@@ -1,0 +1,31 @@
+# Local research and generated evidence
+[Rr]esearch/
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Environment and local credentials
+.env
+.env.*
+!.env.example
+*.local
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+
+# Logs and temporary files
+*.log
+.tmp/
+tmp/
+
+# Editors
+.idea/
+.vscode/
