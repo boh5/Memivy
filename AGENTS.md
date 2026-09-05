@@ -8,10 +8,12 @@ Memivy is a local-first, open-source, AI-native memo app. This repository curren
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.
 - [TECH_STACK.md](TECH_STACK.md): proposed architecture and technology choices; read before implementation or dependency changes.
-- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md): proposed implementation sequence and milestone checks; use the relevant stage for development work.
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md): demo-first implementation sequence, approval record, and milestone checks; use the relevant stage for development work.
 - [DESIGN.md](DESIGN.md): the selected Miro visual reference; read before UI work. Keep the official imported file unchanged unless the user explicitly requests an update. Do not insert translations, project instructions, or a replacement design system into it.
 
 Use the relevant documents rather than duplicating them here. If a requested change conflicts with a documented decision, clarify the decision instead of silently changing product scope. Visual examples do not introduce new product features.
+
+Build and iterate the clickable visual Demo first; do not start the production scaffold or functional development until the user explicitly approves it. After approval, use the recorded Demo version as the UI implementation and visual acceptance baseline. The planned entry is `design-demo/index.html`; check its approval status and version in `DEVELOPMENT_PLAN.md` rather than assuming an existing Demo is approved.
 
 ## Implementation boundaries
 
@@ -27,8 +29,8 @@ Use the relevant documents rather than duplicating them here. If a requested cha
 
 - Make small, task-scoped changes. Preserve unrelated work and avoid speculative abstractions or dependencies for deferred features.
 - Update the existing relevant document when a decision changes; do not create extra reports or parallel specifications unless requested.
-- Keep research and generated evidence under the ignored `research/` directory. Do not force-add it or commit local credentials and runtime data.
-- Reuse shared UI components and styles when implementing the visual reference; do not invent a separate theme for each screen.
+- Keep research and temporary evidence under the ignored `research/` directory. Keep the maintained visual Demo in the version-controlled `design-demo/` directory. Do not force-add research or commit local credentials and runtime data.
+- Reuse shared UI components and styles when implementing the approved Demo; do not invent a separate theme for each screen. Reconfirm affected Demo screens before changing approved visuals or interactions during feature development.
 
 ## Setup and validation
 
