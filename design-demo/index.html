@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Memivy 可点击视觉 Demo：留住想法，也留住它的来处。">
+  <title>Memivy · 让想法接着生长</title>
+  <link rel="icon" href="mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="demo-data.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-window">
+    <header class="window-bar">
+      <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+      <span>一个只属于你的记忆空间</span>
+      <span class="local-label"><span class="status-dot"></span> 本地优先</span>
+    </header>
+    <div class="workspace">
+      <aside class="sidebar" aria-label="记忆列表与搜索">
+        <div class="brand"><img src="mark.svg" alt="" width="37" height="37"><span>memivy<span class="brand-period">.</span></span></div>
+        <div class="sidebar-heading"><h1>我的记忆</h1><span id="memory-count" class="count"></span></div>
+        <p class="sidebar-subtitle">留住想法，也留住它的来处。</p>
+        <button class="button primary capture-trigger" data-action="capture"><span data-icon="plus"></span>记下一刻<kbd>⌥ Space</kbd></button>
+        <div class="search-box"><span data-icon="search"></span><input id="search" type="search" placeholder="找回一个想法…" aria-label="搜索记忆" autocomplete="off"><kbd>⌘ K</kbd></div>
+        <div class="filter-tabs" role="group" aria-label="来源筛选">
+          <button data-filter="all" aria-pressed="true">全部</button>
+          <button data-filter="mine" aria-pressed="false">我的记录</button>
+          <button data-filter="agent" aria-pressed="false">来自 Agent</button>
+        </div>
+        <div class="list-caption"><span id="list-label">最近更新</span><span id="result-count"></span></div>
+        <nav id="memory-list" class="memory-list" aria-label="记忆"></nav>
+        <footer class="sidebar-footer">
+          <button class="service-control" data-action="menu" aria-label="菜单栏示意"><span class="status-dot" id="service-dot"></span><span id="service-label">Memivy 可用</span><span data-icon="chevron-up"></span></button>
+          <button class="icon-button" data-action="settings" aria-label="打开设置" title="设置"><span data-icon="settings"></span></button>
+        </footer>
+      </aside>
+      <main class="main-pane" id="main-pane" aria-label="当前记忆与原话">
+        <div id="detail-toolbar" class="detail-toolbar"></div>
+        <div id="detail-scroll" class="detail-scroll"><article id="memory-detail"></article></div>
+      </main>
+    </div>
+  </div>
+  <footer class="demo-dock" aria-label="Demo 演示控制">
+    <span class="demo-sign"><span class="demo-dot"></span><strong>视觉 Demo</strong><span>v0.1</span></span>
+    <span class="demo-disclaimer">模拟数据 · 刷新重置 · 不连接模型</span>
+    <div class="demo-tools">
+      <label for="scenario">试试不同场景</label>
+      <select id="scenario" aria-label="演示场景">
+        <option value="everyday">日常使用</option><option value="append">续到已有记忆</option><option value="new">建立新记忆</option><option value="uncertain">暂不判断归属</option><option value="agent">Agent 传入</option><option value="processing">AI 处理中</option><option value="failed">AI 连接失败</option><option value="unconfigured">尚未配置模型</option><option value="empty">空记忆库</option><option value="no-results">搜索无结果</option><option value="long">长中文阅读</option>
+      </select>
+      <button class="dock-button" data-action="reset" title="恢复初始示例">重置</button>
+      <button class="dock-button" data-action="about" aria-label="查看设计依据"><span data-icon="info"></span></button>
+    </div>
+  </footer>
+  <section id="receipt" class="receipt" aria-live="polite" aria-atomic="true" hidden></section>
+  <button id="last-receipt" class="last-receipt button secondary" data-action="last-receipt" hidden><span data-icon="check"></span>查看上次动作</button>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="capture-dialog" class="capture-dialog" aria-labelledby="capture-title"></dialog>
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title"></dialog>
+  <dialog id="history-dialog" class="history-dialog" aria-labelledby="history-title"></dialog>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"></dialog>
+  <dialog id="menu-dialog" class="menu-dialog" aria-labelledby="menu-title"></dialog>
+  <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-title"></dialog>
+</body>
+</html>
