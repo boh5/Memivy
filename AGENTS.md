@@ -32,6 +32,12 @@ Build and iterate the clickable visual Demo first; do not start the production s
 - Keep research and temporary evidence under the ignored `research/` directory. Keep the maintained visual Demo in the version-controlled `design-demo/` directory. Do not force-add research or commit local credentials and runtime data.
 - Reuse shared UI components and styles when implementing the approved Demo; do not invent a separate theme for each screen. Reconfirm affected Demo screens before changing approved visuals or interactions during feature development.
 
+## Logo design
+
+- The user-selected Memivy logo is the lowercase m with a leaf on a yellow rounded tile (`#FFD02F`). The design assets are in [design-demo/brand/](design-demo/brand/). Reuse this selected logo for subsequent UI design and implementation work.
+- Use [memivy-icon.svg](design-demo/brand/memivy-icon.svg) for the standalone icon, [memivy-logo.svg](design-demo/brand/memivy-logo.svg) for the horizontal logo on light backgrounds, and [memivy-logo-dark.svg](design-demo/brand/memivy-logo-dark.svg) on dark backgrounds.
+- [memivy-icon-1024.png](design-demo/brand/memivy-icon-1024.png) provides the bitmap icon; [favicon.ico](design-demo/brand/favicon.ico) is the browser favicon.
+
 ## Setup and validation
 
 There is currently no `package.json`, `Cargo.toml`, application build, or test suite. No setup, development, lint, build, or test commands are established yet. Do not invent commands or claim planned tooling has run. When adding the actual scaffold, replace this paragraph with verified commands and their working directories.
