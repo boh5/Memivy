@@ -1,0 +1,17 @@
+[package]
+name = "memivy-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+memivy-core.workspace = true
+rmcp = { version = "=3.2.0", features = ["server", "transport-io"] }
+schemars = "1"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

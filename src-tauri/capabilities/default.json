@@ -1,0 +1,1 @@
+{"identifier":"prototype-events","description":"Only listen for prototype window events; data operations are checked by Rust window label.","windows":["main","capture"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}

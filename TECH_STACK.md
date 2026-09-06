@@ -21,6 +21,10 @@ Memivy 建议采用：
 
 当前产品只支持 macOS。Windows、iOS、Android 暂缓，不进入本轮构建、测试和发布；Linux 不支持。
 
+阶段 1 实际样机：`src-tauri/` 为原生 host，`src/` 为复用 Demo 样式的最小 React 界面，`crates/memivy-core/` 为共享原话保存、查询和独立模型协议探测，`crates/memivy-mcp/` 为仅含 `memory_capture` 的 stdio 程序。样机迁移只有不可改写的原话表与 FTS 索引；正式 memory/version、撤销和 AI 整理不在本阶段实现。模型探测使用 `reqwest` 的同一 `/chat/completions` 路径，验证完整 JSON schema 结果，拒绝截断、异常状态和超过 64 KB 的响应；探测模块没有数据库访问能力。当前实测 SQLite 为 bundled 3.53.2，完整依赖版本以 lockfile 为准。
+
+2026-09-06 原生验证补充：普通 NSWindow 在访达全屏下未取得可输入焦点，仅增加 fullScreenAuxiliary 仍不足；阶段 1 捕捉窗改由 `src-tauri/src/capture_panel.rs` 配置非激活 NSPanel，保留原 WebView、IPC 与主窗口 Dock 行为。使用 [tauri-nspanel](https://github.com/ahkohd/tauri-nspanel/tree/c9ec2130422200f0863b23dfdad02b133a529b07) 2.1.0，固定提交 `c9ec2130422200f0863b23dfdad02b133a529b07`；它启用 Tauri 的 macos-private-api feature，当前仅作为未签名技术样机验证，不代表已完成分发审核。原生面板操作限定在主线程；输入就绪按 DOM 输入框焦点加 NSPanel key-window 状态判断，非激活面板无需把整个应用设为前台。
+
 技术实现只为 Mac MVP 服务：菜单栏常驻、全局快捷键、本地 SQLite、Memory Agent 和 MCP 都在同一台 Mac 上运行。暂不为未来平台提前增加适配层。
 
 ## 2. 候选方案与取舍
@@ -93,6 +97,8 @@ macOS：菜单栏、全局快捷键、前台应用名、MCP
 - MCP 使用同仓库生成的轻量 `memivy-mcp` stdio 程序，由 Agent 需要时启动，不常驻、不监听端口、不拥有另一份数据；
 - UI、MCP 和后台处理都调用同一个 `memivy-core`，不能各写一套记忆规则。
 
+2026-09-05 已确认：关闭主窗口只隐藏窗口，菜单栏进程继续运行；彻底退出应用后，已开启的 MCP 仍可保存原话与 pending 状态，明确返回等待应用运行后整理。主进程下次启动再消费 pending；实际 AI 消费器归阶段 5，阶段 1 仅验证独立进程写入与待处理状态。
+
 MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动的标准方式，并同时支持 Streamable HTTP。[rmcp transport](https://github.com/modelcontextprotocol/rust-sdk/blob/main/README.md#transports) Memivy MVP 只实现 stdio，避免本地端口、Origin 校验、鉴权令牌和客户端 HTTP 兼容性问题。
 
 ## 5. macOS 能力边界
@@ -117,9 +123,9 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 建议配置：
 
 - `rusqlite` 使用 `bundled`，把受控 SQLite 版本一起编译，避免各系统自带版本不一致；官方项目也将其推荐给自主管理数据库的应用。[rusqlite](https://github.com/rusqlite/rusqlite)
-- 开启 foreign keys、WAL 和合理的 busy timeout；
+- 开启 foreign keys、WAL、synchronous=FULL 和合理的 busy timeout；锁定包含 WAL-reset 修复的稳定 SQLite 构建，并检查实际链接版本；
 - 使用显式 SQL migration，不引入 ORM；
-- 先写 `captures` 并提交事务，再创建 AI 任务；任何模型失败都不能回滚原话；
+- 在同一事务保存 `captures` 与初始 pending 状态，提交后才启动 AI 调用；任何模型失败都不能回滚原话；
 - UI 和 MCP 并发写入时仍走相同事务规则。
 
 ### 6.2 中文搜索必须使用 trigram

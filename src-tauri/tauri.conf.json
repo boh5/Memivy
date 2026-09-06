@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Memivy Phase 1",
+  "version": "0.1.0",
+  "identifier": "com.memivy.phase1",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {"label":"main","title":"Memivy · 阶段 1 技术样机","width":1100,"height":760,"minWidth":720,"minHeight":520},
+      {"label":"capture","title":"Memivy · 捕捉样机","url":"index.html?window=capture","width":560,"height":350,"visible":false,"decorations":false,"resizable":false,"alwaysOnTop":true,"skipTaskbar":true,"visibleOnAllWorkspaces":true,"acceptFirstMouse":true}
+    ],
+    "security": {"csp":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420"}
+  },
+  "bundle": {"active":false,"icon":["icons/memivy.icns","icons/app-icon.png"]}
+}
