@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
 import logo from "../design-demo/brand/memivy-logo.svg";
@@ -43,7 +43,9 @@ function App() {
     [source, setSource] = useState<Capture | null>(null),
     [settingsOpen, setSettingsOpen] = useState(false),
     [revision, setRevision] = useState(0),
+    [focusRequest, setFocusRequest] = useState(0),
     [ready, setReady] = useState(false);
+  const focusComposer = useCallback(() => setFocusRequest((n) => n + 1), []);
   const viewRef = useRef(view);
   viewRef.current = view;
   const composer = useRef<HTMLTextAreaElement>(null),
@@ -79,6 +81,7 @@ function App() {
         setPage("home");
         setSource(null);
         setError("");
+        focusComposer();
         refresh();
       }),
       listen("capture-open", () => {
@@ -88,7 +91,7 @@ function App() {
         void call<View>("view_state")
           .then(setView)
           .catch((e) => setError(fail(e)));
-        requestAnimationFrame(() => composer.current?.focus());
+        focusComposer();
         refresh();
       }),
       listen("companion-collapsed", () => {
@@ -100,7 +103,7 @@ function App() {
       active = false;
       for (const l of ls) void l.then((f) => f());
     };
-  }, [refresh]);
+  }, [refresh, focusComposer]);
   useEffect(() => {
     let active = true;
     void Promise.all([
@@ -160,9 +163,27 @@ function App() {
         answer: !!thread?.turns.length || !!source,
       }).catch((e) => setError(fail(e)));
   }, [expanded, thread?.turns.length, source, revision]);
-  useEffect(() => {
-    if (expanded) requestAnimationFrame(() => composer.current?.focus());
-  }, [expanded]);
+  useLayoutEffect(() => {
+    // Focus after React mounts the destination composer, including the later
+    // thread load. Data refreshes and new answer text must not steal focus.
+    if (!expanded || settingsOpen || source || page !== "home") return;
+    let active = true;
+    let frame = 0;
+    // WebKit finishes native mouse focus after the React click handler. Focus
+    // its native responder first, then the DOM editor on the next frame.
+    void (native ? call("focus_editor") : Promise.resolve())
+      .then(() => {
+        if (active)
+          frame = requestAnimationFrame(() =>
+            composer.current?.focus({ preventScroll: true }),
+          );
+      })
+      .catch((e) => { if (active) setError(fail(e)); });
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [expanded, focusRequest, thread?.topic.id, settingsOpen, source, page]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [thread?.turns.length, pending?.status]);
@@ -213,6 +234,7 @@ function App() {
       setPage("home");
       setSource(null);
       setError("");
+      focusComposer();
     } catch (e) {
       setError(fail(e));
     }
@@ -228,7 +250,7 @@ function App() {
     setNotice("");
     attemptTopic.current = null;
     requestId.current = crypto.randomUUID();
-    requestAnimationFrame(() => composer.current?.focus());
+    focusComposer();
   };
   const openSource = async (id: string) => {
     try {
@@ -245,7 +267,7 @@ function App() {
     setThread(null);
     setPage("home");
     setSource(null);
-    requestAnimationFrame(() => composer.current?.focus());
+    focusComposer();
   };
   const submit = async () => {
     if (

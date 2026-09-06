@@ -3,7 +3,7 @@ use memivy_core::{
     conversation::{self, Receipt, Thread, Topic},
     model::ModelConfig,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +63,39 @@ pub fn place_companion(app: &tauri::AppHandle) {
         }
     }
 }
+
+/// Main thread only. orderOut lets AppKit release nonactivating-panel key focus;
+/// resignKeyWindow is a notification override, not a focus-transfer operation.
+pub fn collapse_companion(app: &tauri::AppHandle) -> HostResult<()> {
+    let panel = app
+        .get_webview_panel("capture")
+        .map_err(|_| "捕捉面板不可用")?;
+    panel.hide();
+    capture_panel::set_accepts_keyboard(false);
+    {
+        let state = app.state::<Runtime>();
+        let mut windows = state.windows.lock().unwrap();
+        windows.expanded = false;
+        windows.drag_origin = None;
+    }
+    resize_panel(app, 72.0, 76.0);
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.emit("companion-collapsed", ());
+    }
+    panel.order_front_regardless();
+    Ok(())
+}
+
+/// Main thread only. Finish dismissing the panel before activating the editor.
+pub fn focus_workspace(app: &tauri::AppHandle) -> HostResult<()> {
+    collapse_companion(app)?;
+    let window = app.get_webview_window("main").ok_or("主窗口不可用")?;
+    window
+        .show()
+        .and_then(|_| window.set_focus())
+        .and_then(|_| window.as_ref().set_focus())
+        .map_err(|_| "无法打开工作区".into())
+}
 #[tauri::command]
 pub fn companion_open(app: tauri::AppHandle, window: tauri::WebviewWindow) -> HostResult<()> {
     require(&window, &["capture"])?;
@@ -116,21 +149,11 @@ pub fn companion_drag(
 }
 #[tauri::command]
 pub fn companion_drag_end(
-    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<Runtime>,
 ) -> HostResult<()> {
     require(&window, &["capture"])?;
     state.windows.lock().unwrap().drag_origin = None;
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        if !handle.state::<Runtime>().windows.lock().unwrap().expanded
-            && let Ok(panel) = handle.get_webview_panel("capture")
-        {
-            panel.resign_key_window();
-        }
-    })
-    .map_err(|_| "无法结束拖动".to_string())?;
     Ok(())
 }
 #[tauri::command]
@@ -167,18 +190,10 @@ pub fn open_workspace(
     }
     let h = app.clone();
     app.run_on_main_thread(move || {
-        if let Some(w) = h.get_webview_window("main") {
+        if focus_workspace(&h).is_ok()
+            && let Some(w) = h.get_webview_window("main")
+        {
             let _ = w.emit("view-open", &view);
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-        if let Ok(p) = h.get_webview_panel("capture") {
-            p.resign_key_window();
-        }
-        resize_panel(&h, 72.0, 76.0);
-        h.state::<Runtime>().windows.lock().unwrap().expanded = false;
-        if let Some(w) = h.get_webview_window("capture") {
-            let _ = w.emit("companion-collapsed", ());
         }
     })
     .map_err(|_| "无法打开工作区".into())
@@ -190,6 +205,17 @@ pub fn view_state(
 ) -> HostResult<ViewState> {
     require(&window, &["main", "capture"])?;
     Ok(state.view.lock().unwrap().clone())
+}
+
+#[tauri::command]
+pub fn focus_editor(window: tauri::WebviewWindow) -> HostResult<()> {
+    require(&window, &["main", "capture"])?;
+    // Restore WebKit's native first responder before focusing a DOM editor.
+    // This does not activate the app or change the key window.
+    window
+        .as_ref()
+        .set_focus()
+        .map_err(|_| "无法聚焦输入区".into())
 }
 fn changed(app: &tauri::AppHandle) {
     let _ = app.emit("workspace-changed", ());
@@ -234,6 +260,47 @@ fn config_path(state: &Runtime) -> PathBuf {
     std::env::var_os("MEMIVY_PHASE1_MODEL_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| state.store.paths.model_config())
+}
+
+fn validate_config_path(path: &Path, home: Option<&Path>) -> HostResult<()> {
+    let invalid = || "模型配置必须位于仓库以外的本机目录".to_string();
+    if !path.is_absolute()
+        || path.file_name().is_none()
+        || path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(invalid());
+    }
+    // Resolve existing ancestors before checking repository boundaries. The
+    // config's parent may not exist yet; save() creates it on first use.
+    let parent = path.parent().ok_or_else(invalid)?;
+    let mut resolved_parent = None;
+    for ancestor in parent.ancestors() {
+        match ancestor.canonicalize() {
+            Ok(base) => {
+                resolved_parent =
+                    Some(base.join(parent.strip_prefix(ancestor).map_err(|_| invalid())?));
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(invalid()),
+        }
+    }
+    let parent = resolved_parent.ok_or_else(invalid)?;
+    let home = home.and_then(|p| p.canonicalize().ok());
+    let app_data = home.as_ref().is_some_and(|p| {
+        parent.starts_with(p.join("Library/Application Support/com.memivy.phase1"))
+    });
+    // A HOME-level dotfiles repository must not block standard app storage.
+    // Only exempt that exact marker, not a project/worktree inside app data.
+    if parent
+        .ancestors()
+        .any(|p| p.join(".git").exists() && !(app_data && home.as_deref() == Some(p)))
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 #[derive(Serialize)]
 pub struct Settings {
@@ -280,10 +347,8 @@ pub fn save_model_settings(
 ) -> HostResult<()> {
     require(&window, &["main"])?;
     let path = config_path(&state);
-    // Never write BYOM credentials under a repository, including ignored research/.
-    if !path.is_absolute() || path.ancestors().any(|p| p.join(".git").exists()) {
-        return Err("模型配置必须位于仓库以外的本机目录".into());
-    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    validate_config_path(&path, home.as_deref())?;
     let previous = ModelConfig::read(&path).ok();
     let key = api_key.or_else(|| {
         previous.and_then(|c| {
@@ -419,4 +484,78 @@ pub fn memory_source(
 ) -> HostResult<Capture> {
     require(&window, &["main", "capture"])?;
     state.store.capture_by_id(&id).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod model_path_tests {
+    use super::*;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn home_dotfiles_repository_allows_app_settings_to_save_and_reopen() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join(".git")).unwrap();
+        let path = home
+            .path()
+            .join("Library/Application Support/com.memivy.phase1/model.json");
+        validate_config_path(&path, Some(home.path())).unwrap();
+        let config = ModelConfig {
+            base_url: "http://127.0.0.1:11435/v1".into(),
+            model: "test-only".into(),
+            api_key: Some("synthetic-test-key".into()),
+            disable_reasoning: false,
+        };
+        config.save(&path).unwrap();
+        assert_eq!(ModelConfig::read(&path).unwrap().api_key, config.api_key);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        validate_config_path(&path, Some(home.path())).unwrap();
+    }
+
+    #[test]
+    fn repositories_and_worktrees_inside_app_data_are_still_rejected() {
+        let home = tempfile::tempdir().unwrap();
+        let app_data = home
+            .path()
+            .join("Library/Application Support/com.memivy.phase1");
+        for repo in [home.path().join("Developer/project"), app_data] {
+            fs::create_dir_all(&repo).unwrap();
+            // Linked worktrees use a .git file rather than a directory.
+            fs::write(repo.join(".git"), "gitdir: /unused-test-path").unwrap();
+            assert!(
+                validate_config_path(&repo.join("research/model.json"), Some(home.path())).is_err()
+            );
+        }
+        fs::create_dir(home.path().join(".git")).unwrap();
+        assert!(validate_config_path(&home.path().join("model.json"), Some(home.path())).is_err());
+    }
+
+    #[test]
+    fn symlink_into_repository_cannot_use_the_app_data_exception() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("Developer/project");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir(repo.join("research")).unwrap();
+        let support = home.path().join("Library/Application Support");
+        fs::create_dir_all(&support).unwrap();
+        std::os::unix::fs::symlink(repo.join("research"), support.join("com.memivy.phase1"))
+            .unwrap();
+        assert!(
+            validate_config_path(
+                &support.join("com.memivy.phase1/model.json"),
+                Some(home.path())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn external_config_accepts_new_directories_but_not_relative_or_parent_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(validate_config_path(&dir.path().join("new/private/model.json"), None).is_ok());
+        assert!(validate_config_path(Path::new("model.json"), None).is_err());
+        assert!(validate_config_path(&dir.path().join("new/../model.json"), None).is_err());
+    }
 }

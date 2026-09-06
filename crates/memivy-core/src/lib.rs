@@ -1,7 +1,8 @@
-//! Isolated Phase 1 v2: capture/search, grounded conversation, confirmed new records.
-//! This is not the production memory/version model.
+//! Shared Rust core. `memory` is the formal Phase 2 data layer.
+//! The root Store/conversation APIs remain the isolated Phase 1 experiment.
 mod config;
 pub mod conversation;
+pub mod memory;
 pub mod model;
 mod store;
 

@@ -1,10 +1,19 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri_nspanel::WebviewWindowExt;
+
+// AppKit can query this reentrantly while moving focus. Never take Runtime's
+// window mutex here. The collapsed companion is clickable but cannot take keys.
+static ACCEPTS_KEYBOARD: AtomicBool = AtomicBool::new(false);
+
+pub fn set_accepts_keyboard(accepts: bool) {
+    ACCEPTS_KEYBOARD.store(accepts, Ordering::Relaxed);
+}
 
 tauri_nspanel::tauri_panel! {
     panel!(CapturePanel {
         config: {
-            can_become_key_window: true,
+            can_become_key_window: ACCEPTS_KEYBOARD.load(Ordering::Relaxed),
             can_become_main_window: false,
             is_floating_panel: true,
             becomes_key_only_if_needed: false,

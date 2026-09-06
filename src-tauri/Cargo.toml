@@ -25,3 +25,6 @@ objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSWorkspace", "NSRunningApplication"] }
 objc2-foundation = "0.3.2"
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec2130422200f0863b23dfdad02b133a529b07" }
+
+[dev-dependencies]
+tempfile.workspace = true

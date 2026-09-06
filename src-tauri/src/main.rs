@@ -90,6 +90,7 @@ fn reveal_capture(app: &tauri::AppHandle, kind: &'static str) -> HostResult<()> 
         interaction::resize_panel(&handle, 440.0, 300.0);
         // A nonactivating panel takes keyboard focus without activating the
         // whole app or moving away from the user's current fullscreen Space.
+        capture_panel::set_accepts_keyboard(true);
         panel.show_and_make_key();
         if window.as_ref().set_focus().is_err() {
             state.windows.lock().unwrap().shortcut_error =
@@ -183,26 +184,20 @@ async fn capture_hide(
     let handle = app.clone();
     let (sender, mut receiver) = tauri::async_runtime::channel(1);
     app.run_on_main_thread(move || {
-        let Ok(panel) = handle.get_webview_panel("capture") else {
-            let _ = sender.try_send(Err("捕捉面板不可用".into()));
+        if let Err(error) = interaction::collapse_companion(&handle) {
+            let _ = sender.try_send(Err(error));
             return;
-        };
-        panel.resign_key_window();
-        panel.hide();
-        interaction::resize_panel(&handle, 72.0, 76.0);
-        handle.state::<Runtime>().windows.lock().unwrap().expanded = false;
+        }
         let view = handle.state::<Runtime>().view.lock().unwrap().clone();
         if let Some(main) = handle.get_webview_window("main") {
             let _ = main.emit("view-open", &view);
         }
-        if let Some(w) = handle.get_webview_window("capture") {
-            let _ = w.emit("companion-collapsed", ());
-        }
-        panel.order_front_regardless();
         let result =
             if pid == Some(std::process::id() as i32) {
                 if let Some(main) = handle.get_webview_window("main") {
-                    main.show().and_then(|_| main.set_focus())
+                    main.show()
+                        .and_then(|_| main.set_focus())
+                        .and_then(|_| main.as_ref().set_focus())
                 } else {
                     Ok(())
                 }
@@ -341,10 +336,10 @@ async fn set_mcp_enabled(
 fn main() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let _ = interaction::focus_workspace(&handle);
+            });
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_nspanel::init())
@@ -373,10 +368,7 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                        let _ = interaction::focus_workspace(app);
                     }
                     "capture" => {
                         let _ = reveal_capture(app, "tray");
@@ -432,6 +424,7 @@ fn main() {
             interaction::companion_hide,
             interaction::open_workspace,
             interaction::view_state,
+            interaction::focus_editor,
             interaction::workspace_topics,
             interaction::workspace_thread,
             interaction::workspace_draft,
