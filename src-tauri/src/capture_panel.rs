@@ -19,6 +19,8 @@ pub fn configure(app: &tauri::AppHandle) -> tauri::Result<()> {
         .get_webview_window("capture")
         .expect("configured capture window");
     let panel = window.to_panel::<CapturePanel>()?;
+    panel.set_opaque(false);
+    panel.set_has_shadow(false);
     panel.set_style_mask(objc2_app_kit::NSWindowStyleMask::NonactivatingPanel);
     panel.set_level(tauri_nspanel::PanelLevel::Floating.value());
     panel.set_collection_behavior(

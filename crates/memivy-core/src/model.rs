@@ -1,4 +1,4 @@
-//! A synthetic protocol probe only. It has no database or memory mutation access.
+//! Bounded OpenAI-compatible requests. This module cannot mutate memories.
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -8,12 +8,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelConfig {
     pub base_url: String,
     pub model: String,
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub disable_reasoning: bool,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -40,6 +42,46 @@ pub struct ProbeReport {
 }
 
 impl ModelConfig {
+    pub fn endpoint(&self) -> Result<(reqwest::Url, bool), ProbeError> {
+        let mut url =
+            reqwest::Url::parse(self.base_url.trim()).map_err(|_| ProbeError::Endpoint)?;
+        let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        if !(url.scheme() == "https" || (local && url.scheme() == "http"))
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || self.model.trim().is_empty()
+            || self.model.len() > 200
+            || self.api_key.as_ref().is_some_and(|key| key.len() > 8192)
+        {
+            return Err(ProbeError::Endpoint);
+        }
+        url.set_path(&format!(
+            "{}/chat/completions",
+            url.path().trim_end_matches('/')
+        ));
+        Ok((url, local))
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), ProbeError> {
+        use std::io::Write;
+        self.endpoint()?;
+        let parent = path.parent().ok_or(ProbeError::Configuration)?;
+        fs::create_dir_all(parent).map_err(|_| ProbeError::Configuration)?;
+        let mut file =
+            tempfile::NamedTempFile::new_in(parent).map_err(|_| ProbeError::Configuration)?;
+        file.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|_| ProbeError::Configuration)?;
+        file.write_all(&serde_json::to_vec(self).map_err(|_| ProbeError::Configuration)?)
+            .map_err(|_| ProbeError::Configuration)?;
+        file.as_file()
+            .sync_all()
+            .map_err(|_| ProbeError::Configuration)?;
+        file.persist(path).map_err(|_| ProbeError::Configuration)?;
+        Ok(())
+    }
     pub fn read(path: &Path) -> Result<Self, ProbeError> {
         let metadata = fs::symlink_metadata(path).map_err(|_| ProbeError::Configuration)?;
         if !metadata.is_file()
@@ -51,6 +93,58 @@ impl ModelConfig {
         serde_json::from_slice(&fs::read(path).map_err(|_| ProbeError::Configuration)?)
             .map_err(|_| ProbeError::Configuration)
     }
+}
+
+/// Two bounded calls per question: query planning, then a structured answer.
+pub async fn complete(
+    config: &ModelConfig,
+    messages: serde_json::Value,
+    name: &str,
+    schema: serde_json::Value,
+) -> Result<serde_json::Value, ProbeError> {
+    let (url, _) = config.endpoint()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| ProbeError::Network)?;
+    let mut body = json!({"model":config.model,"messages":messages,"stream":false,
+        "temperature":0.2,"max_tokens":2500,
+        "response_format":{"type":"json_schema","json_schema":{"name":name,"strict":true,"schema":schema}}});
+    if config.disable_reasoning {
+        body["reasoning_effort"] = json!("none");
+    }
+    let mut request = client.post(url).json(&body);
+    if let Some(key) = config.api_key.as_ref().filter(|s| !s.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    let mut response = request.send().await.map_err(|_| ProbeError::Network)?;
+    if !response.status().is_success() {
+        return Err(ProbeError::Status(response.status().as_u16()));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| ProbeError::Network)? {
+        if bytes.len() + chunk.len() > 65_536 {
+            return Err(ProbeError::TooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let response: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| ProbeError::InvalidResponse)?;
+    let choice = &response["choices"][0];
+    if choice["finish_reason"] != "stop"
+        || choice["message"]["refusal"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    {
+        return Err(ProbeError::InvalidResponse);
+    }
+    serde_json::from_str(
+        choice["message"]["content"]
+            .as_str()
+            .ok_or(ProbeError::InvalidResponse)?,
+    )
+    .map_err(|_| ProbeError::InvalidResponse)
 }
 
 #[derive(Deserialize)]
@@ -82,7 +176,7 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| ProbeError::Network)?;
-    let body = json!({
+    let mut body = json!({
         "model": config.model,
         "messages": [{"role":"user","content":"Return exactly this JSON object, without markdown: {\"ok\":true,\"echo\":\"先留住原话\"}"}],
         "stream": false,
@@ -92,6 +186,9 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
         }}
     });
     let start = Instant::now();
+    if config.disable_reasoning {
+        body["reasoning_effort"] = json!("none");
+    }
     let mut request = client.post(base).json(&body);
     if let Some(key) = config.api_key.filter(|key| !key.is_empty()) {
         request = request.bearer_auth(key);

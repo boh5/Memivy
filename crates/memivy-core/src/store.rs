@@ -8,7 +8,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,7 +73,7 @@ fn connect(paths: &DataPaths, create: bool) -> Result<Connection> {
     Ok(db)
 }
 
-fn read_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Capture> {
+pub(crate) fn read_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Capture> {
     Ok(Capture {
         id: row.get(0)?,
         request_id: row.get(1)?,
@@ -85,7 +85,7 @@ fn read_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<Capture> {
         ai_state: row.get(7)?,
     })
 }
-const COLUMNS: &str =
+pub(crate) const COLUMNS: &str =
     "c.id,c.request_id,c.text,c.source_app,c.project,c.session_uri,c.created_at,c.ai_state";
 
 impl Store {
@@ -107,12 +107,15 @@ impl Store {
         if version == 0 {
             tx.execute_batch(include_str!("../../../migrations/001_phase1.sql"))?;
         }
+        if version < 2 {
+            tx.execute_batch(include_str!("../../../migrations/002_interaction.sql"))?;
+        }
         tx.commit()?;
         fs::set_permissions(paths.database(), fs::Permissions::from_mode(0o600))?;
         Ok(Self { paths })
     }
 
-    fn connection(&self) -> Result<Connection> {
+    pub(crate) fn connection(&self) -> Result<Connection> {
         let db = connect(&self.paths, false)?;
         let v: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         if v != SCHEMA {
@@ -122,6 +125,17 @@ impl Store {
     }
 
     pub fn capture(&self, input: CaptureInput) -> Result<Capture> {
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let capture = Self::insert_capture(&tx, &input)?;
+        tx.commit()?;
+        Ok(capture)
+    }
+
+    pub(crate) fn insert_capture(
+        tx: &rusqlite::Transaction<'_>,
+        input: &CaptureInput,
+    ) -> Result<Capture> {
         if Uuid::parse_str(&input.request_id).is_err() {
             return Err(Error::Invalid("请求标识必须为 UUID"));
         }
@@ -136,8 +150,6 @@ impl Store {
         {
             return Err(Error::Invalid("来源信息过长"));
         }
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -156,7 +168,6 @@ impl Store {
         {
             return Err(Error::RequestConflict);
         }
-        tx.commit()?;
         Ok(capture)
     }
 
@@ -177,7 +188,9 @@ impl Store {
         }
         let start = Instant::now();
         let db = self.connection()?;
-        let mut predicates = Vec::new();
+        let mut predicates = vec![
+            "NOT EXISTS (SELECT 1 FROM prototype_withdrawn w WHERE w.capture_id=c.id)".to_owned(),
+        ];
         let mut values: Vec<String> = Vec::new();
         let mut long = Vec::new();
         for term in &terms {
@@ -191,7 +204,7 @@ impl Store {
             }
         }
         let has_long = !long.is_empty();
-        let has_short = !predicates.is_empty();
+        let has_short = !values.is_empty();
         if has_long {
             predicates.push(
                 "c.rowid IN (SELECT rowid FROM captures_fts WHERE captures_fts MATCH ?)".into(),

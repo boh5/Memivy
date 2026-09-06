@@ -1,6 +1,7 @@
-//! Phase 1 only: an isolated capture/search store and an explicit model probe.
-//! No memory editing, AI actions, history, export, or background worker.
+//! Isolated Phase 1 v2: capture/search, grounded conversation, confirmed new records.
+//! This is not the production memory/version model.
 mod config;
+pub mod conversation;
 pub mod model;
 mod store;
 

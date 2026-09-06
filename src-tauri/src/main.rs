@@ -1,6 +1,6 @@
 use memivy_core::{Capture, CaptureInput, DataPaths, SearchPage, Store};
-use serde::Serialize;
-use std::{sync::Mutex, time::Instant};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Mutex, time::Instant};
 use tauri::{
     Emitter, Manager,
     menu::{Menu, MenuItem},
@@ -9,6 +9,7 @@ use tauri::{
 use tauri_nspanel::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 mod capture_panel;
+mod interaction;
 
 #[derive(Default)]
 struct WindowState {
@@ -22,10 +23,14 @@ struct WindowState {
     last_open_kind: Option<&'static str>,
     last_ready_native_focus: Option<bool>,
     capture_events: Vec<String>,
+    expanded: bool,
+    drag_origin: Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalPosition<f64>)>,
 }
 struct Runtime {
     store: Store,
     windows: Mutex<WindowState>,
+    tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    view: Mutex<interaction::ViewState>,
 }
 type HostResult<T> = Result<T, String>;
 
@@ -62,7 +67,7 @@ fn reveal_capture(app: &tauri::AppHandle, kind: &'static str) -> HostResult<()> 
         };
         let state = handle.state::<Runtime>();
         let front = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication();
-        let visible = panel.is_visible();
+        let visible = panel.is_visible() && state.windows.lock().unwrap().expanded;
         {
             let mut context = state.windows.lock().unwrap();
             context.remember_origin(
@@ -80,17 +85,9 @@ fn reveal_capture(app: &tauri::AppHandle, kind: &'static str) -> HostResult<()> 
             context.last_ready_native_focus = None;
             context.last_open_kind = Some(kind);
             context.capture_events.clear();
+            context.expanded = true;
         }
-        if let Ok(point) = window.cursor_position()
-            && let Ok(Some(monitor)) = handle.monitor_from_point(point.x, point.y)
-        {
-            let size = monitor.size();
-            let origin = monitor.position();
-            let scale = monitor.scale_factor();
-            let x = origin.x + ((size.width as f64 - 560.0 * scale) / 2.0) as i32;
-            let y = origin.y + ((size.height as f64 - 350.0 * scale) / 3.0) as i32;
-            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-        }
+        interaction::resize_panel(&handle, 440.0, 300.0);
         // A nonactivating panel takes keyboard focus without activating the
         // whole app or moving away from the user's current fullscreen Space.
         panel.show_and_make_key();
@@ -190,7 +187,18 @@ async fn capture_hide(
             let _ = sender.try_send(Err("捕捉面板不可用".into()));
             return;
         };
+        panel.resign_key_window();
         panel.hide();
+        interaction::resize_panel(&handle, 72.0, 76.0);
+        handle.state::<Runtime>().windows.lock().unwrap().expanded = false;
+        let view = handle.state::<Runtime>().view.lock().unwrap().clone();
+        if let Some(main) = handle.get_webview_window("main") {
+            let _ = main.emit("view-open", &view);
+        }
+        if let Some(w) = handle.get_webview_window("capture") {
+            let _ = w.emit("companion-collapsed", ());
+        }
+        panel.order_front_regardless();
         let result =
             if pid == Some(std::process::id() as i32) {
                 if let Some(main) = handle.get_webview_window("main") {
@@ -228,7 +236,7 @@ async fn capture_save(
     text: String,
     attach_source: bool,
 ) -> HostResult<Capture> {
-    require(&window, &["capture"])?;
+    require(&window, &["main", "capture"])?;
     let start = Instant::now();
     let store = state.store.clone();
     let source_app = if attach_source {
@@ -258,7 +266,7 @@ async fn capture_search(
     state: tauri::State<'_, Runtime>,
     query: String,
 ) -> HostResult<SearchPage> {
-    require(&window, &["main"])?;
+    require(&window, &["main", "capture"])?;
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || store.search(&query, 50))
         .await
@@ -342,15 +350,21 @@ fn main() {
         .plugin(tauri_nspanel::init())
         .setup(|app| {
             let store = Store::open(DataPaths::resolve()?)?;
+            store.recover_interrupted()?;
             app.manage(Runtime {
                 store,
                 windows: Mutex::new(WindowState::default()),
+                tasks: Mutex::new(HashMap::new()),
+                view: Mutex::new(interaction::ViewState::default()),
             });
             capture_panel::configure(app.handle())?;
+            interaction::place_companion(app.handle());
             let open = MenuItem::with_id(app, "open", "打开阶段一样机", true, None::<&str>)?;
             let capture = MenuItem::with_id(app, "capture", "记一下 · ⌃⌥ M", true, None::<&str>)?;
+            let hide =
+                MenuItem::with_id(app, "hide-companion", "隐藏桌面助手", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "彻底退出样机", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &capture, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &capture, &hide, &quit])?;
             TrayIconBuilder::new()
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../../design-demo/brand/memivy-icon-1024.png"
@@ -368,6 +382,11 @@ fn main() {
                         let _ = reveal_capture(app, "tray");
                     }
                     "quit" => app.exit(0),
+                    "hide-companion" => {
+                        if let Ok(panel) = app.get_webview_panel("capture") {
+                            panel.hide();
+                        }
+                    }
                     _ => {}
                 })
                 .build(app)?;
@@ -404,7 +423,26 @@ fn main() {
             capture_save,
             capture_search,
             diagnostics,
-            set_mcp_enabled
+            set_mcp_enabled,
+            interaction::companion_open,
+            interaction::companion_resize,
+            interaction::companion_drag,
+            interaction::companion_drag_start,
+            interaction::companion_drag_end,
+            interaction::companion_hide,
+            interaction::open_workspace,
+            interaction::view_state,
+            interaction::workspace_topics,
+            interaction::workspace_thread,
+            interaction::workspace_draft,
+            interaction::ask_memory,
+            interaction::cancel_answer,
+            interaction::confirm_conclusion,
+            interaction::undo_conclusion,
+            interaction::memory_source,
+            interaction::model_settings,
+            interaction::save_model_settings,
+            interaction::test_model
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

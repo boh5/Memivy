@@ -30,6 +30,7 @@ fn config(base_url: String) -> ModelConfig {
         base_url,
         model: "test-only".into(),
         api_key: Some("fixture-secret".into()),
+        disable_reasoning: false,
     }
 }
 fn response(content: &str, finish: &str) -> String {

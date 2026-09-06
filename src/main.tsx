@@ -1,120 +1,963 @@
-import { useEffect, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import logo from '../design-demo/brand/memivy-logo.svg';
-import icon from '../design-demo/brand/memivy-icon.svg';
-import '../design-demo/styles.css';
-import './prototype.css';
-
-type Capture = {id:string;text:string;source_app:string;created_at:number;ai_state:string};
-type SearchPage = {items:Capture[];elapsed_ms:number;strategy:string};
-type Diagnostics = {sqlite_version:string;fts5:boolean;journal_mode:string;synchronous:number;count:number;database_path:string;mcp_enabled:boolean;shortcut_error:string|null;last_focus_ms:number|null;last_commit_ms:number|null};
-const failure = (e:unknown) => typeof e === 'string' ? e : '操作未完成，请重试';
-
-function CaptureWindow() {
-  const [draft,setDraft] = useState('');
-  const [source,setSource] = useState('');
-  const [attach,setAttach] = useState(false);
-  const [error,setError] = useState('');
-  const [saving,setSaving] = useState(false);
-  const textarea = useRef<HTMLTextAreaElement>(null);
-  const busy = useRef(false);
-  const composing = useRef(false);
-  const dismissing = useRef(false);
-  const requestId = useRef(crypto.randomUUID());
-  const trace = (event:string) => { void invoke('capture_trace',{event,atMs:performance.now()}); };
-  const dismiss = () => {
-    if(dismissing.current) return;
-    dismissing.current=true;
-    trace('dismiss');
-    void invoke('capture_hide').catch(e=>{dismissing.current=false;setError(failure(e));});
-  };
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { listen } from "@tauri-apps/api/event";
+import logo from "../design-demo/brand/memivy-logo.svg";
+import icon from "../design-demo/brand/memivy-icon.svg";
+import {
+  call,
+  native,
+  fail,
+  date,
+  emptyView,
+  emptySettings,
+  Icon,
+  IconButton,
+  MemoryCard,
+  Conclusion,
+  SettingsPanel,
+  type Capture,
+  type Topic,
+  type Turn,
+  type Thread,
+  type View,
+  type Settings,
+} from "./ui";
+import "./prototype.css";
+const floating =
+  new URLSearchParams(location.search).get("window") === "capture";
+function App() {
+  const [view, setView] = useState<View>(emptyView),
+    [topics, setTopics] = useState<Topic[]>([]),
+    [memories, setMemories] = useState<Capture[]>([]),
+    [thread, setThread] = useState<Thread | null>(null),
+    [settings, setSettings] = useState<Settings>(emptySettings);
+  const [page, setPage] = useState<"home" | "library">("home"),
+    [query, setQuery] = useState(""),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [busy, setBusy] = useState(false),
+    [expanded, setExpanded] = useState(!floating),
+    [pinnedOpen, setPinnedOpen] = useState(
+      localStorage.getItem("memivy-companion-pinned") === "true",
+    ),
+    [source, setSource] = useState<Capture | null>(null),
+    [settingsOpen, setSettingsOpen] = useState(false),
+    [revision, setRevision] = useState(0),
+    [ready, setReady] = useState(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const composer = useRef<HTMLTextAreaElement>(null),
+    composing = useRef(false),
+    collapseLock = useRef(false),
+    submitLock = useRef(false),
+    requestId = useRef(crypto.randomUUID()),
+    bottom = useRef<HTMLDivElement>(null),
+    attemptTopic = useRef<string | null>(null);
+  const orbGesture = useRef({ x: 0, y: 0, pressed: false, dragged: false });
+  const dragQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pending = thread?.turns.find((t) => t.status === "processing");
+  const refresh = useCallback(() => setRevision((r) => r + 1), []);
   useEffect(() => {
-    const ready = () => {
-      dismissing.current=false;
-      void invoke<string>('capture_context').then(setSource);
-      requestAnimationFrame(() => { textarea.current?.focus(); void invoke('capture_ready'); });
+    let active = true;
+    void call<View>("view_state")
+      .then((v) => {
+        if (active) {
+          setView(v);
+          setReady(true);
+        }
+      })
+      .catch((e) => setError(fail(e)));
+    if (!native)
+      return () => {
+        active = false;
+      };
+    const ls = [
+      listen("workspace-changed", refresh),
+      listen("capture-saved", refresh),
+      listen<View>("view-open", (e) => {
+        setView(e.payload);
+        setPage("home");
+        setSource(null);
+        setError("");
+        refresh();
+      }),
+      listen("capture-open", () => {
+        collapseLock.current = false;
+        setExpanded(true);
+        setSource(null);
+        void call<View>("view_state")
+          .then(setView)
+          .catch((e) => setError(fail(e)));
+        requestAnimationFrame(() => composer.current?.focus());
+        refresh();
+      }),
+      listen("companion-collapsed", () => {
+        setExpanded(false);
+        collapseLock.current = false;
+      }),
+    ];
+    return () => {
+      active = false;
+      for (const l of ls) void l.then((f) => f());
     };
-    // Only an explicit opening moves DOM focus. Re-activation by a mouse click
-    // must leave that click's target alone instead of re-focusing the textarea.
-    const focused = () => {
-      if(document.activeElement===textarea.current) void invoke('capture_ready');
+  }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      call<Topic[]>("workspace_topics"),
+      call<{ items: Capture[] }>("capture_search", { query }),
+      call<Settings>("model_settings"),
+    ])
+      .then(([t, m, s]) => {
+        if (active) {
+          setTopics(t);
+          setMemories(m.items);
+          setSettings(s);
+        }
+      })
+      .catch((e) => {
+        if (active) setError(fail(e));
+      });
+    return () => {
+      active = false;
     };
-    const escape = (event:KeyboardEvent) => {
-      if(event.key!=='Escape' || event.isComposing || composing.current || event.keyCode===229) return;
-      event.preventDefault();
-      dismiss();
+  }, [revision, query]);
+  useEffect(() => {
+    let active = true;
+    if (!view.topicId) {
+      setThread(null);
+      return;
+    }
+    void call<Thread>("workspace_thread", { id: view.topicId })
+      .then((t) => {
+        if (active) setThread(t);
+      })
+      .catch((e) => {
+        if (active) setError(fail(e));
+      });
+    return () => {
+      active = false;
     };
-    const listener = listen('capture-open', ready);
-    window.addEventListener('focus', focused);
-    window.addEventListener('keydown', escape);
-    return () => { window.removeEventListener('focus',focused); window.removeEventListener('keydown',escape); void listener.then(unlisten => unlisten()); };
-  },[]);
-  const save = async () => {
-    if (busy.current || composing.current || !draft.trim()) return;
-    busy.current = true; setSaving(true); setError('');
+  }, [view.topicId, revision]);
+  useEffect(() => {
+    if (pending) {
+      const timer = setInterval(refresh, 1600);
+      return () => clearInterval(timer);
+    }
+  }, [pending?.id, refresh]);
+  useEffect(() => {
+    if (!native || !ready) return;
+    const timer = setTimeout(
+      () =>
+        void call("workspace_draft", { view }).catch((e) => setError(fail(e))),
+      220,
+    );
+    return () => clearTimeout(timer);
+  }, [view, ready]);
+  useEffect(() => {
+    if (floating && expanded)
+      void call("companion_resize", {
+        answer: !!thread?.turns.length || !!source,
+      }).catch((e) => setError(fail(e)));
+  }, [expanded, thread?.turns.length, source, revision]);
+  useEffect(() => {
+    if (expanded) requestAnimationFrame(() => composer.current?.focus());
+  }, [expanded]);
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [thread?.turns.length, pending?.status]);
+  const collapse = useCallback(async () => {
+    if (collapseLock.current) return;
+    collapseLock.current = true;
     try {
-      const started=performance.now();
-      await invoke('capture_save', {requestId:requestId.current,text:draft,attachSource:attach});
-      const submitRoundtripMs=performance.now()-started;
-      setDraft(''); requestId.current=crypto.randomUUID(); setAttach(false);
-      try { await invoke('capture_hide',{submitRoundtripMs}); }
-      catch { setError('原话已保存，但窗口未能收起，可按 Esc 重试'); }
-    } catch(e) { setError(`${failure(e)}，输入仍保留。`); }
-    finally { busy.current=false; setSaving(false); }
-  };
-  return <section className="capture-dialog native-capture">
-    <header className="dialog-header"><span className="capture-brand"><img src={icon}/>Memivy <span className="phase-tag">阶段 1</span></span><button aria-label="收起捕捉" onPointerDown={()=>trace('esc-down')}
-      // WebKit 219670: IME + tap-to-click can deliver pointerup before pointerdown
-      // and omit click. This reversible dismiss action accepts primary release;
-      // click remains for keyboard/assistive activation, guarded against duplicates.
-      onPointerUp={e=>{trace('esc-up');if(e.button===0)dismiss();}} onClick={()=>{trace('esc-click');dismiss();}}>Esc</button></header>
-    <div className="capture-body"><h2>先留住这一刻。</h2>
-      <textarea ref={textarea} className="capture-input" aria-label="原话输入" placeholder="一句想法，一段刚刚说过的话……" value={draft} disabled={saving}
-        onFocus={()=>trace('input-focus')} onBlur={()=>trace('input-blur')}
-        onChange={e => {setDraft(e.target.value); requestId.current=crypto.randomUUID();}}
-        onCompositionStart={() => {composing.current=true;}} onCompositionEnd={() => {composing.current=false;}}
-        onKeyDown={e => {if(e.nativeEvent.isComposing || composing.current || e.keyCode===229) return;
-          if(e.key==='Enter' && !e.shiftKey){e.preventDefault(); void save();}
-        }}/>
-      <label className="attach-toggle"><input type="checkbox" checked={attach} disabled={saving} onChange={e=>{setAttach(e.target.checked);requestId.current=crypto.randomUUID();}}/>附带来源应用：{source || '未知应用'}</label>
-      {error && <p className="prototype-error" role="alert">{error}</p>}
-    </div><footer className="dialog-footer"><div className="capture-hint">Enter 保存 · Shift+Enter 换行<span>样机只保存原话，AI 整理尚未启用</span></div><button className="button primary" disabled={saving||!draft.trim()} onClick={() => void save()}>{saving?'正在保存…':'保存原话'}</button></footer>
-  </section>;
-}
-
-function MainWindow() {
-  const [query,setQuery] = useState('');
-  const [page,setPage] = useState<SearchPage>({items:[],elapsed_ms:0,strategy:'recent'});
-  const [selected,setSelected] = useState<string|null>(null);
-  const [diag,setDiag] = useState<Diagnostics|null>(null);
-  const [error,setError] = useState('');
-  const [receipt,setReceipt] = useState('');
-  const [verifying,setVerifying] = useState(false);
+      await call("workspace_draft", { view: viewRef.current });
+      await call("capture_hide");
+      setExpanded(false);
+    } catch (e) {
+      setError(fail(e));
+    } finally {
+      collapseLock.current = false;
+    }
+  }, []);
   useEffect(() => {
-    let active=true;
-    const refresh = async () => {try {
-      const [next,info] = await Promise.all([invoke<SearchPage>('capture_search',{query}),invoke<Diagnostics>('diagnostics')]);
-      if(active){setPage(next);setDiag(info);setError('');}
-    } catch(e){if(active)setError(failure(e));}};
-    const timer=setTimeout(()=>void refresh(),120);
-    const poll=setInterval(()=>void refresh(),1500);
-    const changed=listen<Capture>('capture-saved',event=>{setSelected(event.payload.id);setReceipt('原话已保存 · 等待后续整理');void refresh();});
-    return ()=>{active=false;clearTimeout(timer);clearInterval(poll);void changed.then(f=>f());};
-  },[query]);
-  const current=page.items.find(item=>item.id===selected) || page.items[0];
-  const toggle = async () => {try {await invoke('set_mcp_enabled',{enabled:!diag?.mcp_enabled});setDiag(await invoke('diagnostics'));}catch(e){setError(failure(e));}};
-  return <div className="prototype-shell"><div className="prototype-banner">阶段 1 · 技术风险样机 <span>独立测试数据 · AI 整理尚未启用</span></div><div className="workspace">
-    <aside className="sidebar"><div className="brand"><img src={logo} alt="Memivy"/></div><div className="sidebar-heading"><h1>留下的原话</h1><span className="count">{diag?.count||0}</span></div><p className="sidebar-subtitle">先记下来，稍后再整理。</p>
-      <button className="button primary capture-trigger" onClick={()=>void invoke('show_capture').catch(e=>setError(failure(e)))}>记一下 <kbd>⌃⌥ M</kbd></button>
-      <input className="prototype-search" type="search" aria-label="搜索原话" placeholder="搜索原话或来源…" value={query} onChange={e=>setQuery(e.target.value)}/>
-      <div className="memory-list">{page.items.map(item=><button key={item.id} className={`memory-card ${item.id===current?.id?'selected':''}`} onClick={()=>setSelected(item.id)}><h2>{item.text.split('\n')[0].slice(0,50)}</h2><p>{item.text.slice(0,130)}</p><small>{item.source_app} · {new Date(item.created_at).toLocaleString('zh-CN')}</small></button>)}{!page.items.length&&<p className="prototype-empty">{query?'没有匹配的原话':'从一句话开始。'}</p>}</div>
-      <div className="sidebar-footer"><button className="button secondary" onClick={()=>void toggle()}>MCP {diag?.mcp_enabled?'已开启':'已关闭'}</button></div></aside>
-    <main className="main-pane"><div className="prototype-notice" role="status">{receipt||'这里只展示原话，尚未生成正式记忆。'}</div>{error&&<p className="prototype-error" role="alert">{error}</p>}{diag?.shortcut_error&&<p className="prototype-error">{diag.shortcut_error}</p>}
-      {current?<article id="memory-detail"><span className="context-chip">已保存 · 等待整理</span><h1>原话</h1><div className="memory-prose prototype-raw">{current.text}</div><footer className="memory-footnote">来源：{current.source_app} · {new Date(current.created_at).toLocaleString('zh-CN')}<br/>记录 ID：{current.id}</footer></article>:<div className="prototype-empty">捕捉小窗和 MCP 保存的原话会出现在这里。</div>}
-      <details className="prototype-diagnostics"><summary>样机验证信息</summary><button className="button secondary" disabled={verifying} onClick={()=>{setVerifying(true);void invoke('verify_external_capture').catch(e=>setError(failure(e))).finally(()=>setVerifying(false));}}>{verifying?'已安排，请切到待测应用…':'10 秒后测试跨应用唤起'}</button><pre>{diag?JSON.stringify({...diag,search_ms:page.elapsed_ms,search_strategy:page.strategy},null,2):'正在读取…'}</pre></details>
-    </main></div></div>;
+    const key = (e: KeyboardEvent) => {
+      if (
+        e.key !== "Escape" ||
+        e.isComposing ||
+        composing.current ||
+        e.keyCode === 229
+      )
+        return;
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return;
+      }
+      if (source) {
+        setSource(null);
+        return;
+      }
+      if (floating && expanded) {
+        e.preventDefault();
+        void collapse();
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [collapse, expanded, source, settingsOpen]);
+  const selectTopic = async (id: string) => {
+    try {
+      await call("workspace_draft", { view: viewRef.current });
+      const t = await call<Thread>("workspace_thread", { id });
+      setView({ topicId: id, mode: "ask", draft: t.topic.draft, pinned: [] });
+      setThread(t);
+      setPage("home");
+      setSource(null);
+      setError("");
+    } catch (e) {
+      setError(fail(e));
+    }
+  };
+  const newThought = async (mode: "capture" | "ask" = "capture") => {
+    await call("workspace_draft", { view: viewRef.current }).catch((e) =>
+      setError(fail(e)),
+    );
+    setView({ ...emptyView, mode });
+    setThread(null);
+    setPage("home");
+    setSource(null);
+    setNotice("");
+    attemptTopic.current = null;
+    requestId.current = crypto.randomUUID();
+    requestAnimationFrame(() => composer.current?.focus());
+  };
+  const openSource = async (id: string) => {
+    try {
+      setSource(await call<Capture>("memory_source", { id }));
+    } catch (e) {
+      setError(fail(e));
+    }
+  };
+  const fromMemory = async (c: Capture) => {
+    await call("workspace_draft", { view: viewRef.current }).catch((e) =>
+      setError(fail(e)),
+    );
+    setView({ topicId: null, mode: "ask", draft: "", pinned: [c.id] });
+    setThread(null);
+    setPage("home");
+    setSource(null);
+    requestAnimationFrame(() => composer.current?.focus());
+  };
+  const submit = async () => {
+    if (
+      submitLock.current ||
+      composing.current ||
+      !view.draft.trim() ||
+      (view.mode === "ask" && pending)
+    )
+      return;
+    submitLock.current = true;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      if (view.mode === "capture") {
+        await call<Capture>("capture_save", {
+          requestId: requestId.current,
+          text: view.draft,
+          attachSource: false,
+        });
+        const next = { ...view, draft: "" };
+        setView(next);
+        viewRef.current = next;
+        await call("workspace_draft", { view: next });
+        setNotice("已记下原话，可在记忆库找回。");
+        requestId.current = crypto.randomUUID();
+        refresh();
+        if (floating && !pinnedOpen) void collapse();
+      } else {
+        const topicId =
+          view.topicId || attemptTopic.current || crypto.randomUUID();
+        attemptTopic.current = topicId;
+        await call("ask_memory", {
+          id: requestId.current,
+          topicId,
+          question: view.draft,
+          pinned: view.pinned,
+        });
+        const next = { ...view, topicId, draft: "" };
+        setView(next);
+        viewRef.current = next;
+        await call("workspace_draft", { view: next });
+        requestId.current = crypto.randomUUID();
+        refresh();
+      }
+    } catch (e) {
+      setError(fail(e));
+    } finally {
+      submitLock.current = false;
+      setBusy(false);
+    }
+  };
+  const openMain = async () => {
+    try {
+      await call("open_workspace", { view });
+    } catch (e) {
+      setError(fail(e));
+    }
+  };
+  const retry = (t: Turn) => {
+    setView((v) => ({ ...v, mode: "ask", draft: t.question }));
+    requestId.current = crypto.randomUUID();
+    composer.current?.focus();
+  };
+  const cancel = async () => {
+    if (pending)
+      try {
+        await call("cancel_answer", { id: pending.id });
+        refresh();
+      } catch (e) {
+        setError(fail(e));
+      }
+  };
+  const chooseMode = (mode: "capture" | "ask") => {
+    setView((v) => ({ ...v, mode }));
+    requestId.current = crypto.randomUUID();
+    composer.current?.focus();
+  };
+  const queueDrag = (command: string) => {
+    dragQueue.current = dragQueue.current
+      .then(() => call(command))
+      .catch((e) => setError(fail(e)));
+  };
+  const endDrag = () => {
+    if (!orbGesture.current.pressed) return;
+    orbGesture.current.pressed = false;
+    if (orbGesture.current.dragged) queueDrag("companion_drag");
+    queueDrag("companion_drag_end");
+  };
+  const dragHandlers = {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      if (expanded && (e.target as HTMLElement).closest("button")) return;
+      orbGesture.current = {
+        x: e.screenX,
+        y: e.screenY,
+        pressed: true,
+        dragged: false,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      queueDrag("companion_drag_start");
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      const gesture = orbGesture.current;
+      if (!gesture.pressed || !(e.buttons & 1)) return;
+      if (
+        !gesture.dragged &&
+        Math.hypot(e.screenX - gesture.x, e.screenY - gesture.y) < 5
+      ) return;
+      gesture.dragged = true;
+      queueDrag("companion_drag");
+    },
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+    onLostPointerCapture: endDrag,
+  };
+  const composerUI = (
+    <div className={`composer ${floating ? "compact" : ""}`}>
+      <div className="composer-top">
+        <div className="segmented" aria-label="输入用途">
+          <button
+            className={view.mode === "capture" ? "selected" : ""}
+            onClick={() => chooseMode("capture")}
+          >
+            <Icon name="plus" size={15} />
+            记一下
+          </button>
+          <button
+            className={view.mode === "ask" ? "selected" : ""}
+            onClick={() => chooseMode("ask")}
+          >
+            <Icon name="spark" size={15} />
+            问一问
+          </button>
+        </div>
+        {!floating && <span className="quiet">想法不用整理好再来</span>}
+      </div>
+      {view.pinned.length > 0 && (
+        <div className="context-row">
+          <span>
+            <Icon name="book" size={13} />
+            带着 {view.pinned.length} 条记忆思考
+          </span>
+          <button
+            onClick={() => setView((v) => ({ ...v, pinned: [] }))}
+            aria-label="移除所选记忆"
+          >
+            <Icon name="close" size={13} />
+          </button>
+        </div>
+      )}
+      <textarea
+        ref={composer}
+        aria-label={view.mode === "capture" ? "记下想法" : "向记忆提问"}
+        value={view.draft}
+        maxLength={8000}
+        disabled={busy}
+        placeholder={
+          view.mode === "capture"
+            ? "一句想法，一段刚刚说过的话……"
+            : view.topicId
+              ? "接着刚才的话题，你还想到了什么？"
+              : view.pinned.length
+                ? "关于这段记忆，你想接着想什么？"
+                : "想找回什么，或有什么想一起想清楚？"
+        }
+        onChange={(e) => {
+          setView((v) => ({ ...v, draft: e.target.value }));
+          if (!view.topicId) attemptTopic.current = null;
+          requestId.current = crypto.randomUUID();
+        }}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={() => {
+          composing.current = false;
+        }}
+        onFocus={() => {
+          if (floating && native) void call("capture_ready").catch(() => {});
+        }}
+        onKeyDown={(e) => {
+          if (
+            e.nativeEvent.isComposing ||
+            composing.current ||
+            e.keyCode === 229
+          )
+            return;
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      <div className="composer-bottom">
+        <span className="input-hint">
+          {pending
+            ? "正在结合记忆思考…"
+            : view.mode === "capture"
+              ? "原话先保存在本机"
+              : settings.configured
+                ? `${settings.local ? "本地模型" : "远程模型"} · ${settings.model}`
+                : "连接模型后即可提问"}
+          <span className="keyboard-hint"> · ⇧ Enter 换行</span>
+        </span>
+        {pending && view.mode === "ask" ? (
+          <button className="send-button stop" onClick={() => void cancel()}>
+            <Icon name="stop" size={14} />
+            停止
+          </button>
+        ) : (
+          <button
+            className="send-button"
+            disabled={busy || !view.draft.trim()}
+            onClick={() => void submit()}
+          >
+            <span>
+              {busy ? "正在提交" : view.mode === "capture" ? "记下" : "发送"}
+            </span>
+            <Icon name="arrow" size={16} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  const threadUI = thread && (
+    <div className="conversation" aria-live="polite">
+      {thread.turns.map((t, index) => (
+        <div className="turn" key={t.id}>
+          <div className="question-row">
+            <span className="you-avatar">我</span>
+            <div>{t.question}</div>
+          </div>
+          <div className="assistant-row">
+            <img src={icon} alt="Memivy" />
+            <div className="answer-body">
+              {t.status === "processing" ? (
+                <div className="thinking">
+                  <span className="thinking-dot" />
+                  正在找相关记忆，再陪你往下想
+                  <span className="quiet">
+                    你可以收起窗口，回答会留在这个话题里。
+                  </span>
+                </div>
+              ) : t.answer ? (
+                <>
+                  {t.answer.recollection && (
+                    <section className="recollection">
+                      <div className="eyebrow">
+                        <Icon name="book" size={13} />
+                        从你的记忆里
+                      </div>
+                      <p>{t.answer.recollection}</p>
+                      <div className="source-chips">
+                        {t.answer.sources.map((id, n) => (
+                          <button key={id} onClick={() => void openSource(id)}>
+                            <span>{n + 1}</span>
+                            {date(
+                              t.evidence.find((e) => e.id === id)?.created_at ||
+                                t.created_at,
+                            )}{" "}
+                            的原话
+                            <Icon name="chevron" size={12} />
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                  {t.answer.ideas && (
+                    <section className="new-ideas">
+                      <div className="eyebrow">
+                        <Icon name="spark" size={13} />
+                        {t.answer.recollection ? "一起往下想" : "新的思考建议"}
+                        {!t.evidence.length && (
+                          <span className="quiet"> · 未找到相关记忆</span>
+                        )}
+                      </div>
+                      <p>{t.answer.ideas}</p>
+                    </section>
+                  )}
+                  {t.evidence.length > 0 && (
+                    <details className="coverage">
+                      <summary>本次参考了 {t.evidence.length} 条记忆</summary>
+                      {t.evidence.map((e) => (
+                        <button
+                          key={e.id}
+                          onClick={() => void openSource(e.id)}
+                        >
+                          {e.text.slice(0, 55)}
+                          {e.truncated ? "（节选）" : ""}
+                          <Icon name="chevron" size={12} />
+                        </button>
+                      ))}
+                    </details>
+                  )}
+                  {t.answer.conclusion && (
+                    <Conclusion
+                      turn={t}
+                      receipts={thread.receipts.filter(
+                        (r) => r.turn_id === t.id,
+                      )}
+                      latest={index === thread.turns.length - 1}
+                      onChange={refresh}
+                      onError={setError}
+                    />
+                  )}
+                </>
+              ) : (
+                <div className="failed-answer">
+                  <p>{t.error || "这次回答没有完成。"}</p>
+                  <button className="text-button" onClick={() => retry(t)}>
+                    重新提问 <Icon name="undo" size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+      <div ref={bottom} />
+    </div>
+  );
+  const sourceUI = source && (
+    <aside className="source-drawer">
+      <div className="drawer-head">
+        <span>
+          <Icon name="book" />
+          记忆原文
+        </span>
+        <IconButton
+          name="close"
+          label="关闭原文"
+          onClick={() => setSource(null)}
+        />
+      </div>
+      <span className="eyebrow">
+        {date(source.created_at)} · {source.source_app}
+      </span>
+      <h2>{source.project || "当时留下的话"}</h2>
+      <p className="source-text">{source.text}</p>
+      <button
+        className="outline-button"
+        onClick={() => void fromMemory(source)}
+      >
+        <Icon name="spark" />
+        带着这段记忆继续想
+      </button>
+      <p className="source-footnote">
+        {source.source_app.includes("用户确认")
+          ? "来自你确认保存的讨论结论。"
+          : "原话按输入保存。"}
+        <br />
+        记录可供下次检索使用。
+      </p>
+    </aside>
+  );
+  const alerts = (
+    <>
+      {error && (
+        <div className="error-note" role="alert">
+          <span>{error}</span>
+          <button aria-label="关闭错误提示" onClick={() => setError("")}>
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="success-note" role="status">
+          <Icon name="check" size={14} />
+          {notice}
+        </div>
+      )}
+    </>
+  );
+  if (floating) {
+    if (!expanded)
+      return (
+        <div
+          className="companion-rest"
+          {...dragHandlers}
+          onClick={(e) => {
+            if (orbGesture.current.dragged && e.detail !== 0) return;
+            if (native)
+              void call("companion_open").catch((e) => setError(fail(e)));
+            else setExpanded(true);
+          }}
+        >
+          <button
+            className={`companion-orb ${pending ? "working" : ""}`}
+            aria-label="打开 Memivy 桌面助手"
+            title="点击输入 · 按住拖动"
+          >
+            <img src={icon} alt="" draggable={false} />
+            {pending && <i />}
+          </button>
+          <div className="rest-grip" aria-hidden="true">
+            <span />
+          </div>
+        </div>
+      );
+    return (
+      <div className="floating-frame">
+        <div className="companion-panel">
+          <header className="companion-header" {...dragHandlers}>
+            <div className="companion-identity">
+              <img src={icon} draggable={false} />
+              <div>
+                <strong>Memivy</strong>
+                <span>{pending ? "正在想…" : "在这里，接住你的想法"}</span>
+              </div>
+            </div>
+            <div className="window-actions">
+              <IconButton
+                name="pin"
+                active={pinnedOpen}
+                label={pinnedOpen ? "取消固定输入条" : "固定输入条"}
+                onClick={() => {
+                  setPinnedOpen(!pinnedOpen);
+                  localStorage.setItem(
+                    "memivy-companion-pinned",
+                    String(!pinnedOpen),
+                  );
+                }}
+              />
+              <IconButton
+                name="expand"
+                label="展开到主窗口"
+                onClick={() => void openMain()}
+              />
+              <button
+                className="icon-button"
+                title="收起 · Esc"
+                aria-label="收起桌面助手"
+                onPointerUp={(e) => {
+                  if (e.button === 0) void collapse();
+                }}
+                onClick={() => void collapse()}
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+          </header>
+          {thread && (
+            <div className="floating-topic">
+              <span>{thread.topic.title}</span>
+              <button onClick={() => void newThought("ask")}>
+                <Icon name="plus" size={14} />
+                新话题
+              </button>
+            </div>
+          )}
+          {source
+            ? sourceUI
+            : thread && <div className="floating-scroll">{threadUI}</div>}
+          {alerts}
+          {composerUI}
+          {!settings.configured && view.mode === "ask" && (
+            <button className="connect-inline" onClick={() => void openMain()}>
+              到主窗口连接模型 <Icon name="chevron" size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <img src={logo} alt="Memivy" />
+        </div>
+        <button className="new-thought" onClick={() => void newThought()}>
+          <Icon name="plus" />
+          留下一个想法<span>⌃⌥ M</span>
+        </button>
+        <nav>
+          <button
+            className={page === "home" && !view.topicId ? "selected" : ""}
+            onClick={() => void newThought("ask")}
+          >
+            <Icon name="spark" />
+            接着想
+          </button>
+          <button
+            className={page === "library" ? "selected" : ""}
+            onClick={() => setPage("library")}
+          >
+            <Icon name="book" />
+            记忆库<span>{memories.length}</span>
+          </button>
+        </nav>
+        <div className="sidebar-label">最近的话题</div>
+        <div className="topic-list">
+          {topics.map((t) => (
+            <button
+              key={t.id}
+              className={
+                t.id === view.topicId && page === "home" ? "selected" : ""
+              }
+              onClick={() => void selectTopic(t.id)}
+            >
+              <Icon name="chat" size={15} />
+              <span>{t.title}</span>
+            </button>
+          ))}
+          {!topics.length && (
+            <p>
+              聊过的话题会留在这里，
+              <br />
+              下次可以接着想。
+            </p>
+          )}
+        </div>
+        <div className="sidebar-bottom">
+          <button
+            onClick={() =>
+              void call("workspace_draft", { view })
+                .then(() => call("show_capture"))
+                .catch((e) => setError(fail(e)))
+            }
+          >
+            <Icon name="leaf" />
+            桌面助手<span>↗</span>
+          </button>
+          <button onClick={() => setSettingsOpen(true)}>
+            <Icon name="settings" />
+            模型与设置
+          </button>
+          <div className="prototype-label">
+            <span />
+            交互样机 v2 · 独立测试数据
+          </div>
+        </div>
+      </aside>
+      <main className="main-workspace">
+        <header className="workspace-header">
+          <div className="breadcrumb">
+            我的记忆 <span>/</span>{" "}
+            {page === "library" ? "记忆库" : thread ? "接着想" : "今天"}
+          </div>
+          <button
+            className={`model-badge ${settings.configured ? "connected" : ""}`}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <i />
+            {settings.configured
+              ? settings.local
+                ? "已配置本地模型"
+                : "已配置远程模型"
+              : "连接模型"}
+            <Icon name="chevron" size={12} />
+          </button>
+        </header>
+        {!native && (
+          <div className="preview-banner">
+            浏览器布局预览 · 示例数据；真实操作请使用 Mac 样机
+          </div>
+        )}
+        {page === "library" ? (
+          <div className="library-page">
+            <div className="page-heading">
+              <div>
+                <span className="eyebrow">留在这里，下次用得上</span>
+                <h1>你的记忆</h1>
+              </div>
+              <span className="soft-label">原话与确认的结论</span>
+            </div>
+            <div className="library-search">
+              <Icon name="search" />
+              <input
+                aria-label="搜索记忆"
+                placeholder="输入关键词，找回一段记忆…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <span>本地搜索</span>
+            </div>
+            {alerts}
+            <div className="memory-grid">
+              {memories.map((c) => (
+                <MemoryCard
+                  key={c.id}
+                  memory={c}
+                  onOpen={() => void openSource(c.id)}
+                  onThink={() => void fromMemory(c)}
+                />
+              ))}
+            </div>
+            {!memories.length && (
+              <div className="empty-state">
+                <Icon name="leaf" size={30} />
+                <h2>{query ? "没有找到匹配的记忆" : "从一句话开始"}</h2>
+                <p>
+                  {query
+                    ? "换个词试试，搜索不依赖模型。"
+                    : "不需要目录或标签，先把想到的留下来。"}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : thread ? (
+          <div className="thread-page">
+            <div className="thread-heading">
+              <span className="eyebrow">接着上次的思路</span>
+              <h1>{thread.topic.title}</h1>
+              <p>讨论留在这个话题里。你确认的结论，才会存入记忆。</p>
+            </div>
+            <div className="thread-scroll">{threadUI}</div>
+            <div className="thread-composer">
+              {alerts}
+              {composerUI}
+            </div>
+          </div>
+        ) : (
+          <div className="home-page">
+            <div className="home-heading">
+              <span className="eyebrow">
+                <span className="sun-dot" />
+                给想法一点生长的空间
+              </span>
+              <h1>今天，想接着想些什么？</h1>
+              <p>记住一点过去，打开一点新的思路。</p>
+            </div>
+            {composerUI}
+            {alerts}
+            {view.mode === "ask" && !view.draft && (
+              <div className="suggestions">
+                {(view.pinned.length
+                  ? ["帮我把这个想法想得更清楚", "这个想法还有什么盲点？"]
+                  : ["我之前为什么做这个决定？", "最近有哪些想法值得接着想？"]
+                ).map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => {
+                      setView((v) => ({ ...v, draft: q }));
+                      requestId.current = crypto.randomUUID();
+                      composer.current?.focus();
+                    }}
+                  >
+                    {q}
+                    <Icon name="chevron" size={12} />
+                  </button>
+                ))}
+              </div>
+            )}
+            <section className="home-section">
+              <div className="section-heading">
+                <h2>上次想到这里</h2>
+                <span>不用从头说起</span>
+              </div>
+              {topics.length ? (
+                <div className="resume-list">
+                  {topics.slice(0, 3).map((t) => (
+                    <button key={t.id} onClick={() => void selectTopic(t.id)}>
+                      <div className="topic-symbol">
+                        <Icon name="chat" />
+                      </div>
+                      <div>
+                        <strong>{t.title}</strong>
+                        <p>{t.preview}</p>
+                      </div>
+                      <span>{date(t.updated_at)}</span>
+                      <Icon name="chevron" size={16} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="first-thought">
+                  <div className="first-thought-icon">
+                    <Icon name="leaf" size={26} />
+                  </div>
+                  <div>
+                    <h3>先留下一句话，再一起想一想。</h3>
+                    <p>不必先积累很多笔记，也不用把想法整理完整。</p>
+                  </div>
+                </div>
+              )}
+            </section>
+            <section className="home-section">
+              <div className="section-heading">
+                <h2>刚刚留下的</h2>
+                <button onClick={() => setPage("library")}>
+                  全部记忆 <Icon name="chevron" size={13} />
+                </button>
+              </div>
+              {memories.length ? (
+                <div className="memory-grid home-memories">
+                  {memories.slice(0, 3).map((c) => (
+                    <MemoryCard
+                      key={c.id}
+                      memory={c}
+                      onOpen={() => void openSource(c.id)}
+                      onThink={() => void fromMemory(c)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-line">你的第一段记忆，会出现在这里。</p>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
+      {sourceUI}
+      {settingsOpen && (
+        <SettingsPanel
+          initial={settings}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={refresh}
+        />
+      )}
+    </div>
+  );
 }
-
-createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).get('window')==='capture'?<CaptureWindow/>:<MainWindow/>);
+document.documentElement.dataset.surface = floating ? "companion" : "workspace";
+createRoot(document.getElementById("root")!).render(<App />);
