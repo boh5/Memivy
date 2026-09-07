@@ -118,6 +118,9 @@ pub(super) fn insert_capture(
     let id = id();
     db.execute("INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,request,hash,text,encode(origin)?,now()?])?;
     db.execute("INSERT INTO capture_state(capture_id) VALUES(?)", [&id])?;
+    if !matches!(origin, Origin::Conversation { .. }) {
+        db.execute("INSERT INTO organization_jobs(capture_id,attempt_id,status,created_at) VALUES(?1,?2,'pending',?3)",params![id,super::db::id(),now()?])?;
+    }
     raw(db, &id)
 }
 pub(super) fn version(db: &Connection, id: &str) -> Result<Version> {
@@ -313,22 +316,40 @@ fn undo_inner(
     Ok(inverses)
 }
 pub(super) fn resolve(db: &Connection, source: &SourceRef, max_chars: usize) -> Result<Evidence> {
-    let (title, text) = match source {
+    resolve_excerpt(db, source, max_chars, &[], None)
+}
+pub(super) fn resolve_excerpt(
+    db: &Connection,
+    source: &SourceRef,
+    max_chars: usize,
+    queries: &[String],
+    start: Option<usize>,
+) -> Result<Evidence> {
+    let (title, text, recorded_at, current): (String, String, i64, bool) = match source {
         SourceRef::Capture(id) => {
             let c = raw(db, id)?;
-            ("原始记录".into(), c.text)
+            ("原始记录".into(), c.text, c.created_at, true)
         }
         SourceRef::Version(id) => db.query_row(
-            "SELECT v.title,v.body FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=? AND m.state='active' AND v.body IS NOT NULL",
-            [id], |r| Ok((r.get(0)?, r.get(1)?))
+            "SELECT v.title,v.body,v.created_at,v.id=m.current_version_id FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=? AND m.state='active' AND v.body IS NOT NULL",
+            [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?,r.get(3)?))
         )?,
     };
     let max_chars = max_chars.clamp(1, 4096);
+    let total = text.chars().count();
+    let (start, text) = if let Some(start) = start {
+        (start, text.chars().skip(start).take(max_chars).collect())
+    } else {
+        super::retrieval::excerpt(&text, &title, queries, max_chars)
+    };
     Ok(Evidence {
         source: source.clone(),
         title,
-        truncated: text.chars().count() > max_chars,
-        text: text.chars().take(max_chars).collect(),
+        truncated: start > 0 || total > start + max_chars,
+        text,
+        recorded_at,
+        current,
+        start,
     })
 }
 impl MemoryStore {
@@ -519,6 +540,7 @@ impl MemoryStore {
         )?;
         save_receipt(&tx, &receipt, &hash)?;
         save_changes(&tx, &receipt.request_id, &inverse)?;
+        tx.execute("UPDATE organization_jobs SET receipt_id=?2,status='done',reason='已按你的选择纠正归属' WHERE capture_id=?1",params![r.capture_id,receipt.request_id])?;
         tx.commit()?;
         Ok(receipt)
     }
@@ -674,9 +696,9 @@ impl MemoryStore {
                 capture_filters.push("c.id IN (SELECT source_id FROM record_fts WHERE kind='capture' AND record_fts MATCH ?)".into());
                 capture_values.push(literal);
             } else {
-                memory_filters.push("(instr(lower(v.title||' '||v.body),lower(?))>0 OR EXISTS(SELECT 1 FROM version_captures vc JOIN captures c ON c.id=vc.capture_id JOIN capture_state cs ON cs.capture_id=c.id WHERE vc.version_id=v.id AND cs.availability='active' AND instr(lower(c.text||' '||c.source),lower(?))>0))".into());
+                memory_filters.push("(instr(lower(v.title||' '||v.body),lower(?))>0 OR EXISTS(SELECT 1 FROM version_captures vc JOIN captures c ON c.id=vc.capture_id JOIN capture_state cs ON cs.capture_id=c.id WHERE vc.version_id=v.id AND cs.availability='active' AND instr(lower(c.text||' '||c.source||' '||coalesce((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower(?))>0))".into());
                 memory_values.extend([term.to_owned(), term.to_owned()]);
-                capture_filters.push("instr(lower(c.text||' '||c.source),lower(?))>0".into());
+                capture_filters.push("instr(lower(c.text||' '||c.source||' '||coalesce((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower(?))>0".into());
                 capture_values.push(term.to_owned());
             }
         }

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import {
   call,
+  fullDate,
   errorText,
   uid,
   type Message,
@@ -15,19 +16,22 @@ import { ErrorNotice, Modal } from "./components";
 import { useDraft } from "./useDraft";
 import { isSubmitKey } from "./keyboard";
 import DraftConflict from "./DraftConflict";
+import SaveConclusion from "./SaveConclusion";
 
 function SourcePreview({
   source,
+  messageId,
   onClose,
 }: {
   source: Source;
+  messageId?: string;
   onClose: () => void;
 }) {
   const [value, setValue] = useState<SourceEvidence | null>(null),
     [error, setError] = useState("");
   useEffect(() => {
     let alive = true;
-    void call<SourceEvidence>("discussion_source", { source })
+    void call<SourceEvidence>("discussion_source", { source, messageId })
       .then((x) => {
         if (alive) setValue(x);
       })
@@ -37,7 +41,7 @@ function SourcePreview({
     return () => {
       alive = false;
     };
-  }, [source.id, source.kind]);
+  }, [source.id, source.kind, messageId]);
   return (
     <Modal title="讨论依据" onClose={onClose}>
       <ErrorNotice text={error} />
@@ -46,8 +50,8 @@ function SourcePreview({
           <h3>{value.title}</h3>
           <p className="field-help">
             {source.kind === "version"
-              ? "本次讨论使用的记忆版本"
-              : "本次讨论使用的原话"}
+              ? (value.current ? "当前记忆版本" : "当时使用的历史版本")
+              : "本次讨论使用的原话"} · {fullDate(value.recorded_at)}
           </p>
           <p className="readable-text">{value.text}</p>
           {value.truncated && (
@@ -60,99 +64,9 @@ function SourcePreview({
     </Modal>
   );
 }
-function SaveConclusion({
-  message,
-  topic,
-  onClose,
-  onSaved,
-}: {
-  message: Message;
-  topic: Topic;
-  onClose: () => void;
-  onSaved: (r: Receipt) => void;
-}) {
-  const [title, setTitle] = useState(topic.title),
-    [text, setText] = useState(
-      message.text.split("可以留下的结论：\n").at(-1) || message.text,
-    ),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const request = useRef(uid()),
-    lock = useRef(false);
-  async function save() {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      const r = await call<Receipt>("discussion_save", {
-        request: {
-          request_id: request.current,
-          message_id: message.id,
-          destination: { kind: "new" },
-          title,
-          text,
-        },
-      });
-      onSaved(r);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title="留下这段结论"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <p className="field-help">
-        核对文字后，保存为一条新记忆。讨论本身不会自动进入记忆库。
-      </p>
-      <label className="discussion-field">
-        标题
-        <input
-          value={title}
-          disabled={busy}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            request.current = uid();
-          }}
-        />
-      </label>
-      <label className="discussion-field">
-        要保存的文字
-        <textarea
-          value={text}
-          disabled={busy}
-          rows={7}
-          onChange={(e) => {
-            setText(e.target.value);
-            request.current = uid();
-          }}
-        />
-      </label>
-      <ErrorNotice text={error} />
-      <div className="action-row">
-        <button
-          className="send-button"
-          disabled={busy || !title.trim() || !text.trim()}
-          onClick={() => void save()}
-        >
-          {busy ? "保存中…" : "确认保存新记忆"}
-        </button>
-        <button className="outline-button" disabled={busy} onClick={onClose}>
-          取消
-        </button>
-      </div>
-    </Modal>
-  );
-}
 const failures: Record<string, string> = {
   network: "模型请求未完成，请检查连接后重试。",
+  rate_limit: "模型请求过于频繁，请稍后重试。",
   invalid_answer: "这次回答缺少有效依据或格式不完整，请重试。",
   source_unavailable: "本次使用的来源已不可用，请重新选择记忆后提问。",
   interrupted: "上次退出时回答尚未完成，可以继续提问。",
@@ -187,7 +101,7 @@ export default function Discussion({
     [sending, setSending] = useState(false),
     [more, setMore] = useState(false),
     [loadingMore, setLoadingMore] = useState(false),
-    [source, setSource] = useState<Source | null>(null),
+    [source, setSource] = useState<(Source & { messageId?: string }) | null>(null),
     [review, setReview] = useState<Message | null>(null),
     [receipt, setReceipt] = useState<Receipt | null>(null),
     [savedNotice, setSavedNotice] = useState("");
@@ -362,6 +276,16 @@ export default function Discussion({
               <p className="thinking-status" role="status">
                 正在查找记忆、组织回答…
               </p>
+            ) : m.answer ? (
+              <div className="answer-content">
+                {!m.answer.recollections.length && <p className="field-help">目前没有找到足够的记忆依据。</p>}
+                {m.answer.recollections.map((claim, index) => <div key={index}><p className="readable-text">{claim.text}</p><div className="discussion-citations">{claim.sources.map(ref => {
+                  const citation = m.citations.find(c => c.source.kind === ref.kind && c.source.id === ref.id);
+                  return <button key={`${ref.kind}:${ref.id}`} disabled={!citation?.available} onClick={() => setSource({ ...ref, messageId: m.id })}>{citation?.available ? "查看依据" : "来源已删除"}</button>;
+                })}</div></div>)}
+                {m.answer.ideas && <div><strong className="answer-label">接着想 · 新的分析与建议</strong><p className="readable-text">{m.answer.ideas}</p></div>}
+                {m.answer.conclusion && <div><strong className="answer-label">可以留下的结论 · 需确认保存</strong><p className="readable-text">{m.answer.conclusion}</p></div>}
+              </div>
             ) : (
               <p className="readable-text">
                 {m.text ||
@@ -370,13 +294,13 @@ export default function Discussion({
                     : failures[m.error_code || ""] || "这次回答未完成。")}
               </p>
             )}
-            {!!m.citations.length && (
+            {!m.answer && !!m.citations.length && (
               <div className="discussion-citations">
                 {m.citations.map((c, i) => (
                   <button
                     key={`${c.source.kind}:${c.source.id}`}
                     disabled={!c.available}
-                    onClick={() => setSource(c.source)}
+                    onClick={() => setSource({ ...c.source, messageId: m.id })}
                   >
                     {c.available ? `依据 ${i + 1}` : "来源已删除"}
                   </button>
@@ -424,9 +348,9 @@ export default function Discussion({
                     })
                   }
                 >
-                  查看记忆
+                  {receipt.status === "needs_review" ? "查看保留稿" : "查看记忆"}
                 </button>
-                <button onClick={() => void undo()}>撤销</button>
+                {receipt.status === "applied" && <button onClick={() => void undo()}>撤销</button>}
               </>
             )}
           </div>
@@ -506,16 +430,17 @@ export default function Discussion({
         <DraftConflict draft={draft} />
       </div>
       {source && (
-        <SourcePreview source={source} onClose={() => setSource(null)} />
+        <SourcePreview source={source} messageId={source.messageId} onClose={() => setSource(null)} />
       )}{" "}
       {review && (
         <SaveConclusion
           message={review}
+          context={draft.value.context || []}
           topic={topic}
           onClose={() => setReview(null)}
           onSaved={(r) => {
             setReceipt(r);
-            setSavedNotice("已保存为一条新记忆，原话与讨论出处均保留。");
+            setSavedNotice(r.status === "needs_review" ? "目标记忆已改变，确认的结论和完整审核稿已保存在本机；请查看保留稿后再决定去向。" : r.before_version ? "结论已存入所选记忆，原话与讨论出处均保留。" : "已保存为一条新记忆，原话与讨论出处均保留。");
             undoRequest.current = uid();
             setReview(null);
             onRefresh();

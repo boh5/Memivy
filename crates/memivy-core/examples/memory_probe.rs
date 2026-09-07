@@ -53,6 +53,33 @@ fn run() -> Result<()> {
                 }
             }
         }
+        "hold-organization" | "finish-organization" => {
+            store.recover_organization()?;
+            let task = store.claim_organization()?.ok_or(DataError::Unavailable)?;
+            if command == "hold-organization" {
+                println!("{}", task.attempt_id);
+                std::io::stdout().flush()?;
+                loop {
+                    std::thread::park();
+                }
+            }
+            let r = store.apply_organization(
+                &task,
+                &OrganizationProposal {
+                    action: "new".into(),
+                    target: String::new(),
+                    title: "恢复后整理".into(),
+                    addition: task.capture.text.clone(),
+                    changes: vec![],
+                    keywords: vec![],
+                    reason: "合成进程验证".into(),
+                },
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string(&r).map_err(|_| DataError::Invalid)?
+            );
+        }
         "backup" => store.backup(PathBuf::from(args.get(3).ok_or(DataError::Invalid)?))?,
         "diagnostics" => {
             store.check_integrity()?;

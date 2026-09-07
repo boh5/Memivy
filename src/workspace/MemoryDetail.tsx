@@ -1,3 +1,4 @@
+import OrganizationReceipt from "./OrganizationReceipt";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import {
@@ -27,8 +28,8 @@ function Editor({
   onClose: () => void;
 }) {
   const draft = useDraft(keyOf(detail.key), {
-    title: detail.title,
-    body: detail.body,
+    title: detail.reviewed_conclusion?.title || detail.title,
+    body: detail.reviewed_conclusion?.body || detail.body,
     expected_version: detail.current?.id || null,
   });
   const [busy, setBusy] = useState(false),
@@ -117,7 +118,7 @@ function Editor({
           }
           onClick={() => void save()}
         >
-          {busy ? "保存中…" : "保存版本"}
+          {busy ? "保存中…" : detail.current ? "保存版本" : "确认另存为新记忆"}
         </button>
         <button className="outline-button" disabled={busy} onClick={onClose}>
           稍后继续
@@ -384,6 +385,7 @@ export default function MemoryDetail({
           {exportNotice}
         </p>
       )}
+      {detail && !trashed && <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
       {notice && (
         <div className="mutation-receipt" role="status">
           <Icon name="check" size={16} />
@@ -419,6 +421,11 @@ export default function MemoryDetail({
                   : "尚未整理；你可以直接阅读、搜索或编辑成记忆。"}
               </p>
             </header>
+            {detail.reviewed_conclusion && !editing && <div className="workspace-warning">
+              <p>目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。</p>
+              <details><summary>查看保留的完整审核稿</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
+              <button onClick={() => { setTab("current"); setEditing(true); }}>审核保留稿并另存</button>
+            </div>}
             <div className="detail-tabs" role="tablist" aria-label="记忆内容">
               <button
                 role="tab"

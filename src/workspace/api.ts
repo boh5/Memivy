@@ -6,6 +6,9 @@ export type SourceEvidence = {
   title: string;
   text: string;
   truncated: boolean;
+  recorded_at: number;
+  current: boolean;
+  start: number;
 };
 export type Key = { kind: "memory" | "capture"; id: string };
 export type Origin = {
@@ -53,6 +56,7 @@ export type Version = {
   capture_ids: string[];
 };
 export type Detail = {
+  reviewed_conclusion?: { title: string; body: string } | null;
   key: Key;
   state: string;
   title: string;
@@ -71,6 +75,7 @@ export type Draft = {
   origin?: Origin;
 };
 export type Receipt = {
+  status: "applied" | "needs_review" | "undone";
   request_id: string;
   capture_id: string | null;
   before_version: string | null;
@@ -80,6 +85,7 @@ export type Receipt = {
 };
 export type Topic = { id: string; title: string; updated_at: number };
 export type Message = {
+  answer?: { recollections: { text: string; sources: Source[] }[]; ideas: string; conclusion: string } | null;
   seq: number;
   id: string;
   text: string;
@@ -127,6 +133,8 @@ export async function call<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return invoke<T>(name, args);
+  if (name === "discussion_targets") return [] as T;
+  if (name === "organization_jobs") return [] as T;
   if (name === "library_query") {
     const q = args?.query as Query;
     return {

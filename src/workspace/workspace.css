@@ -950,3 +950,15 @@ mark {
     padding: 16px;
   }
 }
+
+.organization-receipt { margin: 12px 0; padding: 14px 18px; border: 1px solid var(--hairline, #e0e2e8); border-radius: 12px; background: #fff8e0; color: #1c1c1e; font-size: 13px; }
+.organization-receipt p { margin: 0 0 8px; line-height: 1.6; }
+.receipt-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.receipt-actions button { background: transparent; padding: 0; border: 0; text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
+.change-comparison { display: grid; gap: 20px; }
+.change-comparison section { border: 1px solid #e0e2e8; border-radius: 10px; padding: 16px; }
+.change-comparison h3 { margin: 0 0 12px; font-size: 14px; }
+.answer-content { display: grid; gap: 20px; }
+.answer-content .readable-text { margin: 8px 0; }
+.answer-label { font-size: 12px; color: #6b6f7e; font-weight: 500; }
+.discussion-field select { appearance: none; min-height: 44px; width: 100%; border: 1px solid #e0e2e8; border-radius: 8px; padding: 10px; background: white; font: inherit; }

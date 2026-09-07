@@ -1,16 +1,19 @@
 //! Formal local data model, independent of the Phase 1 database and UI.
 //! All writes, including future UI/MCP writes, must pass through this module.
-//! No method calls a model. Network work must happen outside database transactions.
+//! Model requests are bounded and run outside database transactions.
 mod conversations;
 mod db;
 mod discussion;
 mod library;
+mod organization;
 mod records;
+mod retrieval;
 mod transfer;
 mod types;
 
 pub use db::MemoryStore;
 pub use library::*;
+pub use organization::*;
 pub use types::*;
 
 /// Display and Debug deliberately omit SQL, paths, content and provider errors.

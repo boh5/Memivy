@@ -154,20 +154,207 @@ async fn discussion_source(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     source: SourceRef,
+    message_id: Option<String>,
 ) -> HostResult<Evidence> {
     require(&window)?;
     let s = state.store.clone();
-    blocking(move || s.resolve_source(&source, 4096)).await
+    blocking(move || match message_id {
+        Some(id) => s.discussion_excerpt(&id, &source),
+        None => s.resolve_source(&source, 4096),
+    })
+    .await
 }
 #[tauri::command]
 async fn discussion_save(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     request: ConclusionRequest,
+    merged_body: Option<String>,
 ) -> HostResult<Receipt> {
     require(&window)?;
     let s = state.store.clone();
-    blocking(move || s.save_conclusion(&request)).await
+    blocking(move || s.save_reviewed_conclusion(&request, merged_body.as_deref())).await
+}
+#[tauri::command]
+async fn discussion_merge(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    destination: Destination,
+    text: String,
+) -> HostResult<String> {
+    require(&window)?;
+    validate_config(&state.config)?;
+    let config = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
+    state
+        .store
+        .preview_conclusion_merge(&config, &destination, &text)
+        .await
+        .map_err(|_| "融合预览未完成，原文与结论仍保留。请检查模型连接或缩短内容后重试。".into())
+}
+#[tauri::command]
+async fn discussion_targets(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    sources: Vec<SourceRef>,
+) -> HostResult<Vec<(String, String)>> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.discussion_targets(&sources)).await
+}
+#[tauri::command]
+async fn organization_jobs(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    key: RecordKey,
+) -> HostResult<Vec<OrganizationJob>> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.organization_jobs(&key)).await
+}
+#[tauri::command]
+async fn organization_retry(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    capture_id: String,
+) -> HostResult<()> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.retry_organization(&capture_id)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn organization_new(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    capture_id: String,
+    request_id: String,
+    original_request: Option<String>,
+) -> HostResult<Receipt> {
+    require(&window)?;
+    let store = state.store.clone();
+    let receipt = blocking(move || {
+        let raw = store.capture_by_id(&capture_id)?;
+        let request = ChangeRequest {
+            request_id,
+            capture_id,
+            destination: Destination::New,
+            title: raw
+                .text
+                .lines()
+                .find(|s| !s.trim().is_empty())
+                .unwrap_or("新记忆")
+                .chars()
+                .take(60)
+                .collect(),
+            body: raw.text,
+            actor: Actor::User,
+        };
+        match original_request {
+            Some(id) => store.correct_assignment(&id, &request),
+            None => store.capture_as_new(&request.request_id, &request.capture_id),
+        }
+    })
+    .await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(receipt)
+}
+
+// Retain terminal writes until SQLite accepts them. Retrying this state never
+// repeats the model call; shutdown recovery handles a still-pending attempt.
+async fn flush_organization_failure(
+    store: MemoryStore,
+    pending: &mut Option<(String, &'static str)>,
+) -> bool {
+    let Some((attempt, reason)) = pending.clone() else {
+        return true;
+    };
+    if blocking(move || store.fail_organization(&attempt, reason))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    *pending = None;
+    true
+}
+
+fn start_organizer(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut pending_failure = None;
+        let mut delay = 750;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            let state = app.state::<Workspace>();
+            if state.exiting.load(Ordering::Relaxed) {
+                return;
+            }
+            if pending_failure.is_some() {
+                if !flush_organization_failure(state.store.clone(), &mut pending_failure).await {
+                    delay = (delay * 2).min(5000);
+                    continue;
+                }
+                delay = 750;
+                let _ = app.emit("library-refresh", ());
+            }
+            // Interactive answers get priority before starting another background request.
+            if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
+                continue;
+            }
+            if validate_config(&state.config).is_err() {
+                continue;
+            }
+            let Ok(config) = ModelConfig::read(&state.config) else {
+                continue;
+            };
+            let store = state.store.clone();
+            let claimant = store.clone();
+            let Ok(Some(mut task)) = blocking(move || claimant.claim_organization()).await else {
+                continue;
+            };
+            let _ = app.emit("library-refresh", ());
+            let attempt = task.attempt_id.clone();
+            let preparer = store.clone();
+            let prepared = blocking(move || {
+                preparer.prepare_organization(&mut task)?;
+                Ok(task)
+            })
+            .await;
+            let failure = match prepared {
+                Err(_) => Some("invalid"),
+                Ok(task) => match store.propose_organization(&config, &task).await {
+                    Ok(proposal) => {
+                        let writer = store.clone();
+                        match tauri::async_runtime::spawn_blocking(move || {
+                            writer.apply_organization(&task, &proposal)
+                        })
+                        .await
+                        {
+                            Ok(Ok(_)) => None,
+                            Ok(Err(DataError::Invalid)) => Some("invalid"),
+                            Ok(Err(DataError::Conflict | DataError::Unavailable)) => {
+                                Some("conflict")
+                            }
+                            _ => Some("storage"),
+                        }
+                    }
+                    Err(memivy_core::model::ProbeError::Status(429)) => Some("rate_limit"),
+                    Err(
+                        memivy_core::model::ProbeError::InvalidResponse
+                        | memivy_core::model::ProbeError::TooLarge,
+                    ) => Some("invalid"),
+                    Err(_) => Some("unavailable"),
+                },
+            };
+            if let Some(reason) = failure {
+                pending_failure = Some((attempt, reason));
+                let _ = flush_organization_failure(store, &mut pending_failure).await;
+            }
+            let _ = app.emit("library-refresh", ());
+        }
+    });
 }
 #[tauri::command]
 async fn library_query(
@@ -565,6 +752,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.model_config_path());
             store.recover_interrupted_turns()?;
+            store.recover_organization()?;
             // Carry forward an existing local setup only for the normal app,
             // never for an isolated QA directory or an explicit config override.
             if !config.exists()
@@ -588,7 +776,9 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
             });
-            crate::desktop::setup(app)
+            crate::desktop::setup(app)?;
+            start_organizer(app.handle().clone());
+            Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -607,6 +797,11 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             discussion_cancel,
             discussion_source,
             discussion_save,
+            discussion_merge,
+            discussion_targets,
+            organization_jobs,
+            organization_retry,
+            organization_new,
             library_detail,
             library_projects,
             library_topics,
@@ -657,4 +852,46 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             let _ = crate::desktop::show_main(app);
         }
     });
+}
+
+#[cfg(test)]
+mod organization_writeback_tests {
+    use super::*;
+    #[tokio::test]
+    async fn failed_terminal_write_is_retained_until_writer_lock_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let raw = store
+            .capture(&CaptureRequest {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                text: "合成锁冲突".into(),
+                origin: memivy_core::memory::Origin::User {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        let task = store.claim_organization().unwrap().unwrap();
+        let lock = rusqlite::Connection::open(store.database_path()).unwrap();
+        lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let mut pending = Some((task.attempt_id.clone(), "storage"));
+        assert!(!flush_organization_failure(store.clone(), &mut pending).await);
+        assert_eq!(pending.as_ref().unwrap().0, task.attempt_id);
+        lock.execute_batch("ROLLBACK").unwrap();
+        assert!(flush_organization_failure(store.clone(), &mut pending).await);
+        assert!(pending.is_none());
+        assert_eq!(
+            store
+                .organization_jobs(&RecordKey {
+                    kind: "capture".into(),
+                    id: raw.id.clone()
+                })
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+        store.retry_organization(&raw.id).unwrap();
+        assert!(store.claim_organization().unwrap().is_some());
+    }
 }

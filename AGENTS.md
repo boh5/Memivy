@@ -13,6 +13,8 @@ Later in the same session the user explicitly rejected hiding the previously wor
 
 On 2026-09-07, after phase 4 research and decision review, the user agreed and explicitly authorized implementation ("好，同意。你可以开始做了吗？"). Reuse the current formal UI and shared native panel for formal MemoryStore quick capture and discussion. The approved behavior is Command+Enter to submit (Enter inserts a newline), collapse after a successful ordinary capture, keep a pinned panel ready for another capture, and continue answers while collapsed. Include the menu bar, configurable global shortcut, draggable/hideable leaf, opt-in macOS login startup, explicit sources, draft preservation and main-window handoff. This is phase 4 implementation authorization; automatic AI organization and formal MCP remain separately scoped. Record actual native verification and any remaining gaps in DEVELOPMENT_PLAN.md.
 
+On 2026-09-07, the user confirmed the Phase 5 research decisions: automatic continuation supplements or locally updates existing content while preserving unaffected text; saving a conclusion to an existing memory defaults to addition, with any integrated rewrite shown for one explicit confirmation before saving. The system is still in development, so do not build legacy-data compatibility, historical batch organization, or upgrade migration flows. After reviewing remaining questions, the user asked to start coding, authorizing Phase 5 implementation on the current formal UI. See PRD 4.2/4.5 and DEVELOPMENT_PLAN Phase 5. Preserve the existing layout and shared components; formal MCP remains a later milestone.
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

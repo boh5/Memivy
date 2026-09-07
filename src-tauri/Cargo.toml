@@ -27,4 +27,6 @@ objc2-foundation = "0.3.2"
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec2130422200f0863b23dfdad02b133a529b07" }
 
 [dev-dependencies]
+uuid.workspace = true
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 tempfile.workspace = true

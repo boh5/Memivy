@@ -6,7 +6,7 @@ fn sources(db: &Connection, message: &str, cited_only: bool) -> Result<Vec<Sourc
 }
 fn message(db: &Connection, id: &str) -> Result<Message> {
     let mut m = db.query_row(
-        "SELECT seq,id,turn_id,role,text,status,error_code FROM messages WHERE id=?",
+        "SELECT seq,id,turn_id,role,text,status,error_code,answer FROM messages WHERE id=?",
         [id],
         |r| {
             Ok(Message {
@@ -18,6 +18,10 @@ fn message(db: &Connection, id: &str) -> Result<Message> {
                 status: r.get(5)?,
                 error_code: r.get(6)?,
                 citations: vec![],
+                answer: r
+                    .get::<_, Option<String>>(7)?
+                    .map(|s| serde_json::from_str(&s).map_err(|_| rusqlite::Error::InvalidQuery))
+                    .transpose()?,
             })
         },
     )?;
@@ -183,6 +187,15 @@ impl MemoryStore {
     /// Persist only citations from the bounded evidence actually supplied to the
     /// request. Citation text is resolved on reads, never copied into a cache.
     pub fn finish_turn(&self, request: &str, text: &str, citations: &[SourceRef]) -> Result<bool> {
+        self.finish_answer(request, text, citations, None)
+    }
+    pub(super) fn finish_answer(
+        &self,
+        request: &str,
+        text: &str,
+        citations: &[SourceRef],
+        answer: Option<&DiscussionAnswer>,
+    ) -> Result<bool> {
         valid_text(text, 128 * 1024)?;
         if citations.len() > 8 {
             return Err(DataError::Invalid);
@@ -209,8 +222,8 @@ impl MemoryStore {
             }
         }
         tx.execute(
-            "UPDATE messages SET text=?2,status='complete' WHERE id=?1",
-            params![current.assistant.id, text],
+            "UPDATE messages SET text=?2,status='complete',answer=?3 WHERE id=?1",
+            params![current.assistant.id, text, answer.map(encode).transpose()?],
         )?;
         for source in citations {
             let (kind, id) = source.parts();
@@ -282,9 +295,22 @@ impl MemoryStore {
     /// destination commits the confirmation capture with a needs_review receipt.
     /// Deleting its conversation later cannot erase this independent capture.
     pub fn save_conclusion(&self, r: &ConclusionRequest) -> Result<Receipt> {
+        self.save_reviewed_conclusion(r, None)
+    }
+    pub fn save_reviewed_conclusion(
+        &self,
+        r: &ConclusionRequest,
+        merged_body: Option<&str>,
+    ) -> Result<Receipt> {
         valid_text(&r.title, 200)?;
         valid_text(&r.text, 128 * 1024)?;
-        let hash = fingerprint(&("conclusion", r))?;
+        if let Some(body) = merged_body {
+            valid_text(body, 128 * 1024)?;
+            if matches!(r.destination, Destination::New) {
+                return Err(DataError::Invalid);
+            }
+        }
+        let hash = fingerprint(&("conclusion", r, merged_body))?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(old) = replay(&tx, &r.request_id, &hash)? {
@@ -307,8 +333,8 @@ impl MemoryStore {
         };
         let capture = insert_capture(&tx, &r.request_id, &r.text, &origin)?;
         tx.execute(
-            "INSERT INTO conclusion_intents(capture_id,title,destination) VALUES(?1,?2,?3)",
-            params![capture.id, r.title, encode(&r.destination)?],
+            "INSERT INTO conclusion_intents(capture_id,title,destination,merged_body) VALUES(?1,?2,?3,?4)",
+            params![capture.id, r.title, encode(&r.destination)?, merged_body],
         )?;
         for reference in source.citations {
             let (kind, id) = reference.source.parts();
@@ -317,17 +343,31 @@ impl MemoryStore {
                 params![capture.id, kind, id],
             )?;
         }
-        let mut receipt = match apply(
-            &tx,
-            &ChangeRequest {
-                request_id: r.request_id.clone(),
-                capture_id: capture.id.clone(),
-                destination: r.destination.clone(),
-                title: r.title.clone(),
-                body: r.text.clone(),
-                actor: Actor::User,
-            },
-        ) {
+        let mut receipt = match (|| {
+            let body = match &r.destination {
+                Destination::New => r.text.clone(),
+                Destination::Existing {
+                    memory_id,
+                    expected_version,
+                } => {
+                    let previous = head(&tx, memory_id, expected_version)?;
+                    merged_body
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("{}\n\n{}", previous.body, r.text))
+                }
+            };
+            apply(
+                &tx,
+                &ChangeRequest {
+                    request_id: r.request_id.clone(),
+                    capture_id: capture.id.clone(),
+                    destination: r.destination.clone(),
+                    title: r.title.clone(),
+                    body,
+                    actor: Actor::User,
+                },
+            )
+        })() {
             Ok(result) => result,
             Err(DataError::Conflict) => Receipt {
                 request_id: r.request_id.clone(),

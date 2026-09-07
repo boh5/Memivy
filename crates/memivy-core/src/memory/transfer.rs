@@ -205,17 +205,21 @@ impl MemoryStore {
             block(&mut captures, &encode(&c.origin)?);
             block(&mut captures, &c.text);
             refs(&mut captures, &tx, "capture_citations", "capture_id", id)?;
-            if let Some((title, target)) = tx
+            if let Some((title, target, merged)) = tx
                 .query_row(
-                    "SELECT title,destination FROM conclusion_intents WHERE capture_id=?",
+                    "SELECT title,destination,merged_body FROM conclusion_intents WHERE capture_id=?",
                     [id],
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)),
                 )
                 .optional()?
             {
                 captures.push_str("\n用户确认的名称与去向：\n");
                 block(&mut captures, &title);
                 block(&mut captures, &target);
+                if let Some(body) = merged {
+                    captures.push_str("\n用户审核的完整融合正文：\n");
+                    block(&mut captures, &body);
+                }
             }
         }
         let mut memories = String::from(

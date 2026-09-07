@@ -50,11 +50,17 @@ pub struct LibrarySource {
     pub capture: Option<RawCapture>,
 }
 #[derive(Debug, Serialize)]
+pub struct ReviewedConclusion {
+    pub title: String,
+    pub body: String,
+}
+#[derive(Debug, Serialize)]
 pub struct LibraryDetail {
     pub key: RecordKey,
     pub state: String,
     pub title: String,
     pub body: String,
+    pub reviewed_conclusion: Option<ReviewedConclusion>,
     pub current: Option<Version>,
     pub history: Vec<Version>,
     pub sources: Vec<LibrarySource>,
@@ -178,7 +184,7 @@ impl MemoryStore {
                 let ft = bind(Value::Text(format!("\"{}\"", term.replace('"', "\"\""))));
                 filters.push(format!("(version_id IN (SELECT source_id FROM record_fts WHERE kind='version' AND record_fts MATCH {ft}) OR EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND c.id IN (SELECT source_id FROM record_fts WHERE kind='capture' AND record_fts MATCH {ft})))"));
             } else {
-                filters.push(format!("(instr(lower(title||' '||body),lower({literal}))>0 OR EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND instr(lower(c.text||' '||c.source),lower({literal}))>0))"));
+                filters.push(format!("(instr(lower(title||' '||body),lower({literal}))>0 OR EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND instr(lower(c.text||' '||c.source||' '||COALESCE((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower({literal}))>0))"));
             }
         }
         for (field, value) in [("kind", &q.origin), ("project", &q.project)] {
@@ -324,7 +330,13 @@ impl MemoryStore {
                 .transpose()?;
             sources.push(LibrarySource { id, capture });
         }
+        let reviewed_conclusion = if key.kind == "capture" && state == "active" {
+            tx.query_row("SELECT i.title,COALESCE(i.merged_body,c.text) FROM conclusion_intents i JOIN captures c ON c.id=i.capture_id JOIN capture_state s ON s.capture_id=c.id WHERE i.capture_id=? AND s.understanding!='attached' AND EXISTS(SELECT 1 FROM receipts r WHERE r.capture_id=c.id AND r.action='conclusion' AND r.status='needs_review')", [&key.id], |r| Ok(ReviewedConclusion { title: r.get(0)?, body: r.get(1)? })).optional()?
+        } else {
+            None
+        };
         Ok(LibraryDetail {
+            reviewed_conclusion,
             key: key.clone(),
             state,
             title,
@@ -447,7 +459,7 @@ impl MemoryStore {
         tx.execute_batch("DROP TRIGGER IF EXISTS capture_search_insert; DROP TRIGGER IF EXISTS version_search_insert; DROP TRIGGER IF EXISTS capture_search_erase; DROP TRIGGER IF EXISTS version_search_erase; DROP TABLE IF EXISTS record_fts;
         CREATE VIRTUAL TABLE record_fts USING fts5(kind UNINDEXED,source_id UNINDEXED,title,body,origin,tokenize='trigram');
         INSERT INTO record_fts(record_fts,rank) VALUES('secure-delete',1);
-        INSERT INTO record_fts(kind,source_id,title,body,origin) SELECT 'capture',id,'',text,source FROM captures WHERE text IS NOT NULL;
+        INSERT INTO record_fts(kind,source_id,title,body,origin) SELECT 'capture',c.id,'',c.text,c.source||' '||COALESCE(k.terms,'') FROM captures c LEFT JOIN capture_keywords k ON k.capture_id=c.id WHERE c.text IS NOT NULL;
         INSERT INTO record_fts(kind,source_id,title,body,origin) SELECT 'version',id,title,body,'' FROM memory_versions WHERE body IS NOT NULL;
         CREATE TRIGGER capture_search_insert AFTER INSERT ON captures WHEN NEW.text IS NOT NULL BEGIN INSERT INTO record_fts(kind,source_id,title,body,origin) VALUES('capture',NEW.id,'',NEW.text,NEW.source); END;
         CREATE TRIGGER version_search_insert AFTER INSERT ON memory_versions WHEN NEW.body IS NOT NULL BEGIN INSERT INTO record_fts(kind,source_id,title,body,origin) VALUES('version',NEW.id,NEW.title,NEW.body,''); END;

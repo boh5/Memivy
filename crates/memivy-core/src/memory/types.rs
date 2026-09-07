@@ -146,6 +146,22 @@ pub struct Evidence {
     pub title: String,
     pub text: String,
     pub truncated: bool,
+    pub recorded_at: i64,
+    pub current: bool,
+    pub start: usize,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recollection {
+    pub text: String,
+    pub sources: Vec<SourceRef>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscussionAnswer {
+    pub recollections: Vec<Recollection>,
+    pub ideas: String,
+    pub conclusion: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Conversation {
@@ -164,6 +180,7 @@ pub struct Message {
     pub status: String,
     pub error_code: Option<String>,
     pub citations: Vec<Citation>,
+    pub answer: Option<DiscussionAnswer>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Turn {
@@ -174,6 +191,7 @@ pub struct Turn {
 #[derive(Clone, Copy, Debug)]
 pub enum Failure {
     Network,
+    RateLimit,
     InvalidAnswer,
     SourceUnavailable,
 }
@@ -181,6 +199,7 @@ impl Failure {
     pub(super) fn code(self) -> &'static str {
         match self {
             Self::Network => "network",
+            Self::RateLimit => "rate_limit",
             Self::InvalidAnswer => "invalid_answer",
             Self::SourceUnavailable => "source_unavailable",
         }

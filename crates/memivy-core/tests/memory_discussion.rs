@@ -18,6 +18,19 @@ type Fixture = (
     std::thread::JoinHandle<()>,
 );
 fn fixture(block_answer: bool, unknown: bool) -> Fixture {
+    fixture_answer(
+        block_answer,
+        unknown,
+        json!({"queries":["桌面体验"],"historical":false}),
+        None,
+    )
+}
+fn fixture_answer(
+    block_answer: bool,
+    unknown: bool,
+    plan: Value,
+    answer: Option<Value>,
+) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let config = ModelConfig {
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
@@ -67,9 +80,11 @@ fn fixture(block_answer: bool, unknown: bool) -> Fixture {
                 release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
             }
             let content = if n == 0 {
-                json!({"queries":["桌面体验"]})
+                plan.clone()
+            } else if let Some(answer) = &answer {
+                answer.clone()
             } else {
-                json!({"recollection":"旧版本说先做好桌面体验。","ideas":"generated_suggestion_not_memory","sources":[if unknown{"M99"}else{"M1"}],"conclusion":"reviewed_conclusion_fixture"})
+                json!({"recollections":[{"text":"旧版本说先做好桌面体验。","sources":[if unknown{"M99"}else{"M1"}]}],"ideas":"generated_suggestion_not_memory","conclusion":"reviewed_conclusion_fixture"})
             };
             let body=json!({"choices":[{"message":{"content":content.to_string()},"finish_reason":"stop"}]}).to_string();
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
@@ -254,4 +269,199 @@ fn discussion_drafts_and_pins_survive_restart_and_history_reads_from_both_ends()
         .unwrap();
     assert_eq!(older.len(), 10);
     assert!(older.last().unwrap().seq < latest[0].seq);
+}
+
+#[tokio::test]
+async fn evidence_uses_matching_unicode_excerpt_and_preserves_history_identity() {
+    let (_dir, store, receipt, old, topic) = setup();
+    let current = store
+        .edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: receipt.memory_id.clone().unwrap(),
+            expected_version: receipt.after_version.unwrap(),
+            title: "桌面体验".into(),
+            body: format!(
+                "{}关键目标是保留快捷入口，当前已完成。",
+                "无关的开头。".repeat(400)
+            ),
+        })
+        .unwrap();
+    let turn = store
+        .start_turn(&id(), &topic, "关键目标以前和现在有什么变化", &[])
+        .unwrap();
+    let (config, requests, _, _, server) = fixture_answer(
+        false,
+        false,
+        json!({"queries":["关键目标","桌面体验"],"historical":true}),
+        Some(
+            json!({"recollections":[{"text":"当前目标包括快捷入口。","sources":["M1"]}],"ideas":"","conclusion":""}),
+        ),
+    );
+    store
+        .answer_discussion(&config, &topic, &turn, &[])
+        .await
+        .unwrap();
+    server.join().unwrap();
+    let calls = requests.lock().unwrap();
+    let payload: Value =
+        serde_json::from_str(calls[1]["messages"][1]["content"].as_str().unwrap()).unwrap();
+    assert!(
+        payload["evidence"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("关键目标")
+    );
+    assert_eq!(payload["evidence"][0]["is_current_version"], true);
+    assert!(
+        payload["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["text"] == "旧版本：桌面体验优先" && e["is_current_version"] == false)
+    );
+    let result = store.turn(&turn.id).unwrap();
+    let cited = &result.assistant.citations[0].source;
+    assert_eq!(cited, &SourceRef::Version(current.after_version.unwrap()));
+    let excerpt = store
+        .discussion_excerpt(&result.assistant.id, cited)
+        .unwrap();
+    assert!(excerpt.start > 0);
+    assert_eq!(excerpt.text, payload["evidence"][0]["text"]);
+    assert!(
+        store
+            .discussion_excerpt(&result.assistant.id, &old)
+            .is_err()
+    );
+    store
+        .trash_memory(
+            &receipt.memory_id.unwrap(),
+            match cited {
+                SourceRef::Version(id) => id,
+                _ => unreachable!(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .discussion_excerpt(&result.assistant.id, cited)
+            .unwrap_err(),
+        DataError::Unavailable
+    );
+}
+#[tokio::test]
+async fn no_evidence_and_uncited_recollections_are_distinct() {
+    for sources in [json!([]), json!([{"text":"虚构的个人经历","sources":[]}])] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let topic = id();
+        store.create_conversation(&topic, "测试").unwrap();
+        let turn = store
+            .start_turn(&id(), &topic, "我的海岛经历", &[])
+            .unwrap();
+        let (config, _, _, _, server) = fixture_answer(
+            false,
+            false,
+            json!({"queries":["海岛"],"historical":false}),
+            Some(json!({"recollections":sources,"ideas":"","conclusion":""})),
+        );
+        let result = store.answer_discussion(&config, &topic, &turn, &[]).await;
+        server.join().unwrap();
+        if sources.as_array().unwrap().is_empty() {
+            result.unwrap();
+            assert!(
+                store
+                    .turn(&turn.id)
+                    .unwrap()
+                    .assistant
+                    .text
+                    .contains("没有找到足够")
+            );
+        } else {
+            assert!(matches!(result.unwrap_err(), Failure::InvalidAnswer));
+            assert_eq!(store.turn(&turn.id).unwrap().assistant.status, "processing");
+        }
+        assert!(store.search("", 50).unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
+    for raw_only in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let body = format!(
+            "İ木桥项目\n{}收费是每年 120 元。",
+            "其他背景资料。".repeat(350)
+        );
+        let raw = store
+            .capture(&CaptureRequest {
+                request_id: id(),
+                text: body.clone(),
+                origin: Origin::User {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        store
+            .apply_capture(&ChangeRequest {
+                request_id: id(),
+                capture_id: raw.id.clone(),
+                destination: Destination::New,
+                title: "木桥项目".into(),
+                body: if raw_only {
+                    "木桥项目概况".into()
+                } else {
+                    body.clone()
+                },
+                actor: Actor::User,
+            })
+            .unwrap();
+        let topic = id();
+        store.create_conversation(&topic, "木桥收费").unwrap();
+        let turn = store
+            .start_turn(&id(), &topic, "木桥项目怎么收费？", &[])
+            .unwrap();
+        let alias = if raw_only { "M2" } else { "M1" };
+        let (config, requests, _, _, server) = fixture_answer(
+            false,
+            false,
+            json!({"queries":["木桥","收费"],"historical":false}),
+            Some(
+                json!({"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""}),
+            ),
+        );
+        store
+            .answer_discussion(&config, &topic, &turn, &[])
+            .await
+            .unwrap();
+        server.join().unwrap();
+        let calls = requests.lock().unwrap();
+        let payload: Value =
+            serde_json::from_str(calls[1]["messages"][1]["content"].as_str().unwrap()).unwrap();
+        let supplied = payload["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == alias)
+            .unwrap();
+        let sent = supplied["text"].as_str().unwrap();
+        assert!(sent.contains("收费是每年 120 元"));
+        let assistant = store.turn(&turn.id).unwrap().assistant;
+        let source = &assistant.citations[0].source;
+        if raw_only {
+            assert_eq!(*source, SourceRef::Capture(raw.id));
+        }
+        let excerpt = store.discussion_excerpt(&assistant.id, source).unwrap();
+        assert_eq!(excerpt.text, sent);
+        assert!(excerpt.start > 0);
+        assert_eq!(
+            excerpt.text,
+            body.chars()
+                .skip(excerpt.start)
+                .take(1800)
+                .collect::<String>()
+        );
+    }
 }

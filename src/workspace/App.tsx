@@ -1,3 +1,4 @@
+import OrganizationReceipt from "./OrganizationReceipt";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import logo from "../../design-demo/brand/memivy-logo.svg";
@@ -403,6 +404,7 @@ export default function App() {
               <button onClick={() => openRecord(savedKey)}>查看记忆</button>
             </div>
           )}
+          {savedKey && <OrganizationReceipt key={`${savedKey.kind}:${savedKey.id}`} record={savedKey} revision={revision} onOpen={openRecord} onRefresh={refresh} />}
           <ErrorNotice text={homeError} />
           {!!topics.length && (
             <section className="home-section">
