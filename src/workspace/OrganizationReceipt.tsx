@@ -7,17 +7,30 @@ export default function OrganizationReceipt({ record, revision, onOpen, onRefres
   record: Key; revision: number; onOpen: (key: Key) => void; onRefresh: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const owner = `${record.kind}:${record.id}:${revision}`;
-  const currentOwner = useRef(owner); currentOwner.current = owner;
+  const recordKey = `${record.kind}:${record.id}`;
+  const identity = useRef({ key: recordKey, owner: uid() });
+  if (identity.current.key !== recordKey) identity.current = { key: recordKey, owner: uid() };
+  const owner = identity.current.owner;
+  const currentOwner = useRef<string>(owner); currentOwner.current = owner;
   const [result, setResult] = useState<{ owner: string; jobs: Job[] } | null>(null), [error, setError] = useState("");
   const jobs = result?.owner === owner ? result.jobs : [];
   const [busy, setBusy] = useState(false), [change, setChange] = useState<{ before: string; after: string } | null>(null);
   const locked = useRef(false), request = useRef({ action: "", id: uid() });
   useEffect(() => {
-    let active = true; currentOwner.current = owner;
+    currentOwner.current = owner;
     setResult(null); setError(""); setChange(null); setExpanded(false); setBusy(false); locked.current = false;
-    void call<Job[]>("organization_jobs", { key: record }).then(rows => { if (active) setResult({ owner, jobs: rows }); }).catch(e => { if (active) setError(errorText(e)); });
-    return () => { active = false; if (currentOwner.current === owner) currentOwner.current = ""; };
+    return () => { if (currentOwner.current === owner) currentOwner.current = ""; };
+  }, [record.id, record.kind]);
+  useEffect(() => {
+    let active = true;
+    // Revisions refresh server data without dismissing immutable comparisons or
+    // invalidating a write that is still completing for this same record.
+    void call<Job[]>("organization_jobs", { key: record }).then(rows => {
+      if (active) { setResult({ owner, jobs: rows }); setError(""); }
+    }).catch(e => {
+      if (active) { setResult(null); setChange(null); setError(errorText(e)); }
+    });
+    return () => { active = false; };
   }, [record.id, record.kind, revision]);
   async function run(job: Job, action: "undo" | "new" | "retry" | "changes") {
     if (locked.current || currentOwner.current !== owner || result?.owner !== owner || !jobs.includes(job)) return;

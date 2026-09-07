@@ -8,9 +8,11 @@
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",
     "check": "tsc --noEmit",
-    "dev:app": "tauri dev",
+    "dev:app": "npm run build:mcp && tauri dev",
     "dev:prototype": "MEMIVY_PHASE1_PROTOTYPE=1 tauri dev --config src-tauri/tauri.prototype.conf.json",
-    "test:ui": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test:ui": "node --experimental-strip-types --test tests/*.test.mjs",
+    "build:mcp": "node scripts/prepare-mcp.mjs --debug",
+    "build:beta": "node scripts/build-beta.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

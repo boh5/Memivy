@@ -30,3 +30,9 @@ tmp/
 # Editors
 .idea/
 .vscode/
+
+# Generated same-version MCP sidecar (never local data).
+src-tauri/binaries/
+
+# Python process-test imports.
+__pycache__/

@@ -962,3 +962,8 @@ mark {
 .answer-content .readable-text { margin: 8px 0; }
 .answer-label { font-size: 12px; color: #6b6f7e; font-weight: 500; }
 .discussion-field select { appearance: none; min-height: 44px; width: 100%; border: 1px solid #e0e2e8; border-radius: 8px; padding: 10px; background: white; font: inherit; }
+
+.mcp-details { margin-top: 18px; }
+.mcp-details summary { cursor: pointer; font-size: 13px; }
+.mcp-details p { font-size: 12px; line-height: 1.7; color: #6b6e63; }
+.mcp-configuration { width: 100%; box-sizing: border-box; resize: vertical; padding: 12px; border: 1px solid #dcded5; border-radius: 12px; background: #f8f9f5; font: 11px/1.5 monospace; }

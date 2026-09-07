@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "node scripts/prepare-mcp.mjs && npm run build"
+  },
+  "bundle": {
+    "active": true,
+    "externalBin": ["binaries/memivy-mcp"],
+    "macOS": {
+      "minimumSystemVersion": "26.0",
+      "signingIdentity": "-"
+    }
+  }
+}

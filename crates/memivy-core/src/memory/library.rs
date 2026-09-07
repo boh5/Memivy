@@ -32,6 +32,8 @@ impl RecordKey {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct LibraryRow {
+    #[serde(skip)]
+    pub(crate) version_id: Option<String>,
     pub key: RecordKey,
     pub title: String,
     pub snippet: String,
@@ -143,6 +145,17 @@ impl MemoryStore {
     /// Paged library reads. Filter against fact tables before ranking/limiting.
     /// Each term may match the current version or one of its available originals.
     pub fn library(&self, q: &LibraryQuery) -> Result<LibraryPage> {
+        let mut db = self.connection()?;
+        let started = Instant::now();
+        db.progress_handler(
+            1000,
+            Some(move || started.elapsed() > Duration::from_millis(500)),
+        )?;
+        let tx = db.transaction()?;
+        Self::library_in(&tx, q)
+    }
+
+    pub(super) fn library_in(tx: &rusqlite::Connection, q: &LibraryQuery) -> Result<LibraryPage> {
         if q.query.len() > 512
             || q.query.split_whitespace().count() > 16
             || q.offset > 1_000_000
@@ -154,13 +167,6 @@ impl MemoryStore {
         {
             return Err(DataError::Invalid);
         }
-        let mut db = self.connection()?;
-        let started = Instant::now();
-        db.progress_handler(
-            1000,
-            Some(move || started.elapsed() > Duration::from_millis(500)),
-        )?;
-        let tx = db.transaction()?;
         let state = if q.trash { "trashed" } else { "active" };
         let availability = if q.trash { "trashed" } else { "active" };
         let source_visibility = if q.trash {
@@ -255,6 +261,7 @@ impl MemoryStore {
                 .transpose()
                 .map_err(|_| DataError::Integrity)?;
             items.push(LibraryRow {
+                version_id: version,
                 key: RecordKey { kind, id },
                 title: if title.is_empty() {
                     raw_title(&body)

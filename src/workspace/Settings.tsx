@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { call, errorText, type Settings } from "./api";
 import { ErrorNotice, Modal } from "./components";
 import DesktopSettings from "./DesktopSettings";
+import McpSettings from "./McpSettings";
 export default function SettingsPanel({
   onClose,
   onChanged,
@@ -21,6 +22,7 @@ export default function SettingsPanel({
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
+    [mcpBusy, setMcpBusy] = useState(false),
     [rebuild, setRebuild] = useState(false),
     [ready, setReady] = useState(false),
     [unreadable, setUnreadable] = useState(false);
@@ -67,7 +69,7 @@ export default function SettingsPanel({
     <Modal
       title="设置"
       onClose={() => {
-        if (!busy) onClose();
+        if (!busy && !mcpBusy) onClose();
       }}
     >
       <DesktopSettings />
@@ -205,10 +207,7 @@ export default function SettingsPanel({
           </button>
         </div>
       </section>
-      <section className="settings-section">
-        <h3>外部 Agent</h3>
-        <p>正式记忆库的 MCP 将在后续版本接通。</p>
-      </section>
+      <McpSettings onBusyChange={setMcpBusy} />
       <ErrorNotice text={error} />
       {notice && (
         <p className="settings-result" role="status">

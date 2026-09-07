@@ -11,7 +11,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "target/debug/examples/probe"
-MCP = ROOT / "target/debug/memivy-mcp"
+MCP = ROOT / "target/debug/memivy-mcp-prototype"
 
 
 def check(data_dir):

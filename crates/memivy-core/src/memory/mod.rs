@@ -5,6 +5,7 @@ mod conversations;
 mod db;
 mod discussion;
 mod library;
+mod mcp;
 mod organization;
 mod records;
 mod retrieval;
@@ -13,12 +14,15 @@ mod types;
 
 pub use db::MemoryStore;
 pub use library::*;
+pub use mcp::*;
 pub use organization::*;
 pub use types::*;
 
 /// Display and Debug deliberately omit SQL, paths, content and provider errors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DataError {
+    #[error("MCP 已关闭，请在 Memivy 设置中开启后重试")]
+    McpDisabled,
     #[error("本地文件操作失败，请检查权限和剩余空间")]
     Io,
     #[error("数据库操作失败，本次写入未确认完成")]

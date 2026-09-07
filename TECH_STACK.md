@@ -9,7 +9,7 @@
 
 悬浮拖动实验覆盖整个图标及展开后的标题区；WebView 使用 pointer capture 区分点击与拖动，Rust 读取系统鼠标和窗口的物理坐标来移动原生窗口，不依赖跨 WebView IPC 后的旧鼠标事件。拖动不触发展开，短点击才进入输入状态；实际手感和跨屏行为仍按原生验收记录核对。
 
-阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。已验收样机保留在 `prototype.rs` / `Prototype.tsx`，用 `npm run dev:prototype` 启动，继续与现有 MCP 使用独立 Phase 1 Store。没有自动迁移样机数据。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。2026-09-07 用户授权阶段 4，正式桌面快捷入口已接入；自动 AI 整理和正式 MCP 接入仍在后续阶段。
+阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。已验收样机保留在 `prototype.rs` / `Prototype.tsx`，用 `npm run dev:prototype` 启动，继续与显式的 `memivy-mcp-prototype` 使用独立 Phase 1 Store。没有自动迁移样机数据。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。2026-09-07 用户授权阶段 4，正式桌面快捷入口已接入；阶段 5 已接入自动 AI 整理；2026-09-07 用户授权阶段 6，默认 `memivy-mcp` 已切换到正式 MemoryStore。
 
 正式讨论使用 `MemoryStore::start_turn` 持久化问题与等待状态，再通过已有 `model::complete` 做检索词提取和回答两次请求。答案请求前冻结至多 8 份版本/原话节选，回答只允许引用这批依据；近期对话取最近 8 条消息、各至多 1000 字，作为讨论上下文。取消和重启恢复都以持久化状态阻止迟到完成。讨论输入及选定依据单独存为草稿，不加入记忆检索；结论必须经文字与目的地确认后调用 `save_conclusion`。正常正式配置缺失时可一次性沿用旧样机已有的本机模型配置，显式测试数据/配置覆盖不会读取用户旧配置。
 
@@ -132,7 +132,7 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 
 快捷草稿使用正式 `workspace_drafts` 的 `quick_capture` / `quick_question` 键，来源与原文在同一个 payload；会话草稿仍使用 `discussion:<id>`。Core 比较已读的 request ID 后才写入/清理草稿，跨窗口刷新不能覆盖本地待保存内容；冲突时保留两边文字，用户核对后选择继续版本。捕捉沿用原有幂等 request ID、精确原话和事务规则，不增加事实库或迁移样机数据。
 
-快捷键、固定、显隐、暂停、位置、最近话题及最近捕捉 ID 保存在应用数据目录的 `desktop.json`，不包含原话和模型凭据。来源应用名只在主动唤起时取得；不读取屏幕、选中文本、浏览器 URL 或剪贴板。菜单栏模板图标由已选品牌矢量去底色生成。登录项直接读取并调用 macOS 13 起提供的 `SMAppService.mainAppService`（正式包最低版本声明 13.0，本轮只在 macOS 26 验证），区分未开启、已开启、待系统允许和应用包不可用；默认不注册，不额外部署后台服务。
+快捷键、固定、显隐、暂停、位置、最近话题及最近捕捉 ID 保存在应用数据目录的 `desktop.json`，不包含原话和模型凭据。来源应用名只在主动唤起时取得；不读取屏幕、选中文本、浏览器 URL 或剪贴板。菜单栏模板图标由已选品牌矢量去底色生成。登录项直接读取并调用 macOS 13 起提供的 `SMAppService.mainAppService`（阶段 6 正式包最低版本声明 26.0，仅面向 Apple Silicon），区分未开启、已开启、待系统允许和应用包不可用；默认不注册，不额外部署后台服务。
 
 登录项状态查询会同步等待系统服务，因此从快捷窗口状态快照中分离：仅设置页打开或重新获得焦点时，通过独立命令在阻塞工作线程查询；登录项变更后使用操作返回的真实状态。窗口打开、收起和快捷键判断只读取所需的窗口状态，不查询登录项。设置页用请求序号拒绝旧状态覆盖新的操作结果，查询期间其余设置仍可使用。
 
@@ -260,11 +260,19 @@ Tauri 常驻进程持续消费 pending；应用重启后继续处理未完成任
 - 只为 macOS 构建 `memory_capture` 与 `memory_search`；
 - 使用官方 `rmcp`，不开 Node/Python 子运行时；
 - `memivy-mcp` 是按需启动的 stdio 适配器，不是后台服务；
-- 每次调用读取 MCP 总开关，关闭时直接拒绝；
+- 每次数据工具调用在跨进程共享锁内读取 MCP 总开关；开关写入用独占锁与原子文件替换，关闭成功后不再接纳新数据调用；协议发现和本地诊断仍可使用；
 - 直接复用 core 的搜索、落盘、来源和结果裁剪逻辑；
 - `memory_search` 仍只做无模型的关键词检索，不返回未确认保存的会话内容；应用内新增问答不扩展 MCP 工具集合；
 - stdout 只输出协议消息，日志只写 stderr，并统一脱敏 API Key 和记忆正文；
 - MVP 不同时实现 HTTP transport。
+
+正式适配器固定 `rmcp = 3.2.0`，声明并测试 2025-11-25 初始化流程和 2026-07-28 按请求携带元数据的发现流程；不以某个客户端的专用协议作为产品边界。输入帧上限 1 MiB，原话上限 128 KiB。保存使用稳定 UUID 与原文、来源指纹实现去重；Agent 名必填，项目与会话 URI 可省略，不从环境推断。返回落盘回执，应用退出时仍可保存并排队，MCP 本身不调用模型。
+
+`memory_search` 要求非空关键词（512 UTF-8 字节、最多 16 个空格分隔的 AND 词），默认 5 条、范围 1–8 条，不提供分页；来源类型、项目、更新时间过滤先于限量。复用 `library_in` 的同一 SQLite 读快照，片段最多约 160 字符、标题最多 200 字符；片段引用实际命中的 capture 或不可变 version ID，独立删除的来源不返回。短词走字面匹配，较长词使用 FTS5 trigram，无模型或向量检索。
+
+开关单独保存在正式数据目录 `mcp.json`（默认关闭），`mcp.lock` 协调 UI 和各 MCP 进程。原生 host 的独立 `data_version` 监听不依赖模型配置，外部落盘会触发既有 `library-refresh`。设置复制同包程序的绝对路径及正式数据目录，检查实际 stdio 握手、应用/服务版本和两个工具名；诊断不读取记忆或触发模型，也不把本地检查描述成外部 Agent 已连接。
+
+后台刷新只更新同一记录的整理任务数据，保留已打开的不可变版本对比和正在执行的操作。MCP 设置操作期间阻止关闭设置，操作后重新读取落盘状态；旧的异步读取不能覆盖新状态，读取失败明确显示状态无法确认。
 
 ## 9. 前端与交互实现
 
@@ -287,11 +295,21 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 |---|---|
 | Rust 核心 | 状态转换、事务、迁移、FTS、导出、失败恢复，以及会话与记忆隔离、确认保存去重、引用版本与撤销 |
 | AI 合同 | 固定案例验证三种整理动作、问答证据、历史变化与建议区分、继续讨论、无证据、取消及失败不写记忆 |
-| React | Vitest + Testing Library，Tauri IPC mock |
-| macOS E2E | WebdriverIO 与关键路径人工冒烟，[测试文档](https://v2.tauri.app/develop/tests/webdriver/) |
-| 构建 | GitHub Actions 做 Rust、前端测试和 macOS 构建；发布候选必须在干净 Mac 安装验证 |
+| React | Node test runner 执行真实 TS/TSX 回调的受控 React 生命周期与 IPC fixture；不将其视为浏览器或原生验收 |
+| macOS E2E | 当前用原生 UI 自动化完成关键路径；WebdriverIO 可作为后续测试驱动，[测试文档](https://v2.tauri.app/develop/tests/webdriver/) |
+| 构建 | 当前为锁定依赖的本机脚本与 macOS 打包；GitHub Actions 尚未接入。公开发布候选仍需干净 Mac 安装验证 |
 
-发布只包含签名、notarization 和 DMG。GitHub Actions 构建成功不等于发布完成，必须验证下载、安装、首次启动、升级和卸载后的数据保留。[Tauri 分发](https://v2.tauri.app/distribute/)
+2026-09-07 阶段 6 决策：当前交付 Apple Silicon / macOS 26 的开发测试包。用户没有 Developer ID 证书，因此应用和包内 MCP 只做 ad-hoc 签名，不做公证、不上 App Store；Developer ID 签名和 notarization 是后续分发升级，不将其写成已完成。`npm run build:beta` 构建同版本原生 sidecar、应用、含 Applications 链接与安装说明的 DMG，并输出 SHA-256。构建需要已缓存的锁定依赖及系统磁盘映像设备权限，DMG 不依赖 Finder/AppleScript。没有自动更新器。
+
+打包前校验 Tauri 应用版本、原生 Cargo 包版本与 MCP 包版本一致；MCP 协议版本信息中的服务版本由 Cargo 包版本生成。sidecar 使用 Cargo 返回的实际可执行产物，应用使用 Cargo metadata 的目标目录及显式 `aarch64-apple-darwin` 构建目标，支持自定义 Cargo 输出目录并避免复用旧产物。默认应用输出为 `target/aarch64-apple-darwin/release/bundle/macos/Memivy.app`；DMG 和校验文件固定输出到仓库的 `target/release/bundle/dmg/`。
+
+开发环境用 `npm run build:mcp` 构建 sidecar，`npm run dev:app` 自动执行此步。发布测试包用 `npm run build:beta`；开发用的普通 debug app 不自动带 sidecar，如需完整 debug 包，使用 `npm run tauri -- build --debug --config src-tauri/tauri.beta.conf.json --bundles app`。协议验证运行 `python3 scripts/verify_phase6.py --binary /absolute/path/to/Memivy.app/Contents/MacOS/memivy-mcp`，先构建 `memory_probe`。历史阶段 1 脚本改为显式运行 `memivy-mcp-prototype`，原有协议和数据不变。
+
+安装：将应用移入固定位置后首次启动，再从设置复制 MCP 配置。未公证包可能被 Gatekeeper 拦截；按系统“隐私与安全性”提供的允许打开流程处理，不要求用户关闭系统安全保护。是否能在另一台 Mac 顺利安装需要实际验证。[Tauri 分发](https://v2.tauri.app/distribute/)
+
+手动替换应用前，退出 Memivy 并停止外部 Agent 的 Memivy MCP 子进程；替换后重启、重连。卸载前关闭 MCP、退出应用并移除 Agent 配置，再删除应用包；默认保留 `~/Library/Application Support/com.memivy.app/` 中的记忆、草稿与独立配置。彻底删除数据只能由用户另外明确操作。离线复制整个数据目录前必须停止全部写入进程；其中模型配置含私密信息，不随诊断或安装包分享。
+
+构建或同机开发测试不等于公开发布完成。另一台干净 Mac 的下载、Gatekeeper 首启、真实版本升级和长时间用户试用结果记在 DEVELOPMENT_PLAN.md。
 
 ## 11. 明确不引入
 

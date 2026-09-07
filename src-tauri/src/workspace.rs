@@ -744,10 +744,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             }
         }))
         .setup(|app| {
-            let store = match std::env::var_os("MEMIVY_DATA_DIR") {
-                Some(p) => MemoryStore::open(PathBuf::from(p))?,
-                None => MemoryStore::open_default()?,
-            };
+            let store = MemoryStore::open_environment()?;
             let config = std::env::var_os("MEMIVY_MODEL_CONFIG")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.model_config_path());
@@ -778,6 +775,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             });
             crate::desktop::setup(app)?;
             start_organizer(app.handle().clone());
+            crate::mcp::watch_library(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -818,6 +816,9 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             workspace_configure,
             workspace_test_model,
             workspace_close,
+            crate::mcp::mcp_settings,
+            crate::mcp::mcp_set_enabled,
+            crate::mcp::mcp_diagnose,
             crate::desktop::desktop_state,
             crate::desktop::desktop_modal,
             crate::desktop::desktop_update,

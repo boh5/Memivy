@@ -1,5 +1,6 @@
 mod capture_panel;
 mod desktop;
+mod mcp;
 mod prototype;
 mod storage;
 mod workspace;
