@@ -68,6 +68,7 @@ export type Draft = {
   body: string;
   expected_version: string | null;
   context?: Source[];
+  origin?: Origin;
 };
 export type Receipt = {
   request_id: string;

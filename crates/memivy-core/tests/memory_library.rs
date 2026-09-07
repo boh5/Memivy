@@ -172,6 +172,7 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
         title: "手动标题".into(),
         body: "当前编辑的内容".into(),
         expected_version: None,
+        origin: None,
     };
     let r = s.save_library_edit(&draft).unwrap();
     assert_eq!(
@@ -212,6 +213,7 @@ fn drafts_are_private_to_editing_and_survive_restart() {
         title: "未保存的草稿标题".into(),
         body: "draft_secret_NOT_MEMORY".into(),
         expected_version: None,
+        origin: None,
     };
     s.save_workspace_draft(&draft).unwrap();
     let reopened = MemoryStore::open(d.path()).unwrap();
@@ -375,6 +377,7 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
         title: "draft_title_private".into(),
         body: "draft_body_private".into(),
         expected_version: current.after_version.clone(),
+        origin: None,
     })
     .unwrap();
     let other = capture(&s, "other_article_private", "user", None);

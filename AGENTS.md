@@ -11,6 +11,8 @@ On 2026-09-06 the user authorized Phase 3 with “好，实现吧”, after choo
 
 Later in the same session the user explicitly rejected hiding the previously working “问一问” and memory-level discussion during the formal-store switch. Restore those real discussion flows on MemoryStore, including citations, cancellation/retry, continuation and reviewed conclusion saving; do not disable them just because their broader milestone was originally later. The companion, automatic AI organization and formal MCP remain separately scoped. Export is a low-frequency single-article action in the memory page’s collapsed More menu, never a prominent toolbar action or whole-library export in Settings.
 
+On 2026-09-07, after phase 4 research and decision review, the user agreed and explicitly authorized implementation ("好，同意。你可以开始做了吗？"). Reuse the current formal UI and shared native panel for formal MemoryStore quick capture and discussion. The approved behavior is Command+Enter to submit (Enter inserts a newline), collapse after a successful ordinary capture, keep a pinned panel ready for another capture, and continue answers while collapsed. Include the menu bar, configurable global shortcut, draggable/hideable leaf, opt-in macOS login startup, explicit sources, draft preservation and main-window handoff. This is phase 4 implementation authorization; automatic AI organization and formal MCP remain separately scoped. Record actual native verification and any remaining gaps in DEVELOPMENT_PLAN.md.
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

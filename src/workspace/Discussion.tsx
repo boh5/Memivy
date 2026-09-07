@@ -13,6 +13,8 @@ import {
 } from "./api";
 import { ErrorNotice, Modal } from "./components";
 import { useDraft } from "./useDraft";
+import { isSubmitKey } from "./keyboard";
+import DraftConflict from "./DraftConflict";
 
 function SourcePreview({
   source,
@@ -161,7 +163,7 @@ export default function Discussion({
   configured,
   onSettings,
   onRefresh,
-  onOpenRecord,
+  onOpenRecord, compact = false, onReady, onBusy, focus = 0,
 }: {
   topic: Topic;
   revision: number;
@@ -169,6 +171,10 @@ export default function Discussion({
   onSettings: () => void;
   onRefresh: () => void;
   onOpenRecord: (key: Key) => void;
+  compact?: boolean;
+  focus?: number;
+  onReady?: () => void;
+  onBusy?: (busy: boolean) => void;
 }) {
   const draft = useDraft(`discussion:${topic.id}`, {
     title: "",
@@ -216,8 +222,8 @@ export default function Discussion({
     };
   }, [topic.id, revision]);
   useEffect(() => {
-    if (draft.ready) input.current?.focus();
-  }, [draft.ready]);
+    if (draft.ready && !sending) { input.current?.focus(); onReady?.(); }
+  }, [draft.ready, focus, sending]);
   const latest = messages.at(-1);
   useLayoutEffect(() => {
     const anchor = historyAnchor.current;
@@ -240,6 +246,7 @@ export default function Discussion({
     }
     lock.current = true;
     setSending(true);
+    onBusy?.(true);
     setError("");
     try {
       const value = await draft.flush();
@@ -257,6 +264,7 @@ export default function Discussion({
     } finally {
       lock.current = false;
       setSending(false);
+      onBusy?.(false);
     }
   }
   async function cancel() {
@@ -321,7 +329,7 @@ export default function Discussion({
     }
   }
   return (
-    <section className="discussion-page">
+    <section className={`discussion-page ${compact ? "compact-discussion" : ""}`}>
       <div className="discussion-heading">
         <span className="eyebrow">接着想</span>
         <h1>{topic.title}</h1>
@@ -463,13 +471,7 @@ export default function Discussion({
             composing.current = false;
           }}
           onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing &&
-              !composing.current &&
-              e.keyCode !== 229
-            ) {
+            if (isSubmitKey({ ...e, isComposing: e.nativeEvent.isComposing }, composing.current)) {
               e.preventDefault();
               void send();
             }
@@ -477,7 +479,7 @@ export default function Discussion({
         />
         <div className="composer-bottom">
           <span>
-            {draft.saved ? "讨论留在本机 · 确认后才存为记忆" : "保存草稿中…"}
+            {draft.saved ? "确认后才存为记忆 · ⌘ Enter 发送" : "保存草稿中…"}
           </span>
           {pending ? (
             <button className="outline-button" onClick={() => void cancel()}>
@@ -501,6 +503,7 @@ export default function Discussion({
           </button>
         )}
         <ErrorNotice text={error || draft.error} />
+        <DraftConflict draft={draft} />
       </div>
       {source && (
         <SourcePreview source={source} onClose={() => setSource(null)} />

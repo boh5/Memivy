@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { call, errorText, type Settings } from "./api";
 import { ErrorNotice, Modal } from "./components";
+import DesktopSettings from "./DesktopSettings";
 export default function SettingsPanel({
   onClose,
   onChanged,
@@ -69,6 +70,7 @@ export default function SettingsPanel({
         if (!busy) onClose();
       }}
     >
+      <DesktopSettings />
       <section className="settings-section">
         <h3>本地数据</h3>
         <p>记忆和草稿保存在这台 Mac。记录、编辑、搜索和导出都不依赖模型。</p>
@@ -204,8 +206,8 @@ export default function SettingsPanel({
         </div>
       </section>
       <section className="settings-section">
-        <h3>外部 Agent 与快捷入口</h3>
-        <p>正式记忆库的 MCP 与桌面快捷入口将在后续版本接通。</p>
+        <h3>外部 Agent</h3>
+        <p>正式记忆库的 MCP 将在后续版本接通。</p>
       </section>
       <ErrorNotice text={error} />
       {notice && (

@@ -1,3 +1,4 @@
+use crate::capture_panel;
 use memivy_core::{Capture, CaptureInput, DataPaths, SearchPage, Store};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex, time::Instant};
@@ -8,8 +9,6 @@ use tauri::{
 };
 use tauri_nspanel::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-#[path = "capture_panel.rs"]
-mod capture_panel;
 #[path = "interaction.rs"]
 mod interaction;
 

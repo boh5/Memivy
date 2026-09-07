@@ -3,6 +3,7 @@ import type { Draft } from "./api";
 type Call = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 type Snapshot = { draft: Draft | null; saved: boolean; error: unknown };
 type Entry = {
+  base: string | null;
   current: Draft | null;
   pending: Draft | null;
   revision: number;
@@ -23,6 +24,7 @@ export class DraftQueue {
     let entry = this.entries.get(key);
     if (!entry) {
       entry = {
+        base: null,
         current: null,
         pending: null,
         revision: 0,
@@ -61,14 +63,20 @@ export class DraftQueue {
         const revision = entry.revision;
         const draft = (await this.call("draft_read", { key })) as Draft | null;
         // An edit made during the read is newer than that read's snapshot.
-        if (entry.revision === revision) entry.current = draft;
+        if (entry.revision === revision) {
+          entry.base = draft?.request_id || null;
+          entry.current = draft;
+          entry.error = null;
+        }
       }
       this.notify(entry);
     });
   }
   private async persist(entry: Entry, draft: Draft) {
     try {
-      await this.call("draft_write", { draft });
+      const written = await this.call("draft_write", { draft, expectedRequest: entry.base });
+      if (written === false) throw DRAFT_CONFLICT;
+      entry.base = draft.request_id;
       if (entry.pending === draft) {
         entry.pending = null;
         entry.error = null;
@@ -107,8 +115,25 @@ export class DraftQueue {
       const submitted = entry.current;
       if (!submitted || submitted.request_id !== requestId) return false;
       // Ordered with reads/writes from every mount of this key.
-      if (replacement) await this.call("draft_write", { draft: replacement });
-      else await this.call("draft_clear", { key });
+      const consumed = replacement
+        ? await this.call("draft_write", { draft: replacement, expectedRequest: entry.base })
+        : await this.call("draft_clear", { key, request: requestId });
+      if (consumed === false) {
+        // The submitted content was saved, but another window now owns a newer draft.
+        if (entry.current === submitted) {
+          const disk = (await this.call("draft_read", { key })) as Draft | null;
+          if (entry.current === submitted) {
+            entry.current = disk;
+            entry.base = disk?.request_id || null;
+            entry.pending = null;
+            entry.error = null;
+            entry.revision++;
+            this.notify(entry);
+          }
+        }
+        return false;
+      }
+      entry.base = replacement?.request_id || null;
       // An edit can arrive during IPC; its queued write must win.
       if (entry.current === submitted) {
         entry.current = replacement;
@@ -120,4 +145,24 @@ export class DraftQueue {
       return true;
     });
   }
+  refresh() {
+    return Promise.all([...this.entries.keys()].map(key => this.read(key)));
+  }
+  resolve(key: string, keepLocal: boolean, expected: string | null) {
+    const entry = this.entry(key);
+    return this.enqueue(entry, async () => {
+      const disk = await this.call("draft_read", { key }) as Draft | null;
+      if ((disk?.request_id || null) !== expected) throw DRAFT_CONFLICT;
+      entry.base = disk?.request_id || null;
+      if (keepLocal && entry.current) await this.persist(entry, entry.current);
+      else {
+        entry.current = disk;
+        entry.pending = null;
+        entry.error = null;
+        entry.revision++;
+        this.notify(entry);
+      }
+    });
+  }
 }
+export const DRAFT_CONFLICT = "另一窗口已更新这份草稿。此处文字已保留，请核对后选择继续使用哪一份。";

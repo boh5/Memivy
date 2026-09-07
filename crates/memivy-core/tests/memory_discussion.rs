@@ -231,6 +231,7 @@ fn discussion_drafts_and_pins_survive_restart_and_history_reads_from_both_ends()
         title: String::new(),
         body: "还没问的问题".into(),
         expected_version: None,
+        origin: None,
         context: vec![source.clone()],
     };
     store.save_workspace_draft(&draft).unwrap();

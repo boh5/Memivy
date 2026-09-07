@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 import { randomUUID } from 'node:crypto';
 
-export function workspaceFixture(t) {
+export function workspaceFixture(t, {native = false} = {}) {
 let active;
 const fibers = [];
 const hooks = {
@@ -34,12 +34,13 @@ const hooks = {
 hooks.useLayoutEffect = hooks.useEffect;
 const jsx = (type, props, key) => ({type,props:props||{},key});
 const db = new Map(), calls = [], overrides = {};
+const windowEvents = new Map();
 let askResolve, messageResponse, scrolls=0;
 const topic = {id:'topic-a',title:'测试讨论',updated_at:1};
 const keyA={kind:'memory',id:'a'}, keyB={kind:'memory',id:'b'};
 const row = key => ({key,title:key.id,snippet:'test',updated_at:1,origin:null});
 const api = {
-  native:false, uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:String,
+  native, uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:String,
   date:()=>'',fullDate:()=>'',sourceName:()=>'',
   async call(name,args) {
     calls.push({name,args});
@@ -73,7 +74,10 @@ function load(file) {
     for(const ext of ['','.tsx','.ts'])if(fs.existsSync(p+ext))return load(p+ext);
     throw Error(name);
   };
-  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,setTimeout,clearTimeout,performance,crypto:{randomUUID},window:{addEventListener(){},removeEventListener(){}},document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
+  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,setTimeout,clearTimeout,performance,crypto:{randomUUID},window:{
+    addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
+    removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
+  },document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
   return module.exports;
 }
 function mount(component,props={}) {
@@ -104,6 +108,7 @@ function text(node) { if(Array.isArray(node))return node.map(text).join(''); if(
 function find(f,predicate){const node=nodes(f.tree).find(predicate);assert(node,'missing element');return node;}
   t.after(()=>{for(const f of fibers)if(f.alive)unmount(f);});
   return {load,mount,unmount,settle,find,nodes,text,db,calls,overrides,topic,keyA,keyB,
+    focus(){windowEvents.get('focus')?.forEach(fn=>fn());},
     completeAsk(){assert(askResolve);askResolve();},
     messages(fn){messageResponse=fn;},
     render(f,props){f.props=props;render(f);}

@@ -12,7 +12,6 @@ import {
   type Key,
   type Page,
   type Query,
-  type Raw,
   type Row,
   type Settings,
   type Topic,
@@ -21,159 +20,17 @@ import {
   uid,
 } from "./api";
 import { Empty, ErrorNotice, Highlight } from "./components";
-import { useDraft, flushDrafts } from "./useDraft";
+import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
 import MemoryDetail from "./MemoryDetail";
 import SettingsPanel from "./Settings";
 import Discussion from "./Discussion";
+import CaptureForm from "./CaptureForm";
+import { useDesktop, useWindowLifecycle, type MainRoute } from "./desktopApi";
 import "../prototype.css";
 import "./workspace.css";
+import "./desktop.css";
 
-function CaptureForm({
-  onSaved,
-  onAsk,
-  mode,
-  onMode,
-  onEdit,
-  focus,
-}: {
-  onSaved: (key: Key) => void;
-  onAsk: (question: string, id: string) => Promise<void>;
-  mode: "capture" | "ask";
-  onMode: (mode: "capture" | "ask") => void;
-  onEdit: () => void;
-  focus: number;
-}) {
-  const draft = useDraft(mode === "capture" ? "capture" : "question", {
-    title: "",
-    body: "",
-    expected_version: null,
-  });
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const input = useRef<HTMLTextAreaElement>(null),
-    lock = useRef(false),
-    composing = useRef(false);
-  useEffect(() => {
-    if (focus && draft.ready) input.current?.focus();
-  }, [focus, draft.ready]);
-  async function save() {
-    if (lock.current || !draft.ready || !draft.value.body.trim()) return;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      const d = await draft.flush();
-      if (mode === "ask") {
-        await onAsk(d.body, d.request_id);
-        await draft.clear(d.request_id);
-        return;
-      }
-      const raw = await call<Raw>("library_capture", {
-        request: {
-          request_id: d.request_id,
-          text: d.body,
-          origin: { kind: "user", app: "Memivy", project: null, uri: null },
-        },
-      });
-      await draft.clear(d.request_id);
-      onSaved({ kind: "capture", id: raw.id });
-      input.current?.focus();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-  return (
-    <>
-      <div className="workspace-composer">
-        <div className="composer-top">
-          <div className="segmented">
-            <button
-              aria-pressed={mode === "capture"}
-              onClick={() => onMode("capture")}
-              disabled={busy}
-            >
-              <Icon name="plus" size={14} />
-              记一下
-            </button>
-            <button
-              aria-pressed={mode === "ask"}
-              onClick={() => onMode("ask")}
-              disabled={busy}
-            >
-              <Icon name="spark" size={14} />
-              问一问
-            </button>
-          </div>
-          <span>
-            {mode === "capture" ? "想法不用整理好再来" : "结合记忆，一起接着想"}
-          </span>
-        </div>
-        <textarea
-          ref={input}
-          aria-label={mode === "capture" ? "记下想法" : "问一问"}
-          placeholder={
-            mode === "capture"
-              ? "一句想法，一段刚刚说过的话……"
-              : "关于过去的记录，你想问些什么？"
-          }
-          value={draft.value.body}
-          disabled={!draft.ready || busy}
-          onChange={(e) => {
-            draft.update({ body: e.target.value });
-            onEdit();
-          }}
-          onCompositionStart={() => {
-            composing.current = true;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-          }}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing &&
-              !composing.current &&
-              e.keyCode !== 229
-            ) {
-              e.preventDefault();
-              void save();
-            }
-          }}
-        />
-        <div className="composer-bottom">
-          <span>
-            {draft.saved
-              ? mode === "capture"
-                ? "原话先保存在本机"
-                : "讨论不会自动存为记忆"
-              : "保存草稿中…"}{" "}
-            · ⇧ Enter 换行
-          </span>
-          <button
-            className="send-button"
-            disabled={!draft.ready || busy || !draft.value.body.trim()}
-            onClick={() => void save()}
-          >
-            {busy
-              ? mode === "capture"
-                ? "保存中…"
-                : "发送中…"
-              : mode === "capture"
-                ? "记下"
-                : "问一问"}
-            <Icon name="arrow" size={16} />
-          </button>
-        </div>
-      </div>
-      <ErrorNotice text={error || draft.error} />
-    </>
-  );
-}
 export default function App() {
   useEffect(() => {
     const root = document.querySelector<HTMLElement>(".formal-app");
@@ -207,15 +64,46 @@ export default function App() {
     [focus, setFocus] = useState(0),
     [filtersOpen, setFiltersOpen] = useState(false),
     [savedKey, setSavedKey] = useState<Key | null>(null);
-  const search = useRef<HTMLInputElement>(null),
-    sequence = useRef(0),
-    pageRef = useRef(page);
-  pageRef.current = page;
   const refresh = useCallback((key?: Key, receipt?: Receipt) => {
     setRevision((v) => v + 1);
     if (key) setSelected(key);
     setPendingReceipt(key && receipt ? { key: keyOf(key), receipt } : null);
   }, []);
+  const desktop = useDesktop();
+  const [quick, setQuick] = useState(false), [handoff, setHandoff] = useState<number | null>(null), [windowError, setWindowError] = useState("");
+  useWindowLifecycle(setWindowError);
+  function handoffReady() {
+    if (handoff === null) return;
+    const generation = handoff;
+    setHandoff(null);
+    void call("desktop_handoff_ready", { generation }).catch(e => setWindowError(errorText(e)));
+  }
+  useEffect(() => {
+    if (!native) return;
+    const events = [listen("desktop-settings", () => setSettingsOpen(true)), listen<MainRoute>("desktop-route", e => {
+      void flushDrafts().then(refreshDrafts).then(() => {
+        if (document.querySelector("dialog[open]")) throw "请先完成或关闭主窗口中的对话框，再展开快捷窗口。";
+        const r = e.payload;
+        setQuick(r.quick); setMode(r.mode); setSavedKey(null); setHandoff(r.generation);
+        if (r.settings) { setSettingsOpen(true); setPage("home"); }
+        else if (r.record) { setSelected(r.record); setPage("library"); }
+        else if (r.mode === "ask" && r.topic) { setTopic(r.topic); setPage("topic"); }
+        else setPage("home");
+        setFocus(v => v + 1); refresh();
+      }).catch(error => { setWindowError(errorText(error)); void call("desktop_handoff_ready", { generation: e.payload.generation, failed: true }); });
+    })];
+    return () => { events.forEach(x => void x.then(stop => stop())); };
+  }, [refresh]);
+  useEffect(() => {
+    if (handoff !== null && (settingsOpen || page === "library")) {
+      const frame = requestAnimationFrame(handoffReady);
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [handoff, settingsOpen, page]);
+  const search = useRef<HTMLInputElement>(null),
+    sequence = useRef(0),
+    pageRef = useRef(page);
+  pageRef.current = page;
   useEffect(() => {
     let alive = true;
     void Promise.all([
@@ -249,6 +137,7 @@ export default function App() {
     if (!native) return;
     const unlisten = listen("library-refresh", () => refresh());
     const close = listen("workspace-close-request", () => {
+      if (document.querySelector("dialog[open]")) { setWindowError("请先完成或关闭当前对话框，再关闭主窗口。"); return; }
       void flushDrafts()
         .then(() => call("workspace_close"))
         .catch((e) => {
@@ -262,6 +151,7 @@ export default function App() {
     };
   }, [refresh]);
   function newCapture() {
+    setQuick(false);
     setMode("capture");
     setPage("home");
     setFocus((v) => v + 1);
@@ -277,6 +167,7 @@ export default function App() {
       question,
       context: [],
     });
+    if (quick) await desktop.update({ topic_id: t.id });
     setTopic(t);
     setPage("topic");
     refresh();
@@ -453,6 +344,10 @@ export default function App() {
           )}
         </div>
         <div className="sidebar-bottom">
+          <button onClick={() => { void flushDrafts().then(async () => {
+            if (page === "topic" && topic) await desktop.update({ topic_id: topic.id });
+            await call("desktop_open", { mode: page === "topic" ? "ask" : undefined });
+          }).catch(e => setWindowError(errorText(e))); }}><Icon name="leaf" /><span>快捷入口</span></button>
           <button onClick={() => setSettingsOpen(true)}>
             <Icon name="settings" />
             <span className="settings-label">
@@ -467,6 +362,7 @@ export default function App() {
         </div>
       </aside>
       <main className="main-workspace">
+        <ErrorNotice text={windowError} />
         {!native && (
           <div className="preview-banner">
             浏览器布局预览 · 固定示例；真实保存和编辑请使用 Mac 应用
@@ -482,7 +378,10 @@ export default function App() {
             <p>记住一点过去，打开一点新的思路。</p>
           </div>
           <CaptureForm
-            key={mode}
+            key={`${quick}:${mode}`}
+            quick={quick}
+            sourceApp={desktop.state?.source_app}
+            onReady={handoffReady}
             mode={mode}
             onMode={(next) => {
               setMode(next);
@@ -490,7 +389,7 @@ export default function App() {
               setSavedKey(null);
             }}
             onAsk={ask}
-            focus={focus}
+            focus={page === "home" && !settingsOpen ? focus : 0}
             onEdit={() => setSavedKey(null)}
             onSaved={(key) => {
               setSavedKey(key);
@@ -772,6 +671,8 @@ export default function App() {
           <Discussion
             key={topic.id}
             topic={topic}
+            focus={focus}
+            onReady={handoffReady}
             revision={revision}
             configured={configured}
             onSettings={() => setSettingsOpen(true)}

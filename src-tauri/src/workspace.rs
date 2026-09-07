@@ -10,22 +10,32 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
-type HostResult<T> = std::result::Result<T, String>;
-struct Workspace {
-    store: MemoryStore,
+pub(crate) type HostResult<T> = std::result::Result<T, String>;
+pub(crate) struct Workspace {
+    pub(crate) store: MemoryStore,
     config: PathBuf,
     config_lock: Mutex<()>,
-    exiting: AtomicBool,
+    pub(crate) exiting: AtomicBool,
     tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
+pub(crate) fn model_available(state: &Workspace) -> bool {
+    validate_config(&state.config).is_ok() && ModelConfig::read(&state.config).is_ok()
+}
 fn require(window: &tauri::WebviewWindow) -> HostResult<()> {
-    if window.label() == "main" {
+    if matches!(window.label(), "main" | "capture") {
         Ok(())
     } else {
         Err("窗口无权执行此操作".into())
     }
 }
-async fn blocking<T: Send + 'static>(
+fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("请在主窗口完成此操作".into())
+    }
+}
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> memivy_core::memory::Result<T> + Send + 'static,
 ) -> HostResult<T> {
     tauri::async_runtime::spawn_blocking(work)
@@ -53,6 +63,7 @@ async fn discussion_open(
                 title: String::new(),
                 body: String::new(),
                 expected_version: None,
+                origin: None,
                 context,
             })?;
         }
@@ -102,6 +113,7 @@ async fn discussion_ask(
         .start_turn(&id, &topic_id, &question, &context)
         .map_err(|e| e.to_string())?;
     let task_id = id.clone();
+    let _ = app.emit("library-refresh", ());
     let task = tokio::spawn(async move {
         if let Err(failure) = store
             .answer_discussion(&config, &topic_id, &turn, &context)
@@ -229,23 +241,52 @@ async fn draft_read(
 }
 #[tauri::command]
 async fn draft_write(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     draft: WorkspaceDraft,
-) -> HostResult<()> {
+    expected_request: Option<String>,
+) -> HostResult<bool> {
     require(&window)?;
     let s = state.store.clone();
-    blocking(move || s.save_workspace_draft(&draft)).await
+    let written =
+        blocking(move || s.compare_workspace_draft(&draft, expected_request.as_deref())).await?;
+    if written {
+        let _ = app.emit_to(
+            if window.label() == "main" {
+                "capture"
+            } else {
+                "main"
+            },
+            "draft-changed",
+            (),
+        );
+    }
+    Ok(written)
 }
 #[tauri::command]
 async fn draft_clear(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     key: String,
-) -> HostResult<()> {
+    request: String,
+) -> HostResult<bool> {
     require(&window)?;
     let s = state.store.clone();
-    blocking(move || s.delete_workspace_draft(&key)).await
+    let cleared = blocking(move || s.consume_workspace_draft(&key, &request)).await?;
+    if cleared {
+        let _ = app.emit_to(
+            if window.label() == "main" {
+                "capture"
+            } else {
+                "main"
+            },
+            "draft-changed",
+            (),
+        );
+    }
+    Ok(cleared)
 }
 #[tauri::command]
 async fn library_capture(
@@ -343,7 +384,7 @@ async fn library_rebuild(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<()> {
-    require(&window)?;
+    require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.rebuild_search_index()).await
 }
@@ -355,7 +396,7 @@ async fn memory_export(
     key: RecordKey,
     expected_version: Option<String>,
 ) -> HostResult<Option<String>> {
-    require(&window)?;
+    require_main(&window)?;
     let s = state.store.clone();
     let selected = key.clone();
     let detail = blocking(move || s.library_detail(&selected)).await?;
@@ -428,7 +469,7 @@ fn workspace_settings(
     window: tauri::WebviewWindow,
     state: tauri::State<Workspace>,
 ) -> HostResult<Settings> {
-    require(&window)?;
+    require_main(&window)?;
     validate_config(&state.config)?;
     if !state.config.exists() {
         return Ok(Settings::default());
@@ -452,7 +493,7 @@ fn workspace_configure(
     disable_reasoning: bool,
     replace_unreadable: bool,
 ) -> HostResult<()> {
-    require(&window)?;
+    require_main(&window)?;
     let _lock = state
         .config_lock
         .lock()
@@ -491,7 +532,7 @@ async fn workspace_test_model(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<memivy_core::model::ProbeReport> {
-    require(&window)?;
+    require_main(&window)?;
     validate_config(&state.config)?;
     let c = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
     memivy_core::model::probe(c, std::time::Duration::from_secs(45))
@@ -499,18 +540,16 @@ async fn workspace_test_model(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn workspace_close(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    state: tauri::State<Workspace>,
-) -> HostResult<()> {
-    require(&window)?;
-    state.exiting.store(true, Ordering::Relaxed);
-    app.exit(0);
-    Ok(())
+fn workspace_close(window: tauri::WebviewWindow) -> HostResult<()> {
+    if window.label() != "main" {
+        return Err("仅主窗口可以隐藏主窗口".into());
+    }
+    window.hide().map_err(|_| "主窗口无法隐藏".into())
 }
 pub fn run(context: tauri::Context<tauri::Wry>) {
     let result = tauri::Builder::default()
+        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -549,7 +588,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
             });
-            Ok(())
+            crate::desktop::setup(app)
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -583,7 +622,20 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             workspace_settings,
             workspace_configure,
             workspace_test_model,
-            workspace_close
+            workspace_close,
+            crate::desktop::desktop_state,
+            crate::desktop::desktop_modal,
+            crate::desktop::desktop_update,
+            crate::desktop::desktop_open,
+            crate::desktop::desktop_dismiss,
+            crate::desktop::desktop_ready,
+            crate::desktop::desktop_capture,
+            crate::desktop::desktop_expand,
+            crate::desktop::desktop_handoff_ready,
+            crate::desktop::desktop_drag,
+            crate::desktop::desktop_login,
+            crate::desktop::desktop_login_status,
+            crate::desktop::desktop_exit_ready
         ])
         .build(context);
     let app = match result {
@@ -594,14 +646,15 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         }
     };
     app.run(|app, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event
+        if let tauri::RunEvent::ExitRequested { ref api, .. } = event
             && let Some(state) = app.try_state::<Workspace>()
             && !state.exiting.load(Ordering::Relaxed)
         {
             api.prevent_exit();
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.emit("workspace-close-request", ());
-            }
+            crate::desktop::request_quit(app);
+        }
+        if let tauri::RunEvent::Reopen { .. } = event {
+            let _ = crate::desktop::show_main(app);
         }
     });
 }

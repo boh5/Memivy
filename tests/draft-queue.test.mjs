@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DraftQueue } from '../src/workspace/draftQueue.ts';
+import { DraftQueue, DRAFT_CONFLICT } from '../src/workspace/draftQueue.ts';
 
 const draft = (key, request_id, body, context = []) => ({key, request_id, body, title: '', expected_version: null, context});
 const deferred = () => { let resolve; const promise = new Promise(r => {resolve = r;}); return {promise,resolve}; };
@@ -88,4 +88,51 @@ test('failed writes keep their latest text and can be retried', async () => {
   assert.deepEqual(seen.at(-1),{draft:value,saved:false,error:'busy'});
   fail=false;await f.queue.flush(value.key);
   assert.deepEqual(f.disk.get(value.key),value);assert.equal(seen.at(-1).saved,true);
+});
+
+function twoWindows() {
+  const disk = new Map();
+  const call = async (name, args) => {
+    if (name === 'draft_read') return structuredClone(disk.get(args.key) || null);
+    const key=args.key || args.draft.key, old=disk.get(key);
+    if (name === 'draft_clear') {
+      if (old?.request_id !== args.request) return false;
+      disk.delete(key); return true;
+    }
+    if (JSON.stringify(old) === JSON.stringify(args.draft)) return true;
+    if ((old?.request_id || null) !== args.expectedRequest) return false;
+    disk.set(key,structuredClone(args.draft)); return true;
+  };
+  return {disk,a:new DraftQueue(call),b:new DraftQueue(call)};
+}
+test('two windows never silently overwrite a concurrently edited draft', async () => {
+  const {disk,a,b}=twoWindows();
+  await a.read('quick_capture'); await b.read('quick_capture');
+  await a.write(draft('quick_capture','a','窗口 A 的记录'));
+  const seen=[];b.subscribe('quick_capture',s=>seen.push(s));
+  await assert.rejects(b.write(draft('quick_capture','b','窗口 B 的记录')),e=>e===DRAFT_CONFLICT);
+  assert.equal(disk.get('quick_capture').body,'窗口 A 的记录');
+  assert.equal(seen.at(-1).draft.body,'窗口 B 的记录');
+  await assert.rejects(b.flushAll(),e=>e===DRAFT_CONFLICT);
+  await b.resolve('quick_capture',true,'a');
+  assert.equal(disk.get('quick_capture').body,'窗口 B 的记录');
+  await a.refresh(); await a.flushAll();
+});
+test('a late save acknowledgement preserves a newer draft from another window', async () => {
+  const {disk,a,b}=twoWindows();
+  await a.write(draft('quick_capture','sent','已保存的原话'));
+  await b.read('quick_capture');
+  await b.write(draft('quick_capture','new','新的原话'));
+  assert.equal(await a.consume('quick_capture','sent',null),false);
+  assert.equal(disk.get('quick_capture').body,'新的原话');
+  await a.flushAll();
+});
+test('conflict resolution only replaces the version actually reviewed', async () => {
+  const {disk,a,b}=twoWindows();
+  await a.read('quick_question');await b.read('quick_question');
+  await a.write(draft('quick_question','first','第一份'));
+  await assert.rejects(b.write(draft('quick_question','local','本地内容')));
+  await a.write(draft('quick_question','later','刚又改了'));
+  await assert.rejects(b.resolve('quick_question',true,'first'),e=>e===DRAFT_CONFLICT);
+  assert.equal(disk.get('quick_question').body,'刚又改了');
 });

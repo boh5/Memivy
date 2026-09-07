@@ -1,0 +1,54 @@
+.formal-desktop { width: 100vw; height: 100vh; padding: 8px; overflow: hidden; }
+.desktop-rest { display: flex; justify-content: flex-end; align-items: center; gap: 12px; width: 100%; height: 56px; }
+.desktop-toast { background: #fff; border: 1px solid #e2e6de; box-shadow: 0 2px 6px #1c1c1e10; border-radius: 10px; padding: 10px 12px; font-size: 12px; display: flex; gap: 12px; color: #315f3d; }
+.desktop-toast button { font-size: 11px; text-decoration: underline; }
+.desktop-leaf { position: relative; width: 56px; height: 56px; cursor: grab; user-select: none; border-radius: 18px; box-shadow: 0 4px 10px #1c1c1e20; }
+.desktop-leaf:active, .desktop-toolbar:active { cursor: grabbing; }
+.desktop-leaf > img { width: 56px; height: 56px; pointer-events: none; }
+.leaf-check { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; width: 19px; height: 19px; border: 2px solid white; border-radius: 50%; background: #2d6b42; color: white; }
+.desktop-panel { height: 100%; display: flex; flex-direction: column; border: 1px solid #e3e2dd; border-radius: 18px; background: #fff; box-shadow: 0 3px 8px #1c1c1e15; overflow: hidden; }
+.desktop-toolbar { display: flex; align-items: center; flex-shrink: 0; height: 48px; padding: 0 12px 0 16px; gap: 6px; border-bottom: 1px solid #f0efea; user-select: none; cursor: grab; }
+.desktop-toolbar > img { width: 25px; height: 25px; pointer-events: none; margin-right: 3px; }
+.desktop-toolbar strong { font-size: 13px; font-weight: 650; }
+.desktop-drag-space { flex: 1; height: 100%; }
+.desktop-toolbar .icon-button { width: 28px; height: 28px; border-radius: 7px; }
+.desktop-toolbar .selected { background: #fff3bb; color: #624b00; }
+.desktop-content { padding: 12px 16px 14px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.desktop-content > .workspace-composer { border: 0; box-shadow: none; padding: 0; border-radius: 0; flex: 1; min-height: 154px; display: flex; flex-direction: column; }
+.desktop-content .composer-top { min-height: 30px; }
+.desktop-content .composer-top > span { display: none; }
+.desktop-content .workspace-composer textarea { flex: 1; min-height: 68px; width: 100%; margin: 12px 0 8px; padding: 0; font-size: 15px; line-height: 1.65; }
+.desktop-content .composer-bottom { gap: 8px; padding: 0; }
+.desktop-content .composer-bottom > span { font-size: 10px; line-height: 1.5; }
+.desktop-content .send-button { padding: 7px 12px; min-height: 31px; font-size: 12px; white-space: nowrap; }
+.quick-source { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: #85857f; font-size: 11px; }
+.quick-source > details { margin-left: auto; max-width: 100%; }
+.quick-source summary { cursor: pointer; }
+.quick-source details[open] { flex: 1 0 100%; }
+.quick-source input { width: 100%; margin-top: 6px; padding: 7px 9px; font-size: 12px; border: 1px solid #deded7; border-radius: 7px; }
+.source-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f0; border-radius: 5px; padding: 2px 6px; color: #5d6057; max-width: 45%; overflow-wrap: anywhere; }
+.source-chip button { padding: 0 1px; line-height: 15px; font-size: 13px; }
+.desktop-saved { display: flex; gap: 5px; align-items: center; color: #386b47; font-size: 11px; margin-top: 8px; flex-shrink: 0; }
+.desktop-saved button { margin-left: auto; text-decoration: underline; }
+.desktop-topic-nav { display: flex; align-items: center; gap: 16px; color: #81817a; font-size: 12px; flex-shrink: 0; margin-bottom: 8px; }
+.desktop-topic-nav > span { color: #262622; font-weight: 650; }
+.desktop-topic-nav > button:last-child { margin-left: auto; font-size: 11px; }
+.desktop-content .compact-discussion { --discussion-gutter: 0px; padding: 0; flex: 1; min-height: 0; width: 100%; }
+.compact-discussion .discussion-heading { padding: 0 0 8px; flex-shrink: 0; }
+.compact-discussion .discussion-heading .eyebrow, .compact-discussion .discussion-heading > p { display: none; }
+.compact-discussion .discussion-heading h1 { font-size: 14px; line-height: 1.5; margin: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.compact-discussion .discussion-messages { padding: 8px 4px 12px 0; }
+.compact-discussion .discussion-message { font-size: 13px; margin-bottom: 18px; }
+.compact-discussion .discussion-message .readable-text { line-height: 1.7; }
+.compact-discussion .discussion-composer { margin: 0; padding: 10px; border-radius: 10px; flex-shrink: 0; }
+.compact-discussion .discussion-composer > textarea { min-height: 54px; height: 54px; max-height: 100px; font-size: 13px; }
+.formal-desktop .workspace-dialog { width: calc(100vw - 40px); max-height: calc(100vh - 40px); padding: 18px; border-radius: 13px; }
+.formal-desktop .workspace-dialog h2 { font-size: 17px; }
+.formal-desktop .workspace-dialog textarea { min-height: 65px; max-height: 180px; }
+.desktop-settings .checkbox-label { margin: 15px 0; }
+.desktop-settings .checkbox-label small { font-size: 11px; color: #84857c; }
+.desktop-settings .shortcut-recorder { min-width: 104px; flex-shrink: 0; font-size: 15px; }
+.shortcut-recorder.recording { border-color: #b7a64c; background: #fff9db; font-size: 12px; }
+.desktop-settings .setting-line { gap: 20px; }
+@media (prefers-reduced-motion: no-preference) { .desktop-leaf.has-saved .leaf-check { animation: leaf-receipt .25s ease-out; } }
+@keyframes leaf-receipt { from { transform: scale(.6); } to { transform: scale(1); } }

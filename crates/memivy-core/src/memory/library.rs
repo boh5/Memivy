@@ -67,6 +67,8 @@ pub struct WorkspaceDraft {
     pub title: String,
     pub body: String,
     pub expected_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
     #[serde(default)]
     pub context: Vec<SourceRef>,
 }
@@ -351,6 +353,21 @@ impl MemoryStore {
             .transpose()
     }
     pub fn save_workspace_draft(&self, draft: &WorkspaceDraft) -> Result<()> {
+        self.write_workspace_draft(draft, None).map(|_| ())
+    }
+    /// A WebView may only replace the draft version it actually read.
+    pub fn compare_workspace_draft(
+        &self,
+        draft: &WorkspaceDraft,
+        expected_request: Option<&str>,
+    ) -> Result<bool> {
+        self.write_workspace_draft(draft, Some(expected_request))
+    }
+    fn write_workspace_draft(
+        &self,
+        draft: &WorkspaceDraft,
+        expected: Option<Option<&str>>,
+    ) -> Result<bool> {
         validate_draft_key(&draft.key)?;
         valid_id(&draft.request_id)?;
         if draft.title.len() > 200 || draft.body.len() > 128 * 1024 || draft.context.len() > 4 {
@@ -362,8 +379,35 @@ impl MemoryStore {
         if let Some(v) = &draft.expected_version {
             valid_id(v)?;
         }
+        if let Some(origin) = &draft.origin {
+            if draft.key != "quick_capture" || !matches!(origin, Origin::User { .. }) {
+                return Err(DataError::Invalid);
+            }
+            super::records::validate_origin(origin)?;
+        }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(expected) = expected {
+            let old: Option<String> = tx
+                .query_row(
+                    "SELECT payload FROM workspace_drafts WHERE key=?",
+                    [&draft.key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            // Retrying the same acknowledged-or-not write is idempotent.
+            if old.as_deref() == Some(encode(draft)?.as_str()) {
+                return Ok(true);
+            }
+            let old = old
+                .map(|s| {
+                    serde_json::from_str::<WorkspaceDraft>(&s).map_err(|_| DataError::Integrity)
+                })
+                .transpose()?;
+            if old.as_ref().map(|d| d.request_id.as_str()) != expected {
+                return Ok(false);
+            }
+        }
         if let Some((kind, id)) = draft.key.split_once(':') {
             let sql = if kind == "discussion" {
                 "SELECT EXISTS(SELECT 1 FROM conversations WHERE id=?)"
@@ -378,7 +422,16 @@ impl MemoryStore {
         }
         tx.execute("INSERT INTO workspace_drafts(key,payload) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload",params![draft.key,encode(draft)?])?;
         tx.commit()?;
-        Ok(())
+        Ok(true)
+    }
+    pub fn consume_workspace_draft(&self, key: &str, request: &str) -> Result<bool> {
+        validate_draft_key(key)?;
+        valid_id(request)?;
+        let changed = self.connection()?.execute(
+            "DELETE FROM workspace_drafts WHERE key=? AND json_extract(payload,'$.request_id')=?",
+            params![key, request],
+        )?;
+        Ok(changed == 1)
     }
     pub fn delete_workspace_draft(&self, key: &str) -> Result<()> {
         validate_draft_key(key)?;
@@ -405,7 +458,10 @@ impl MemoryStore {
     }
 }
 fn validate_draft_key(key: &str) -> Result<()> {
-    if matches!(key, "capture" | "question") {
+    if matches!(
+        key,
+        "capture" | "question" | "quick_capture" | "quick_question"
+    ) {
         return Ok(());
     }
     let (kind, id) = key.split_once(':').ok_or(DataError::Invalid)?;

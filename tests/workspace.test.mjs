@@ -3,7 +3,46 @@ import assert from 'node:assert/strict';
 import { workspaceFixture } from './helpers/workspace.mjs';
 const props = f => ({topic:f.topic,revision:0,configured:true,onSettings(){},onRefresh(){},onOpenRecord(){}});
 const textarea = (f,view) => f.find(view,n=>n.type==='textarea');
-function send(f,view) { textarea(f,view).props.onKeyDown({key:'Enter',shiftKey:false,nativeEvent:{isComposing:false},keyCode:13,preventDefault(){}}); }
+function send(f,view) { textarea(f,view).props.onKeyDown({key:'Enter',metaKey:true,ctrlKey:false,altKey:false,shiftKey:false,repeat:false,nativeEvent:{isComposing:false},keyCode:13,preventDefault(){}}); }
+
+const captureProps = sourceApp => ({quick:true,mode:'capture',sourceApp,focus:1,onSaved(){},onAsk:async()=>{},onMode(){},onEdit(){}});
+
+test('repeated empty handoffs use the new source and reset it after a capture', async t => {
+  const f=workspaceFixture(t), Capture=f.load('src/workspace/CaptureForm.tsx').default;
+  f.overrides.desktop_capture=async ({request})=>({id:request.request_id,text:request.text});
+  const view=f.mount(Capture,captureProps('Safari'));await f.settle();
+  for (const source of ['Notes','Chrome']) {
+    // The main-window form stays mounted through successive handoffs.
+    f.render(view,{...captureProps(source),focus:2});await f.settle();
+    textarea(f,view).props.onChange({target:{value:'交接后输入的原话'}});await f.settle();
+    assert.equal(f.db.get('quick_capture').origin.app,source);
+    send(f,view);await f.settle();
+    assert.equal(f.calls.filter(c=>c.name==='desktop_capture').at(-1).args.request.origin.app,source);
+    assert.equal(textarea(f,view).props.value,'');
+    assert(!f.db.has('quick_capture'));
+  }
+});
+
+test('restored drafts retain their source and explicit URI even with an empty body', async t => {
+  const f=workspaceFixture(t), Capture=f.load('src/workspace/CaptureForm.tsx').default;
+  const origin={kind:'user',app:'Safari',project:null,uri:'https://example.com/selected'};
+  f.db.set('quick_capture',{key:'quick_capture',request_id:'existing',title:'',body:'',expected_version:null,origin});
+  const view=f.mount(Capture,captureProps('Notes'));await f.settle();
+  f.render(view,captureProps('Chrome'));await f.settle();
+  textarea(f,view).props.onChange({target:{value:'恢复后补写'}});await f.settle();
+  assert.deepEqual(f.db.get('quick_capture').origin,origin);
+});
+
+test('a source refresh cannot relabel a draft whose first write is pending', async t => {
+  const f=workspaceFixture(t), Capture=f.load('src/workspace/CaptureForm.tsx').default;
+  let finish;
+  f.overrides.draft_write=({draft})=>new Promise(resolve=>{finish=()=>{f.db.set(draft.key,structuredClone(draft));resolve(true);};});
+  const view=f.mount(Capture,captureProps('Safari'));await f.settle();
+  textarea(f,view).props.onChange({target:{value:'正在保存的原话'}});await f.settle();
+  f.render(view,captureProps('Notes'));await f.settle();finish();await f.settle();
+  assert.equal(f.db.get('quick_capture').origin.app,'Safari');
+  assert.equal(textarea(f,view).props.value,'正在保存的原话');
+});
 
 test('late discussion acknowledgement preserves the reopened input and restart draft', async t => {
   const f=workspaceFixture(t), Discussion=f.load('src/workspace/Discussion.tsx').default;
@@ -66,4 +105,23 @@ test('an invalid editor draft does not prevent submitting a valid home capture',
   const button=f.find(form,n=>n.type==='button'&&n.props.className==='send-button');button.props.onClick();await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='library_capture').at(-1).args.request.text,'有效的首页记录');
   assert.equal(textarea(f,form).props.value,'');
+});
+
+test('the collapsed leaf supports accessible activation and dragging never opens it', async t => {
+  const f=workspaceFixture(t);
+  f.load('src/workspace/desktopApi.ts').previewDesktop.expanded=false;
+  f.overrides.desktop_open=async()=>{};
+  const Desktop=f.load('src/workspace/Desktop.tsx').default, view=f.mount(Desktop);await f.settle();
+  const leaf=f.find(view,n=>n.type==='button' && n.props.className?.startsWith('desktop-leaf'));
+  leaf.props.onClick();await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,1);
+  const element={setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){}};
+  const event={button:0,pointerId:1,clientX:10,clientY:10,currentTarget:element,target:{closest(){return element;}}};
+  leaf.props.onPointerDown(event);
+  leaf.props.onPointerMove({...event,clientX:40});
+  leaf.props.onPointerUp({...event,clientX:40,type:'pointerup'});
+  leaf.props.onClick();await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,1);
+  leaf.props.onClick();await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,2);
 });
