@@ -2,6 +2,7 @@
 Build memivy-core's memory_probe example first. No model calls or user data.
 """
 import json
+import os
 from pathlib import Path
 import select
 import sqlite3
@@ -9,7 +10,7 @@ import subprocess
 import tempfile
 import uuid
 
-PROBE = Path(__file__).resolve().parents[1] / 'target/debug/examples/memory_probe'
+PROBE = Path(os.environ.get('MEMIVY_TEST_PROBE', Path(__file__).resolve().parents[1] / 'target/debug/examples/memory_probe'))
 with tempfile.TemporaryDirectory() as tmp:
     data = Path(tmp) / 'data'
     def call(*args):

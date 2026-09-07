@@ -106,7 +106,7 @@ def check(binary):
         shared = {**args,"request_id":str(uuid.uuid4()),"text":"并发幂等合成证据"}
         def writer(n):
             if n % 3 == 0:
-                probe = ROOT/'target/debug/examples/memory_probe'
+                probe = Path(os.environ.get('MEMIVY_TEST_PROBE', ROOT/'target/debug/examples/memory_probe'))
                 p = subprocess.run([str(probe),str(data),'capture',str(uuid.uuid4()),f'应用侧并发原话 {n}'],capture_output=True,text=True,timeout=12)
                 assert p.returncode == 0, p.stderr
                 return None

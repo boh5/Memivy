@@ -12,7 +12,8 @@
     "dev:prototype": "MEMIVY_PHASE1_PROTOTYPE=1 tauri dev --config src-tauri/tauri.prototype.conf.json",
     "test:ui": "node --experimental-strip-types --test tests/*.test.mjs",
     "build:mcp": "node scripts/prepare-mcp.mjs --debug",
-    "build:beta": "node scripts/build-beta.mjs"
+    "build:beta": "node scripts/build-beta.mjs",
+    "test:core-assets": "python3 scripts/verify_core_assets.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

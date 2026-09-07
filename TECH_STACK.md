@@ -299,6 +299,8 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 | macOS E2E | 当前用原生 UI 自动化完成关键路径；WebdriverIO 可作为后续测试驱动，[测试文档](https://v2.tauri.app/develop/tests/webdriver/) |
 | 构建 | 当前为锁定依赖的本机脚本与 macOS 打包；GitHub Actions 尚未接入。公开发布候选仍需干净 Mac 安装验证 |
 
+2026-09-07 核心测试资产：`npm run test:core-assets` 统一运行离线构建、回归、进程/stdio 故障检查并生成隔离视觉合成库；显式传入 `--models-only --model-config /absolute/private-model.json` 才运行固定整理/问答模型集。固定案例、人工判定要求、失败退出语义和实际验证见 DEVELOPMENT_PLAN.md 第 5 节。沿用已有 Cargo、Node test runner、Python 标准库和原生检查工具，未引入新测试依赖或 CI/运行时服务。
+
 2026-09-07 阶段 6 决策：当前交付 Apple Silicon / macOS 26 的开发测试包。用户没有 Developer ID 证书，因此应用和包内 MCP 只做 ad-hoc 签名，不做公证、不上 App Store；Developer ID 签名和 notarization 是后续分发升级，不将其写成已完成。`npm run build:beta` 构建同版本原生 sidecar、应用、含 Applications 链接与安装说明的 DMG，并输出 SHA-256。构建需要已缓存的锁定依赖及系统磁盘映像设备权限，DMG 不依赖 Finder/AppleScript。没有自动更新器。
 
 打包前校验 Tauri 应用版本、原生 Cargo 包版本与 MCP 包版本一致；MCP 协议版本信息中的服务版本由 Cargo 包版本生成。sidecar 使用 Cargo 返回的实际可执行产物，应用使用 Cargo metadata 的目标目录及显式 `aarch64-apple-darwin` 构建目标，支持自定义 Cargo 输出目录并避免复用旧产物。默认应用输出为 `target/aarch64-apple-darwin/release/bundle/macos/Memivy.app`；DMG 和校验文件固定输出到仓库的 `target/release/bundle/dmg/`。

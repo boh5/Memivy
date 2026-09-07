@@ -62,6 +62,9 @@ async fn main() {
     )
     .unwrap();
     let cases: Vec<Case> = serde_json::from_str(fixture).unwrap();
+    let rubric = include_str!("../tests/fixtures/organization_review.json");
+    fs::write(output.join("rubric.json"), rubric).unwrap();
+    let mut review = vec![];
     let mut passed = 0;
     for case in &cases {
         let path = output.join(format!("{}.json", case.id));
@@ -96,16 +99,30 @@ async fn main() {
                     .map(|v| v.title.clone())
                     .unwrap_or_default();
                 let applied = store.apply_organization(&task, &proposal);
-                let pass = proposal.action == case.expected
+                let raw_preserved = store.capture_by_id(&raw.id).unwrap().text == case.capture;
+                let replay_pass = applied.as_ref().is_ok_and(|r| {
+                    store
+                        .apply_organization(&task, &proposal)
+                        .is_ok_and(|replay| &replay == r)
+                });
+                let final_body = applied
+                    .as_ref()
+                    .ok()
+                    .and_then(|r| r.memory_id.as_ref())
+                    .map(|m| store.memory(m).unwrap().current.body);
+                let pass = raw_preserved
+                    && replay_pass
+                    && proposal.action == case.expected
                     && (case.expected != "append" || target == case.target)
                     && applied.is_ok();
                 passed += usize::from(pass);
-                json!({"id":case.id,"proposal":proposal,"selected_title":target,"candidates":task.candidates,"routing_pass":pass,"apply":applied.map_err(|e|e.to_string()),"elapsed_ms":started.elapsed().as_millis()})
+                json!({"id":case.id,"proposal":proposal,"selected_title":target,"candidates":task.candidates,"routing_pass":pass,"raw_preserved":raw_preserved,"replay_pass":replay_pass,"final_body":final_body,"apply":applied.map_err(|e|e.to_string()),"elapsed_ms":started.elapsed().as_millis()})
             }
             Err(error) => {
                 json!({"id":case.id,"routing_pass":false,"error":error.to_string(),"elapsed_ms":started.elapsed().as_millis()})
             }
         };
+        review.push(json!({"id":case.id,"meaning_preserved":"pending","uncertainty_preserved":"pending","unaffected_text_preserved":"pending","notes":"","reviewer":""}));
         fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
         println!(
             "{} routing_pass={} elapsed_ms={}",
@@ -113,7 +130,15 @@ async fn main() {
         );
     }
     fs::write(output.join("summary.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"cases":cases.len(),"routing_pass":passed,"note":"Routing and core validation only; inspect prose separately for meaning and uncertainty."})).unwrap()).unwrap();
+    fs::write(
+        output.join("review.json"),
+        serde_json::to_vec_pretty(&review).unwrap(),
+    )
+    .unwrap();
     println!("Routing/core validation: {passed}/{}", cases.len());
+    if passed != cases.len() {
+        std::process::exit(1);
+    }
 }
 
 fn create_run_directory(output: &std::path::Path) -> std::io::Result<()> {

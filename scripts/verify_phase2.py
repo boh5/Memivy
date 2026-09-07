@@ -5,6 +5,7 @@ Uses only a temporary, isolated directory and synthetic input.
 """
 import concurrent.futures
 import json
+import os
 from pathlib import Path
 import select
 import sqlite3
@@ -15,7 +16,7 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = ROOT / "target/debug/examples/memory_probe"
+PROBE = Path(os.environ.get("MEMIVY_TEST_PROBE", ROOT / "target/debug/examples/memory_probe"))
 
 
 def check(root):
@@ -95,6 +96,14 @@ def check(root):
         assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM captures c LEFT JOIN capture_state s ON s.capture_id=c.id WHERE s.capture_id IS NULL").fetchone()[0] == 0
 
+    restored = root / "restored"
+    subprocess.run([PROBE, restored, "restore", backup], capture_output=True,
+                   text=True, check=True, timeout=10)
+    with sqlite3.connect(restored / "memivy.db") as db:
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert db.execute("SELECT count(*) FROM captures").fetchone()[0] >= 27
+        assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == 1
+
     result = call("diagnostics")
     assert result["captures"] == 47, result
     assert result["versions"] == 1, result
@@ -102,7 +111,7 @@ def check(root):
         "8 fresh databases opened by 4 concurrent processes each",
         "24 separate process writers", "8 process retries create one capture",
         "acknowledged raw capture survives SIGKILL", "version and receipt survive SIGKILL",
-        "consistent online backup during concurrent writes", "foreign keys and integrity",
+        "consistent online backup during concurrent writes and fresh-directory restore", "foreign keys and integrity",
     ]}
 
 

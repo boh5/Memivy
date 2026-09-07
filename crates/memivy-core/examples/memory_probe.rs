@@ -14,8 +14,48 @@ fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let root = args.get(1).ok_or(DataError::Invalid)?;
     let command = args.get(2).ok_or(DataError::Invalid)?;
+    if command == "restore" {
+        MemoryStore::restore_backup(args.get(3).ok_or(DataError::Invalid)?, root)?;
+        return Ok(());
+    }
+    if command == "hold-migration" {
+        // Test harness only: pause the same migration SQL inside an uncommitted
+        // SQLite transaction. No pause hook or compatibility flow in the app.
+        std::fs::create_dir(root)?;
+        let mut db = rusqlite::Connection::open(PathBuf::from(root).join("memivy.db"))?;
+        db.pragma_update(None, "journal_mode", "WAL")?;
+        let tx = db.transaction()?;
+        tx.execute_batch(include_str!("../../../migrations/memory/001_records.sql"))?;
+        tx.pragma_update(None, "application_id", 0x4d495659_i64)?;
+        tx.execute_batch(include_str!(
+            "../../../migrations/memory/002_conversations.sql"
+        ))?;
+        println!("migration transaction open; schema 2 not committed");
+        std::io::stdout().flush()?;
+        loop {
+            std::thread::park();
+        }
+    }
     let store = MemoryStore::open(PathBuf::from(root))?;
     match command.as_str() {
+        "hold-turn" => {
+            let topic = Uuid::new_v4().to_string();
+            store.create_conversation(&topic, "生成中退出的合成话题")?;
+            let turn = store.start_turn(
+                &Uuid::new_v4().to_string(),
+                &topic,
+                "普通问题不能变成记忆",
+                &[],
+            )?;
+            println!("{}", turn.id);
+            std::io::stdout().flush()?;
+            loop {
+                std::thread::park();
+            }
+        }
+        "recover-turn" => {
+            store.recover_interrupted_turns()?;
+        }
         "capture" | "hold" | "hold-memory" => {
             let request = CaptureRequest {
                 request_id: args.get(3).ok_or(DataError::Invalid)?.clone(),

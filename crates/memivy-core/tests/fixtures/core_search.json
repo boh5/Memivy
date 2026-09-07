@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "seeds": [
+    {
+      "id": "phrase",
+      "raw": "中文连续短语：先给结果再配置。",
+      "title": "首次体验原则",
+      "body": "先给结果再配置。保留中文输入。",
+      "project": "木桥"
+    },
+    {
+      "id": "shifted",
+      "raw": "先给配置，再看结果。",
+      "title": "错位干扰项",
+      "body": "先给配置，再看结果。",
+      "project": "木桥"
+    },
+    {
+      "id": "english",
+      "raw": "Use SQLite with Rust for ArchCode.",
+      "title": "ArchCode storage",
+      "body": "SQLite stores local records.",
+      "origin": "agent",
+      "project": "ArchCode",
+      "uri": "https://example.com/中文路径?q=a_b%20"
+    },
+    {
+      "id": "symbols",
+      "raw": "字面符号 _% \"引号\" 🙂 C++ foo-bar",
+      "title": "符号笔记",
+      "body": "字面符号 _% \"引号\" 🙂 C++ foo-bar"
+    },
+    {
+      "id": "history",
+      "raw": "最初原话：木桥先做网页；收费仍未定。",
+      "title": "木桥当前方向",
+      "body": "木桥已决定先做桌面端，不支持同步。",
+      "old_body": "旧版本独有词：浏览器优先。",
+      "project": "木桥"
+    },
+    {
+      "id": "deleted",
+      "raw": "已删除的孔雀方案",
+      "title": "孔雀方案",
+      "body": "已删除的孔雀方案",
+      "trashed": true
+    },
+    {
+      "id": "ranking",
+      "raw": "固定排序样本",
+      "title": "相近结果",
+      "body": "优先命中标题",
+      "project": "唯一项目",
+      "origin": "agent"
+    }
+  ],
+  "queries": [
+    {
+      "id": "zh-phrase",
+      "query": "先给结果",
+      "expected": [
+        "phrase"
+      ]
+    },
+    {
+      "id": "zh-shifted",
+      "query": "结果再配置",
+      "expected": [
+        "phrase"
+      ]
+    },
+    {
+      "id": "zh-two",
+      "query": "中文",
+      "expected": [
+        "phrase",
+        "english"
+      ]
+    },
+    {
+      "id": "zh-one",
+      "query": "桥",
+      "expected": [
+        "phrase",
+        "shifted",
+        "history"
+      ]
+    },
+    {
+      "id": "ascii-lower",
+      "query": "sqlite",
+      "expected": [
+        "english"
+      ]
+    },
+    {
+      "id": "ascii-upper",
+      "query": "SQLITE",
+      "expected": [
+        "english"
+      ]
+    },
+    {
+      "id": "english-substring",
+      "query": "rchCo",
+      "expected": [
+        "english"
+      ]
+    },
+    {
+      "id": "url",
+      "query": "https://example.com/中文路径?q=a_b%20",
+      "expected": [
+        "english"
+      ]
+    },
+    {
+      "id": "literal-wildcard",
+      "query": "_%",
+      "expected": [
+        "symbols"
+      ]
+    },
+    {
+      "id": "literal-quote",
+      "query": "\"引号\"",
+      "expected": [
+        "symbols"
+      ]
+    },
+    {
+      "id": "emoji",
+      "query": "🙂",
+      "expected": [
+        "symbols"
+      ]
+    },
+    {
+      "id": "punctuation",
+      "query": "C++",
+      "expected": [
+        "symbols"
+      ]
+    },
+    {
+      "id": "hyphen",
+      "query": "foo-bar",
+      "expected": [
+        "symbols"
+      ]
+    },
+    {
+      "id": "current-body",
+      "query": "桌面端",
+      "expected": [
+        "history"
+      ]
+    },
+    {
+      "id": "retained-raw",
+      "query": "网页",
+      "expected": [
+        "history"
+      ],
+      "raw_hit": "history"
+    },
+    {
+      "id": "cross-version-raw-terms",
+      "query": "桌面端 收费",
+      "expected": [
+        "history"
+      ]
+    },
+    {
+      "id": "old-version-excluded",
+      "query": "浏览器优先",
+      "expected": []
+    },
+    {
+      "id": "project-filter",
+      "query": "先给",
+      "project": "木桥",
+      "expected": [
+        "phrase",
+        "shifted"
+      ]
+    },
+    {
+      "id": "project-negative",
+      "query": "SQLite",
+      "project": "木桥",
+      "expected": []
+    },
+    {
+      "id": "source-agent",
+      "query": "SQLite",
+      "origin": "agent",
+      "expected": [
+        "english"
+      ]
+    },
+    {
+      "id": "source-negative",
+      "query": "SQLite",
+      "origin": "user",
+      "expected": []
+    },
+    {
+      "id": "since-inclusive",
+      "query": "桌面端",
+      "since_at": "history",
+      "expected": [
+        "history"
+      ]
+    },
+    {
+      "id": "until-exclusive",
+      "query": "桌面端",
+      "until_at": "history",
+      "expected": []
+    },
+    {
+      "id": "no-result",
+      "query": "未曾存在的海底车站",
+      "expected": []
+    },
+    {
+      "id": "operators-literal",
+      "query": "NOTEXIST OR",
+      "expected": []
+    },
+    {
+      "id": "trash-excluded",
+      "query": "孔雀",
+      "expected": []
+    },
+    {
+      "id": "draft-excluded",
+      "query": "draft_only_sentinel",
+      "expected": []
+    },
+    {
+      "id": "conversation-excluded",
+      "query": "question_only_sentinel",
+      "expected": []
+    }
+  ]
+}

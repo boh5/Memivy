@@ -1,0 +1,15 @@
+{
+  "version":1,
+  "confirmed_text":"  经用户修改确认的结论\n  ",
+  "scope":"固定核心 API 与真实组件回调；原生点击确认在 visual_contract.json 单独记录",
+  "cases":[
+    {"id":"save-01","test":"discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance","file":"crates/memivy-core/tests/memory_data.rs","check":"问题、假设、草稿和建议不进入记忆；确认后保存原文及来源。"},
+    {"id":"save-02","test":"conclusions_append_or_save_exact_reviewed_merge_without_auto_organization","file":"crates/memivy-core/tests/memory_intelligence.rs","check":"默认追加保留全文；融合逐字保存审核稿；重试同一请求不重复；撤销保留原话。"},
+    {"id":"save-03","test":"stale_merge_keeps_confirmation_without_overwriting_and_can_be_corrected","file":"crates/memivy-core/tests/memory_intelligence.rs","check":"并发编辑产生冲突，不覆盖新版本，保留确认文本。"},
+    {"id":"save-04","test":"conflict_retains_complete_review_after_restart_until_explicit_save_or_erasure","file":"crates/memivy-core/tests/memory_intelligence.rs","check":"完整融合审核稿在重启后仍可核对，不能仅保留短结论。"},
+    {"id":"save-05","test":"citations_bind_to_fixed_versions_and_deleted_sources_are_unavailable","file":"crates/memivy-core/tests/memory_data.rs","check":"引用固定版本，删除来源明确不可用。"},
+    {"id":"save-06","test":"discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance","file":"crates/memivy-core/tests/memory_data.rs","check":"删除会话不删除已经确认保存的结论。"},
+    {"id":"save-07","test":"cancelled_deleted_and_unknown_evidence_never_complete_late","file":"crates/memivy-core/tests/memory_discussion.rs","check":"取消、删除与不存在的来源阻止迟到回答。"},
+    {"id":"save-08","test":"concurrent_writers_deduplicate_and_only_one_edit_wins","file":"crates/memivy-core/tests/memory_data.rs","check":"并发写入去重，版本竞争只能成功一方。"}
+  ]
+}
