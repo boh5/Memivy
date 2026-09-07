@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 2;
+pub(super) const SCHEMA: i64 = 3;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -151,7 +151,18 @@ impl MemoryStore {
                 "../../../../migrations/memory/002_conversations.sql"
             ))?;
         }
+        if version < 3 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/003_workspace.sql"
+            ))?;
+        }
         tx.commit()?;
+        if !db
+            .prepare("SELECT 1 FROM sqlite_master WHERE name='record_fts' AND type='table'")?
+            .exists([])?
+        {
+            store.rebuild_search_index()?;
+        }
         Ok(store)
     }
     pub fn database_path(&self) -> PathBuf {

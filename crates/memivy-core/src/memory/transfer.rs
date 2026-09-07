@@ -142,6 +142,43 @@ impl MemoryStore {
         Ok(store)
     }
 
+    /// Export one saved record as a readable article, without its source/history
+    /// archive, other records, conversations, or unsubmitted editing drafts.
+    pub fn export_record_markdown(
+        &self,
+        key: &RecordKey,
+        expected_version: Option<&str>,
+        target: impl AsRef<Path>,
+    ) -> Result<()> {
+        let target = target.as_ref();
+        if !target.is_absolute()
+            || target
+                .extension()
+                .is_none_or(|e| !e.eq_ignore_ascii_case("md"))
+        {
+            return Err(DataError::Invalid);
+        }
+        let detail = self.library_detail(key)?;
+        if detail.state != "active" {
+            return Err(DataError::Unavailable);
+        }
+        if detail.current.as_ref().map(|v| v.id.as_str()) != expected_version {
+            return Err(DataError::Conflict);
+        }
+        let title = detail.title.lines().collect::<Vec<_>>().join(" ");
+        let content = format!("# {title}\n\n{}\n", detail.body);
+        let parent = target.parent().ok_or(DataError::Invalid)?;
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        file.as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(content.as_bytes())?;
+        file.as_file().sync_all()?;
+        // The native save panel handles confirmation before replacing a file.
+        file.persist(target).map_err(|_| DataError::Io)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    }
+
     /// Markdown contains active records, all their versions and source metadata.
     /// Conversations are a separate file and never become searchable memories.
     /// Trash and erased content are excluded; the database backup includes trash.

@@ -1,6 +1,6 @@
 # Memivy 技术栈与架构方案
 
-状态：沿用已验证技术基础；2026-09-06 阶段 2 核心数据层已实现，验证记录见开发计划；原生界面仍使用隔离样机
+状态：沿用已验证技术基础；2026-09-06 阶段 3 首页与记忆库已接入正式数据层，实际验证见开发计划
 依据：[PRD.md](PRD.md)，技术选型研究日期 2026-09-04，产品方向同步日期 2026-09-06
 
 原阶段 1 于 2026-09-06 验收通过。此后用户另行授权在现有样机中实现悬浮助手和最小记忆讨论闭环，作为阶段 1 第二版；原验收结论保留。模型配置与原生焦点问题修复后，用户于同日确认所给检查清单全部通过，第二版完成用户手工验收。实际测试范围、后续实施顺序与授权状态见 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)。
@@ -9,7 +9,9 @@
 
 悬浮拖动实验覆盖整个图标及展开后的标题区；WebView 使用 pointer capture 区分点击与拖动，Rust 读取系统鼠标和窗口的物理坐标来移动原生窗口，不依赖跨 WebView IPC 后的旧鼠标事件。拖动不触发展开，短点击才进入输入状态；实际手感和跨屏行为仍按原生验收记录核对。
 
-阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。原生样机和现有 MCP 仍调用独立的 Phase 1 Store，未迁移样机数据、未切换用户正在试用的界面。正式数据层没有模型调用，后续 UI 与 MCP 接入这套接口。
+阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。已验收样机保留在 `prototype.rs` / `Prototype.tsx`，用 `npm run dev:prototype` 启动，继续与现有 MCP 使用独立 Phase 1 Store。没有自动迁移样机数据。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。桌面助手、自动 AI 整理和正式 MCP 接入仍在后续阶段。
+
+正式讨论使用 `MemoryStore::start_turn` 持久化问题与等待状态，再通过已有 `model::complete` 做检索词提取和回答两次请求。答案请求前冻结至多 8 份版本/原话节选，回答只允许引用这批依据；近期对话取最近 8 条消息、各至多 1000 字，作为讨论上下文。取消和重启恢复都以持久化状态阻止迟到完成。讨论输入及选定依据单独存为草稿，不加入记忆检索；结论必须经文字与目的地确认后调用 `save_conclusion`。正常正式配置缺失时可一次性沿用旧样机已有的本机模型配置，显式测试数据/配置覆盖不会读取用户旧配置。
 
 ## 1. 结论
 
@@ -162,7 +164,7 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 
 PRD 决定 MVP 不使用 embedding，但 FTS5 默认 `unicode61` 对连续中文文本不够好。使用 FTS5 `trigram` tokenizer，让连续三个 Unicode 字符形成索引，支持中文和英文子串匹配。少于三个字符的查询使用 `instr` 做字面匹配，避免把 `%`、`_` 当作通配符；结果数量有上限，短词扫描的工作量不等同于结果上限。[SQLite FTS5 trigram](https://www.sqlite.org/fts5.html#the_trigram_tokenizer)
 
-阶段 2 的 `record_fts` 是一个随原话和版本写入维护的派生索引；永久删除正文时同步移除索引项，启用 FTS secure-delete。普通检索只返回有效的当前版本与未归属原话，聊天不入索引。当前按更新时间排序；标题权重、来源/时间/项目过滤和索引重建入口留在阶段 3。
+阶段 2 的 `record_fts` 是一个随原话和版本写入维护的派生索引；永久删除正文时同步移除索引项，启用 FTS secure-delete。普通检索只返回有效的当前版本与未归属原话，聊天不入索引。阶段 3 的 `library()` 在限量前执行来源/项目/更新时间过滤，按标题命中权重与更新时间排序并分页；短词按字面匹配，SQLite progress handler 将查询限制在约 500ms 执行预算内。来源命中返回原文片段，独立删除的原话不借记忆重新暴露。设置提供事务性索引重建，启动时也会重建缺失的 FTS 表。`003_workspace.sql` 将 schema 升至 3，编辑草稿单独落表，不进入搜索、MCP 或 Markdown；内容提交仍走版本/回执/乐观并发检查。
 
 数据量在个人 MVP 阶段很小，优先采用一个 trigram 索引，不同时维护中英文两套索引。标题、当前记忆、原话、URL 和 AI 检索词可设置不同权重。关键词搜索与 MCP `memory_search` 不调用模型；应用内问答可以调用模型提取检索词，再复用这层检索，见第 7 节。
 
@@ -174,12 +176,14 @@ Mac MVP 只有一份本机 `memivy.db`，不提供多设备自动同步。
 
 因此 MVP：
 
-- 提供记忆、原始输入、历史版本与来源的 Markdown 导出，会话单独标识导出；
+- 日常导出位于单篇记忆页，生成该篇标题与当前正文的一个 Markdown 文件；编辑草稿需先保存；不从设置导出整库、历史或会话；
 - 提供由 SQLite backup API 或 `VACUUM INTO` 生成的一致性备份；
 - 只有应用及 MCP 等写入进程全部停止时，才把直接复制完整数据库文件描述为安全操作；
 - 不做跨设备合并、CRDT、WebDAV 或云盘同步。
 
-阶段 2 使用 SQLite backup API，分步备份并限制总等待时间，完成后校验、同步文件，以不覆盖已有目标的方式发布；恢复只接受新的空目录，不替换运行中的数据库。Markdown 导出在同一读快照内生成 `captures.md`、`memories.md`、`conversations.md`，包含有效记忆的全部历史和来源，回收站内容不进入 Markdown。`manifest.json` 最后写入，作为导出完成标记；完整数据库备份包含回收站和会话，但不含独立模型配置及 MCP 开关。[SQLite backup API](https://www.sqlite.org/backup.html)
+阶段 2 使用 SQLite backup API，分步备份并限制总等待时间，完成后校验、同步文件，以不覆盖已有目标的方式发布；恢复只接受新的空目录，不替换运行中的数据库。阶段 2 已验证的数据迁移辅助接口在同一读快照内生成 `captures.md`、`memories.md`、`conversations.md`，包含有效记忆的全部历史和来源，回收站内容不进入 Markdown。`manifest.json` 最后写入，作为导出完成标记；完整数据库备份包含回收站和会话，但不含独立模型配置及 MCP 开关。[SQLite backup API](https://www.sqlite.org/backup.html)
+
+2026-09-06 用户进一步明确导出只针对单篇：正式 UI 移除整库 `library_export` 命令及设置入口，改用记忆页折叠“更多”菜单的 `memory_export`。原生文件保存面板默认以标题命名 `.md` 文件，由 `MemoryStore::export_record_markdown` 核对所见版本并写入该篇标题与当前正文。文件先写临时文件再原子发布，取消不写入，陈旧版本/回收站内容拒绝导出；其余记忆、原话附件、历史、草稿和会话不混入该文件。阶段 2 的迁移辅助接口与数据库备份保留在核心层，不是正式 UI 的日常导出入口。
 
 若未来确认必须跨设备共享记忆，需要单独设计“逻辑变更同步”，不能同步活动数据库文件。
 

@@ -255,9 +255,27 @@ impl MemoryStore {
             .collect::<rusqlite::Result<_>>()?;
         ids.iter().map(|id| message(&db, id)).collect()
     }
+    pub fn recent_messages(
+        &self,
+        conversation: &str,
+        before_seq: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<Message>> {
+        let mut connection = self.connection()?;
+        let db = connection.transaction()?;
+        let mut ids:Vec<String>=db.prepare("SELECT id FROM messages WHERE conversation_id=?1 AND (?2 IS NULL OR seq<?2) ORDER BY seq DESC LIMIT ?3")?.query_map(params![conversation,before_seq,limit.clamp(1,100) as i64],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        ids.reverse();
+        ids.iter().map(|id| message(&db, id)).collect()
+    }
     pub fn delete_conversation(&self, conversation: &str) -> Result<()> {
-        self.connection()?
-            .execute("DELETE FROM conversations WHERE id=?", [conversation])?;
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "DELETE FROM workspace_drafts WHERE key=?",
+            [format!("discussion:{conversation}")],
+        )?;
+        tx.execute("DELETE FROM conversations WHERE id=?", [conversation])?;
+        tx.commit()?;
         Ok(())
     }
     /// Explicit reviewed intent, exact text and destination. A stale/deleted

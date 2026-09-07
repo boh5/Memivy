@@ -6,6 +6,11 @@ Memivy is a local-first, open-source, AI-native personal memory tool built aroun
 
 After reviewing the Phase 2 research and plan on 2026-09-06, the user said “好，做吧”, authorizing the core data layer and the proposed trash semantics. The formal core is `memivy_core::memory::MemoryStore`; the native prototype and its MCP still use the isolated Phase 1 Store. Phase 2 does not approve later UI or Agent milestones. Keep actual verification in DEVELOPMENT_PLAN.md.
 
+
+On 2026-09-06 the user authorized Phase 3 with “好，实现吧”, after choosing a compact list with a wide reading pane and clarifying that the current dev source is the visual baseline. Preserve that source's home layout, Miro styles and brand; this scoped authorization does not require rebuilding or approving the older HTML Demo. The default native entry now uses formal MemoryStore data. The accepted prototype remains available through `npm run dev:prototype` with its separate Phase 1 Store; its MCP is unchanged. Formal AI/Q&A, the companion and MCP integration remain later milestones. This is implementation authorization, not user acceptance of the delivered Phase 3 build.
+
+Later in the same session the user explicitly rejected hiding the previously working “问一问” and memory-level discussion during the formal-store switch. Restore those real discussion flows on MemoryStore, including citations, cancellation/retry, continuation and reviewed conclusion saving; do not disable them just because their broader milestone was originally later. The companion, automatic AI organization and formal MCP remain separately scoped. Export is a low-frequency single-article action in the memory page’s collapsed More menu, never a prominent toolbar action or whole-library export in Settings.
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.
@@ -56,13 +61,15 @@ On 2026-09-06 the user accepted Phase 1 with its recorded evidence limits; do no
 Run from the repository root. Phase 1 was built with Node 24.12.0, Rust 1.98.1, and macOS 26.6.2 on Apple Silicon with Xcode Command Line Tools. `rust-toolchain.toml`, `Cargo.lock`, and `package-lock.json` pin the tested toolchain and dependency graph.
 
 - Install frontend dependencies: `npm install` (the sandbox run used `npm --cache /private/tmp/memivy-npm-cache install`).
+- Start the formal native dev app: `npm run dev:app` (Vite is started by Tauri). `npm run dev` alone is a read-only browser preview. Use `npm run dev:prototype` for the accepted isolated prototype.
 - Check and build frontend: `npm run build`.
 - Check Rust: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --offline -- -D warnings`.
 - Test core behavior: `cargo test --workspace --offline`.
 - Build test harnesses: `cargo build -p memivy-core --example probe --offline` and `cargo build -p memivy-mcp --offline`; then run `python3 scripts/verify_phase1.py` for actual process/stdio tests.
-- Build a local native test bundle: `npm run tauri build -- --debug --bundles app`. Ensure `~/.cargo/bin` is in `PATH`; this session used `PATH=/Users/bo/.cargo/bin:$PATH` before the command. The output is `target/debug/bundle/macos/Memivy Phase 1.app` and is not a signed release.
-- The default isolated database is `~/Library/Application Support/com.memivy.phase1/phase1.sqlite3`. `MEMIVY_PHASE1_DATA_DIR` overrides its absolute directory for test runs; UI and MCP must use the same value. Current manual QA uses ignored `research/runtime/`. MCP defaults off.
+- Build a local native test bundle: `npm run tauri build -- --debug --bundles app`. Ensure `~/.cargo/bin` is in `PATH`; this session used `PATH=/Users/bo/.cargo/bin:$PATH` before the command. The current default output is `target/debug/bundle/macos/Memivy.app` and is not a signed release. Use `MEMIVY_DATA_DIR` for isolated formal UI tests; do not reuse Phase 1 data.
+- The Phase 1 isolated database is `~/Library/Application Support/com.memivy.phase1/phase1.sqlite3`. `MEMIVY_PHASE1_DATA_DIR` overrides its absolute directory for test runs; UI and MCP must use the same value. Current manual QA uses ignored `research/runtime/`. MCP defaults off.
 - Model probe: `target/debug/examples/probe model /absolute/path/to/private-config.json`. The file must be outside the repository, mode `0600`, and contain `base_url`, `model`, and optional `api_key`. The base URL includes the API prefix such as `/v1`; the probe appends `/chat/completions`. It sends synthetic text only and performs no memory writes.
+- Formal library regression tests: `cargo test -p memivy-core --test memory_library --offline`; covers ranking, filters, drafts, versions, trash and index rebuild.
 - Phase 2 core tests: `cargo test -p memivy-core --test memory_data --offline`. Build the process harness with `cargo build -p memivy-core --example memory_probe --offline`, then run `python3 scripts/verify_phase2.py`. These use temporary synthetic data; the formal default is `~/Library/Application Support/com.memivy.app/memivy.db`, separate from Phase 1. Backup restore accepts only a fresh empty directory.
 
 Commands above require dependencies to have been fetched before using `--offline`. The Phase 1 capture host now uses `src-tauri/src/capture_panel.rs` and a commit-pinned `tauri-nspanel` dependency; run all native panel operations on the main thread. Its diagnostic delayed entry exercises window behavior, not physical global-hotkey delivery. See the Phase 1 verification record in `DEVELOPMENT_PLAN.md` for actual results and outstanding native/model checks; do not infer full acceptance from a successful build.

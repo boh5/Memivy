@@ -3,11 +3,14 @@
 //! No method calls a model. Network work must happen outside database transactions.
 mod conversations;
 mod db;
+mod discussion;
+mod library;
 mod records;
 mod transfer;
 mod types;
 
 pub use db::MemoryStore;
+pub use library::*;
 pub use types::*;
 
 /// Display and Debug deliberately omit SQL, paths, content and provider errors.
@@ -33,6 +36,8 @@ pub enum DataError {
     Integrity,
     #[error("目标已存在，请选择新的导出或恢复位置")]
     DestinationExists,
+    #[error("这个词匹配范围太大，请增加关键词或缩小时间范围")]
+    SearchBudget,
 }
 impl From<std::io::Error> for DataError {
     fn from(_: std::io::Error) -> Self {

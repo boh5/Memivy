@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Memivy",
+  "productName": "Memivy Phase 1",
   "version": "0.1.0",
-  "identifier": "com.memivy.app",
+  "identifier": "com.memivy.phase1",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -13,11 +13,28 @@
     "windows": [
       {
         "label": "main",
-        "title": "Memivy",
+        "title": "Memivy · 交互样机 v2",
         "width": 1140,
         "height": 790,
         "minWidth": 760,
         "minHeight": 560,
+        "acceptFirstMouse": true,
+        "url": "index.html?prototype=1"
+      },
+      {
+        "label": "capture",
+        "title": "Memivy · 桌面助手",
+        "url": "index.html?prototype=1&window=capture",
+        "width": 72,
+        "height": 76,
+        "visible": false,
+        "focus": false,
+        "transparent": true,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
         "acceptFirstMouse": true
       }
     ],

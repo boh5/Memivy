@@ -712,6 +712,10 @@ impl MemoryStore {
     }
 }
 fn erase_capture(db: &Connection, capture: &str) -> Result<()> {
+    db.execute(
+        "DELETE FROM workspace_drafts WHERE key=?",
+        [format!("capture:{capture}")],
+    )?;
     let state: String = db.query_row(
         "SELECT availability FROM capture_state WHERE capture_id=?",
         [capture],
@@ -744,6 +748,10 @@ fn erase_capture(db: &Connection, capture: &str) -> Result<()> {
     Ok(())
 }
 fn erase_memory(db: &Connection, memory: &str) -> Result<()> {
+    db.execute(
+        "DELETE FROM workspace_drafts WHERE key=?",
+        [format!("memory:{memory}")],
+    )?;
     db.execute(
         "UPDATE memory_versions SET title=NULL,body=NULL WHERE memory_id=?",
         [memory],
