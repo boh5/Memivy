@@ -125,8 +125,13 @@ impl MemoryStore {
     }
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         private_dir(root.as_ref())?;
+        let _guard = super::access::root_lock(root.as_ref(), false)?;
+        super::access::available(root.as_ref())?;
+        Self::open_unlocked(root.as_ref())
+    }
+    pub(super) fn open_unlocked(root: &Path) -> Result<Self> {
         let store = Self {
-            root: fs::canonicalize(root.as_ref())?,
+            root: fs::canonicalize(root)?,
         };
         let mut db = connect(&store.database_path(), true)?;
         // Reject unrelated/newer databases before changing their journal or schema.

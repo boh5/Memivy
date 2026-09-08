@@ -15,6 +15,7 @@ pub(crate) struct Workspace {
     pub(crate) store: MemoryStore,
     config: PathBuf,
     config_lock: Mutex<()>,
+    pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
     pub(crate) exiting: AtomicBool,
     tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
@@ -576,6 +577,17 @@ async fn library_rebuild(
     blocking(move || s.rebuild_search_index()).await
 }
 #[tauri::command]
+async fn memory_related(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    memory_id: String,
+    expected_version: String,
+) -> HostResult<Vec<RelatedMemory>> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.related_memories(&memory_id, &expected_version)).await
+}
+#[tauri::command]
 async fn memory_export(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
@@ -744,7 +756,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             }
         }))
         .setup(|app| {
-            let store = MemoryStore::open_environment()?;
+            let store = MemoryStore::open_application(MemoryStore::environment_root()?)?;
             let config = std::env::var_os("MEMIVY_MODEL_CONFIG")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.model_config_path());
@@ -770,6 +782,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 store,
                 config,
                 config_lock: Mutex::new(()),
+                restore_request: Mutex::new(None),
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
             });
@@ -812,6 +825,12 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             library_action,
             library_rebuild,
             memory_export,
+            memory_related,
+            crate::backup::backup_create,
+            crate::backup::backup_prepare,
+            crate::backup::backup_discard,
+            crate::backup::backup_restore,
+            crate::backup::backup_result,
             workspace_settings,
             workspace_configure,
             workspace_test_model,

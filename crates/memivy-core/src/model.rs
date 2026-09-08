@@ -102,15 +102,84 @@ pub async fn complete(
     name: &str,
     schema: serde_json::Value,
 ) -> Result<serde_json::Value, ProbeError> {
+    let choice = request(config, messages, json!({
+        "response_format":{"type":"json_schema","json_schema":{"name":name,"strict":true,"schema":schema}}
+    })).await?;
+    if choice["finish_reason"] != "stop" {
+        return Err(ProbeError::InvalidResponse);
+    }
+    serde_json::from_str(
+        choice["message"]["content"]
+            .as_str()
+            .ok_or(ProbeError::InvalidResponse)?,
+    )
+    .map_err(|_| ProbeError::InvalidResponse)
+}
+
+/// A single proposed call; only the domain layer may validate and execute it.
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+pub async fn call_function(
+    config: &ModelConfig,
+    messages: serde_json::Value,
+    tools: serde_json::Value,
+) -> Result<FunctionCall, ProbeError> {
+    let choice = request(
+        config,
+        messages,
+        json!({
+            "tools":tools,"tool_choice":"required","parallel_tool_calls":false
+        }),
+    )
+    .await?;
+    if choice["finish_reason"] != "tool_calls" {
+        return Err(ProbeError::InvalidResponse);
+    }
+    let calls = choice["message"]["tool_calls"]
+        .as_array()
+        .ok_or(ProbeError::InvalidResponse)?;
+    if calls.len() != 1 || calls[0]["type"] != "function" {
+        return Err(ProbeError::InvalidResponse);
+    }
+    let f = &calls[0]["function"];
+    Ok(FunctionCall {
+        name: f["name"]
+            .as_str()
+            .ok_or(ProbeError::InvalidResponse)?
+            .into(),
+        arguments: serde_json::from_str(
+            f["arguments"].as_str().ok_or(ProbeError::InvalidResponse)?,
+        )
+        .map_err(|_| ProbeError::InvalidResponse)?,
+    })
+}
+
+async fn request(
+    config: &ModelConfig,
+    messages: serde_json::Value,
+    options: serde_json::Value,
+) -> Result<serde_json::Value, ProbeError> {
     let (url, _) = config.endpoint()?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
+    // Reuse the HTTP connection pool. Credentials remain per request, never defaults.
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, reqwest::Error>> =
+        std::sync::OnceLock::new();
+    let client = CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(90))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+        })
+        .as_ref()
         .map_err(|_| ProbeError::Network)?;
     let mut body = json!({"model":config.model,"messages":messages,"stream":false,
-        "temperature":0.2,"max_tokens":2500,
-        "response_format":{"type":"json_schema","json_schema":{"name":name,"strict":true,"schema":schema}}});
+        "temperature":0.2,"max_tokens":2500});
+    body.as_object_mut()
+        .unwrap()
+        .extend(options.as_object().unwrap().clone());
     if config.disable_reasoning {
         body["reasoning_effort"] = json!("none");
     }
@@ -129,22 +198,22 @@ pub async fn complete(
         }
         bytes.extend_from_slice(&chunk);
     }
-    let response: serde_json::Value =
+    let mut response: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| ProbeError::InvalidResponse)?;
-    let choice = &response["choices"][0];
-    if choice["finish_reason"] != "stop"
-        || choice["message"]["refusal"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
+    let choices = response["choices"]
+        .as_array_mut()
+        .ok_or(ProbeError::InvalidResponse)?;
+    if choices.len() != 1 {
+        return Err(ProbeError::InvalidResponse);
+    }
+    let choice = choices.remove(0);
+    if choice["message"]["refusal"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
     {
         return Err(ProbeError::InvalidResponse);
     }
-    serde_json::from_str(
-        choice["message"]["content"]
-            .as_str()
-            .ok_or(ProbeError::InvalidResponse)?,
-    )
-    .map_err(|_| ProbeError::InvalidResponse)
+    Ok(choice)
 }
 
 #[derive(Deserialize)]

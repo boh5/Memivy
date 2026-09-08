@@ -522,7 +522,7 @@ fn register(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
             "快捷键注册失败，可能已被其他应用占用。请修改快捷键；菜单栏入口仍可使用。".into()
         })
 }
-fn set_error(app: &tauri::AppHandle, error: String) {
+pub(crate) fn set_error(app: &tauri::AppHandle, error: String) {
     app.state::<Desktop>().inner.lock().unwrap().error = Some(error);
     publish(app);
 }
@@ -766,7 +766,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     publish(app);
     Ok(())
 }
-async fn on_main<T: Send + 'static>(
+pub(crate) async fn on_main<T: Send + 'static>(
     app: &tauri::AppHandle,
     work: impl FnOnce(tauri::AppHandle) -> HostResult<T> + Send + 'static,
 ) -> HostResult<T> {
@@ -1161,6 +1161,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
             };
             if let Some(waiting) = waiting {
                 termination::reply(false);
+                crate::backup::cancel_restart(&app);
                 set_error(
                     &app,
                     "窗口尚未确认草稿保存，已取消退出。请核对草稿后重试。".into(),
@@ -1178,6 +1179,10 @@ pub fn request_quit(app: &tauri::AppHandle) {
 }
 
 fn finish_quit(app: &tauri::AppHandle) {
+    if crate::backup::finish_restart(app) {
+        termination::reply(false);
+        return;
+    }
     app.state::<Workspace>()
         .exiting
         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1348,22 +1353,14 @@ pub async fn desktop_exit_ready(
         let quit = {
             let d = h.state::<Desktop>();
             let mut s = d.inner.lock().unwrap();
-            let Some((token, remaining)) = &mut s.quit else {
+            let Some(done) = acknowledge_exit(&mut s.quit, id, window.label(), error) else {
                 return Ok(());
             };
-            if *token != id {
-                return Ok(());
-            }
-            if error {
-                s.quit = None;
-                false
-            } else {
-                remaining.remove(window.label());
-                remaining.is_empty()
-            }
+            done
         };
         if error {
             termination::reply(false);
+            crate::backup::cancel_restart(&h);
             set_error(
                 &h,
                 "请先完成当前对话框或核对未保存的草稿，再退出 Memivy。".into(),
@@ -1379,4 +1376,39 @@ pub async fn desktop_exit_ready(
         Ok(())
     })
     .await
+}
+
+// Consume each window acknowledgement once, including during asynchronous restore arming.
+fn acknowledge_exit(
+    quit: &mut Option<(u64, HashSet<String>)>,
+    id: u64,
+    window: &str,
+    error: bool,
+) -> Option<bool> {
+    let (token, remaining) = quit.as_mut()?;
+    if *token != id || !remaining.remove(window) {
+        return None;
+    }
+    let done = remaining.is_empty() && !error;
+    if error || done {
+        *quit = None;
+    }
+    Some(done)
+}
+#[cfg(test)]
+mod exit_ack_tests {
+    use super::*;
+    #[test]
+    fn duplicate_or_late_acknowledgements_cannot_exit_during_restore_arming() {
+        let mut quit = Some((7, HashSet::from(["main".into(), "capture".into()])));
+        assert_eq!(acknowledge_exit(&mut quit, 6, "main", false), None);
+        assert_eq!(acknowledge_exit(&mut quit, 7, "main", false), Some(false));
+        assert_eq!(acknowledge_exit(&mut quit, 7, "main", false), None);
+        assert_eq!(acknowledge_exit(&mut quit, 7, "capture", false), Some(true));
+        assert_eq!(acknowledge_exit(&mut quit, 7, "capture", false), None);
+        assert!(quit.is_none());
+        quit = Some((8, HashSet::from(["main".into()])));
+        assert_eq!(acknowledge_exit(&mut quit, 8, "main", true), Some(false));
+        assert!(quit.is_none());
+    }
 }

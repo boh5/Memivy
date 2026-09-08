@@ -3,9 +3,8 @@ use super::{db::*, *};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::Write,
-    os::unix::fs::OpenOptionsExt,
     time::{Duration, Instant},
 };
 
@@ -45,49 +44,19 @@ pub struct McpSearchResult {
     pub notice: &'static str,
 }
 
-// File locks are cross-process. Releasing the exclusive switch lock is the
-// boundary after which no new data request can pass an old enabled value.
-fn lock(file: &File, exclusive: bool) -> Result<()> {
-    let start = Instant::now();
-    loop {
-        let result = if exclusive {
-            file.try_lock()
-        } else {
-            file.try_lock_shared()
-        };
-        match result {
-            Ok(()) => return Ok(()),
-            Err(std::fs::TryLockError::WouldBlock)
-                if start.elapsed() < Duration::from_millis(750) =>
-            {
-                std::thread::sleep(Duration::from_millis(10))
-            }
-            Err(std::fs::TryLockError::WouldBlock) => return Err(DataError::Busy),
-            Err(_) => return Err(DataError::Io),
-        }
-    }
-}
 impl MemoryStore {
-    pub fn open_environment() -> Result<Self> {
-        match std::env::var_os("MEMIVY_DATA_DIR") {
-            Some(path) => Self::open(std::path::PathBuf::from(path)),
-            None => Self::open_default(),
+    pub fn environment_root() -> Result<std::path::PathBuf> {
+        if let Some(path) = std::env::var_os("MEMIVY_DATA_DIR") {
+            return Ok(path.into());
         }
+        let home = std::env::var_os("HOME").ok_or(DataError::Invalid)?;
+        Ok(std::path::PathBuf::from(home).join("Library/Application Support/com.memivy.app"))
+    }
+    pub fn open_environment() -> Result<Self> {
+        Self::open(Self::environment_root()?)
     }
     fn mcp_lock(&self, exclusive: bool) -> Result<File> {
-        let path = self.root.join("mcp.lock");
-        if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file()) {
-            return Err(DataError::Invalid);
-        }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)?;
-        lock(&file, exclusive)?;
-        Ok(file)
+        super::access::root_lock(&self.root, exclusive)
     }
     pub fn mcp_enabled(&self) -> bool {
         let path = self.root.join("mcp.json");
@@ -120,6 +89,7 @@ impl MemoryStore {
     }
     fn mcp_guard(&self) -> Result<File> {
         let guard = self.mcp_lock(false)?;
+        super::access::available(&self.root)?;
         if !self.mcp_enabled() {
             return Err(DataError::McpDisabled);
         }

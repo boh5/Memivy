@@ -18,12 +18,7 @@ type Fixture = (
     std::thread::JoinHandle<()>,
 );
 fn fixture(block_answer: bool, unknown: bool) -> Fixture {
-    fixture_answer(
-        block_answer,
-        unknown,
-        json!({"queries":["桌面体验"],"historical":false}),
-        None,
-    )
+    fixture_answer(block_answer, unknown, json!({"queries":["桌面体验"]}), None)
 }
 fn fixture_answer(
     block_answer: bool,
@@ -292,7 +287,7 @@ async fn evidence_uses_matching_unicode_excerpt_and_preserves_history_identity()
     let (config, requests, _, _, server) = fixture_answer(
         false,
         false,
-        json!({"queries":["关键目标","桌面体验"],"historical":true}),
+        json!({"queries":["关键目标","桌面体验"]}),
         Some(
             json!({"recollections":[{"text":"当前目标包括快捷入口。","sources":["M1"]}],"ideas":"","conclusion":""}),
         ),
@@ -361,7 +356,7 @@ async fn no_evidence_and_uncited_recollections_are_distinct() {
         let (config, _, _, _, server) = fixture_answer(
             false,
             false,
-            json!({"queries":["海岛"],"historical":false}),
+            json!({"queries":["海岛"]}),
             Some(json!({"recollections":sources,"ideas":"","conclusion":""})),
         );
         let result = store.answer_discussion(&config, &topic, &turn, &[]).await;
@@ -423,11 +418,11 @@ async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
         let turn = store
             .start_turn(&id(), &topic, "木桥项目怎么收费？", &[])
             .unwrap();
-        let alias = if raw_only { "M2" } else { "M1" };
+        let alias = "M1";
         let (config, requests, _, _, server) = fixture_answer(
             false,
             false,
-            json!({"queries":["木桥","收费"],"historical":false}),
+            json!({"queries":["木桥","收费"]}),
             Some(
                 json!({"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""}),
             ),

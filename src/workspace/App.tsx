@@ -18,6 +18,7 @@ import {
   type Topic,
   type Receipt,
   type Detail,
+  type Source,
   uid,
 } from "./api";
 import { Empty, ErrorNotice, Highlight } from "./components";
@@ -37,6 +38,22 @@ export default function App() {
     const root = document.querySelector<HTMLElement>(".formal-app");
     if (native && root) return installClickRecovery(root);
   }, []);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState("");
+  useEffect(() => {
+    if (!native) return;
+    void call<{ message: string; previous_backup: string | null } | null>("backup_result")
+      .then(result => { if (result) setRestoreNotice(result.message + (result.previous_backup ? ` 副本：${result.previous_backup}` : "")); })
+      .catch(e => setRestoreNotice(errorText(e)));
+    const off = listen("restore-cancelled", () => setRestoreNotice("恢复已取消，当前记忆库保留。请核对窗口提示后重试。"));
+    return () => { void off.then(f => f()); };
+  }, []);
+  useEffect(() => {
+    if (!restoreId) return;
+    setRestoreId(null);
+    setRestoreNotice("正在保存草稿并准备重启恢复…");
+    void call("backup_restore", { id: restoreId }).catch(e => setRestoreNotice(errorText(e)));
+  }, [restoreId]);
   const [mode, setMode] = useState<"capture" | "ask">("capture");
   const [page, setPage] = useState<"home" | "library" | "trash" | "topic">(
       "home",
@@ -173,14 +190,14 @@ export default function App() {
     setPage("topic");
     refresh();
   }
-  async function discuss(detail: Detail) {
+  async function discuss(detail: Detail, related: Source[] = []) {
     const source = detail.current
       ? { kind: "version", id: detail.current.id }
       : { kind: "capture", id: detail.key.id };
     const t = await call<Topic>("discussion_open", {
       id: uid(),
       title: detail.title,
-      context: [source],
+      context: [source, ...related],
     });
     setTopic(t);
     setPage("topic");
@@ -278,6 +295,7 @@ export default function App() {
   const filtering = !!(query || origin || project || since || until);
   return (
     <div className="app-shell formal-app">
+      {restoreNotice && <div className="restore-notice" role="status">{restoreNotice}<button aria-label="关闭恢复提示" onClick={() => setRestoreNotice("")}>×</button></div>}
       <aside className="sidebar">
         <div className="brand">
           <img src={logo} alt="Memivy" />
@@ -687,6 +705,7 @@ export default function App() {
         <SettingsPanel
           onClose={() => setSettingsOpen(false)}
           onChanged={() => refresh()}
+          onRestore={id => { setSettingsOpen(false); setRestoreId(id); }}
         />
       )}
     </div>

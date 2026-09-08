@@ -1,3 +1,4 @@
+mod backup;
 mod capture_panel;
 mod desktop;
 mod mcp;

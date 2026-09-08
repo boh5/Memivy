@@ -17,6 +17,8 @@ On 2026-09-07, the user confirmed the Phase 5 research decisions: automatic cont
 
 On 2026-09-07, after Phase 6 research and review, the user explicitly authorized implementation ("好，实现它"). The approved scope is standard local stdio MCP with only `memory_capture` and `memory_search` on formal MemoryStore, a default-off master switch, bounded keyword search and provenance, settings/configuration/local diagnostics, and an Apple Silicon / macOS 26 development app and DMG. No client whitelist or per-client product integrations. The user has no Developer ID signing credentials: deliver ad-hoc signed, unnotarized development artifacts; defer Developer ID/notarization and record actual external beta evidence rather than claiming release acceptance. `memivy-mcp` is now the formal entry; the historical isolated MCP is explicitly `memivy-mcp-prototype`. Do not send beta invitations or messages without explicit authorization.
 
+On 2026-09-08 the user approved the five-point improvement plan and explicitly requested implementation, performance checks, and self-review. Scope: internal organization Function Calling, ordinary RAG prompt constraints, relevance retrieval across current/raw/historical evidence with timestamps (no separate time retrieval), up to three local related memories below the detail body, and manual whole-library backup/restore with an automatic pre-restore copy. Reuse the current architecture/UI; no embedding, extra verification model, generic Agent loop, merge restore, or additional MCP tools. Record actual results in DEVELOPMENT_PLAN.md; implementation authorization does not imply user acceptance.
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

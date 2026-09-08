@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { call, errorText, type Settings } from "./api";
 import { ErrorNotice, Modal } from "./components";
 import DesktopSettings from "./DesktopSettings";
+import BackupSettings from "./BackupSettings";
 import McpSettings from "./McpSettings";
 export default function SettingsPanel({
   onClose,
+  onRestore,
   onChanged,
 }: {
   onClose: () => void;
+  onRestore: (id: string) => void;
   onChanged: () => void;
 }) {
   const [settings, setSettings] = useState<Settings>({
@@ -23,6 +26,7 @@ export default function SettingsPanel({
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [mcpBusy, setMcpBusy] = useState(false),
+    [backupBusy, setBackupBusy] = useState(false),
     [rebuild, setRebuild] = useState(false),
     [ready, setReady] = useState(false),
     [unreadable, setUnreadable] = useState(false);
@@ -69,10 +73,11 @@ export default function SettingsPanel({
     <Modal
       title="设置"
       onClose={() => {
-        if (!busy && !mcpBusy) onClose();
+        if (!busy && !mcpBusy && !backupBusy) onClose();
       }}
     >
       <DesktopSettings />
+      <BackupSettings disabled={busy || mcpBusy} onBusyChange={setBackupBusy} onRestore={onRestore} />
       <section className="settings-section">
         <h3>本地数据</h3>
         <p>记忆和草稿保存在这台 Mac。记录、编辑、搜索和导出都不依赖模型。</p>
@@ -83,7 +88,7 @@ export default function SettingsPanel({
           </div>
           <button
             className="outline-button"
-            disabled={busy}
+            disabled={busy || backupBusy}
             onClick={() => setRebuild(true)}
           >
             重建索引
@@ -108,7 +113,7 @@ export default function SettingsPanel({
             aria-label="API 地址"
             placeholder="https://example.com/v1"
             value={settings.base_url}
-            disabled={busy || !ready}
+            disabled={busy || backupBusy || !ready}
             onChange={(e) =>
               setSettings((s) => ({ ...s, base_url: e.target.value }))
             }
@@ -120,7 +125,7 @@ export default function SettingsPanel({
             aria-label="模型名称"
             autoComplete="off"
             value={settings.model}
-            disabled={busy || !ready}
+            disabled={busy || backupBusy || !ready}
             onChange={(e) =>
               setSettings((s) => ({ ...s, model: e.target.value }))
             }
@@ -145,7 +150,7 @@ export default function SettingsPanel({
             <input
               type="checkbox"
               checked={clearKey}
-              disabled={busy}
+              disabled={busy || backupBusy}
               onChange={(e) => setClearKey(e.target.checked)}
             />
             清除已保存的 Key
@@ -155,7 +160,7 @@ export default function SettingsPanel({
           <input
             type="checkbox"
             checked={settings.disable_reasoning}
-            disabled={busy || !ready}
+            disabled={busy || backupBusy || !ready}
             onChange={(e) =>
               setSettings((s) => ({
                 ...s,
@@ -173,7 +178,7 @@ export default function SettingsPanel({
           <button
             className="send-button"
             disabled={
-              busy ||
+              busy || backupBusy ||
               !ready ||
               !settings.base_url.trim() ||
               !settings.model.trim()
@@ -190,7 +195,7 @@ export default function SettingsPanel({
           <button
             className="outline-button"
             disabled={
-              busy ||
+              busy || backupBusy ||
               !ready ||
               !settings.base_url.trim() ||
               !settings.model.trim()
@@ -227,14 +232,14 @@ export default function SettingsPanel({
           <div className="action-row">
             <button
               className="outline-button"
-              disabled={busy}
+              disabled={busy || backupBusy}
               onClick={() => setRebuild(false)}
             >
               取消
             </button>
             <button
               className="send-button"
-              disabled={busy}
+              disabled={busy || backupBusy}
               onClick={() =>
                 void run(async () => {
                   await call("library_rebuild");

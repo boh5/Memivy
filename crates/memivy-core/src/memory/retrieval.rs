@@ -1,5 +1,7 @@
 use super::*;
+use rusqlite::Connection;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 pub(super) struct RankedRow {
     pub row: LibraryRow,
@@ -12,16 +14,22 @@ pub(super) fn ranked(
     queries: &[String],
     limit: usize,
 ) -> Result<Vec<RankedRow>> {
+    let mut db = store.connection()?;
+    budget(&db)?;
+    let tx = db.transaction()?;
     let mut scores: HashMap<String, (f64, RankedRow)> = HashMap::new();
     for query in queries {
         if query.trim().is_empty() {
             continue;
         }
-        let page = store.library(&LibraryQuery {
-            query: query.clone(),
-            limit: 12,
-            ..Default::default()
-        })?;
+        let page = MemoryStore::library_in(
+            &tx,
+            &LibraryQuery {
+                query: query.clone(),
+                limit: 12,
+                ..Default::default()
+            },
+        )?;
         for (rank, row) in page.items.into_iter().enumerate() {
             let key = format!("{}:{}", row.key.kind, row.key.id);
             let score = 1.0 / (10.0 + rank as f64);
@@ -224,5 +232,137 @@ mod tests {
         .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].matched_captures, vec![fee.id, release.id]);
+    }
+}
+
+/// One deadline for the entire retrieval, including all terms and source reads.
+pub(super) fn budget(db: &Connection) -> Result<()> {
+    let started = Instant::now();
+    db.progress_handler(
+        1000,
+        Some(move || started.elapsed() > Duration::from_millis(250)),
+    )?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum VersionScope {
+    All,
+    Current,
+}
+pub(super) struct SourceHit {
+    pub source: SourceRef,
+    pub score: f64,
+    pub recorded_at: i64,
+}
+
+/// Query the existing FTS index first; read bodies only for bounded, visible hits.
+/// Short literals use a deadline-bounded scan because trigram cannot index them.
+pub(super) fn source_hits(
+    db: &Connection,
+    queries: &[String],
+    scope: VersionScope,
+) -> Result<Vec<SourceHit>> {
+    if queries.len() > 8 || queries.iter().any(|q| q.trim().is_empty() || q.len() > 120) {
+        return Err(DataError::Invalid);
+    }
+    let versions = match scope {
+        VersionScope::All => "1",
+        VersionScope::Current => "v.id=m.current_version_id",
+    };
+    let mut scores: HashMap<String, SourceHit> = HashMap::new();
+    let mut searched = std::collections::HashSet::new();
+    for query in queries {
+        let query = query.trim().to_lowercase();
+        if !searched.insert(query.clone()) {
+            continue;
+        }
+        let indexed = query.chars().count() >= 3;
+        let predicate = if indexed {
+            "record_fts MATCH ?1"
+        } else {
+            "instr(lower(record_fts.title||' '||record_fts.body||' '||record_fts.origin),?1)>0"
+        };
+        let rank = if indexed { "record_fts.rank" } else { "0.0" };
+        let sql = format!("SELECT record_fts.kind,record_fts.source_id,COALESCE(v.created_at,c.created_at),{rank}
+            FROM record_fts
+            LEFT JOIN memory_versions v ON record_fts.kind='version' AND v.id=record_fts.source_id
+            LEFT JOIN memories m ON m.id=v.memory_id
+            LEFT JOIN captures c ON record_fts.kind='capture' AND c.id=record_fts.source_id
+            LEFT JOIN capture_state cs ON cs.capture_id=c.id
+            WHERE {predicate} AND ((record_fts.kind='version' AND m.state='active' AND v.body IS NOT NULL AND {versions} AND v.id NOT IN (SELECT rc.after_version FROM receipt_changes rc JOIN receipts r ON r.request_id=rc.request_id WHERE r.status='undone'))
+                OR (record_fts.kind='capture' AND cs.availability='active' AND c.text IS NOT NULL))
+            ORDER BY 4,3 DESC,record_fts.source_id LIMIT 24");
+        let term = if indexed {
+            format!("\"{}\"", query.replace('"', "\"\""))
+        } else {
+            query
+        };
+        let rows: Vec<(String, String, i64)> = db
+            .prepare_cached(&sql)?
+            .query_map([term], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (rank, (kind, id, recorded_at)) in rows.into_iter().enumerate() {
+            let score = 1.0 / (10.0 + rank as f64);
+            let key = format!("{kind}:{id}");
+            scores
+                .entry(key)
+                .and_modify(|r| r.score += score)
+                .or_insert(SourceHit {
+                    source: if kind == "capture" {
+                        SourceRef::Capture(id)
+                    } else {
+                        SourceRef::Version(id)
+                    },
+                    score,
+                    recorded_at,
+                });
+        }
+    }
+    let mut hits: Vec<_> = scores.into_values().collect();
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(b.recorded_at.cmp(&a.recorded_at))
+            .then(a.source.parts().cmp(&b.source.parts()))
+    });
+    hits.truncate(32);
+    Ok(hits)
+}
+
+impl MemoryStore {
+    /// Ordinary RAG retrieval, including relevant historical versions.
+    pub fn discussion_sources(
+        &self,
+        queries: &[String],
+        pinned: &[SourceRef],
+    ) -> Result<Vec<SourceRef>> {
+        if pinned.len() > 4 || queries.len() > 4 {
+            return Err(DataError::Invalid);
+        }
+        let mut db = self.connection()?;
+        budget(&db)?;
+        let tx = db.transaction()?;
+        let hits = source_hits(&tx, queries, VersionScope::All)?;
+        let mut sources = Vec::new();
+        let mut text_seen = std::collections::HashSet::new();
+        for source in pinned
+            .iter()
+            .cloned()
+            .chain(hits.into_iter().map(|h| h.source))
+        {
+            if sources.contains(&source) {
+                continue;
+            }
+            let evidence = super::records::resolve_excerpt(&tx, &source, 1800, queries, None)?;
+            let fresh = text_seen.insert(evidence.text);
+            if fresh || pinned.contains(&source) {
+                sources.push(source);
+            }
+            if sources.len() == 8 {
+                break;
+            }
+        }
+        Ok(sources)
     }
 }

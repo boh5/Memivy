@@ -1,3 +1,4 @@
+import RelatedMemories from "./RelatedMemories";
 import OrganizationReceipt from "./OrganizationReceipt";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
@@ -10,6 +11,7 @@ import {
   sourceName,
   uid,
   type Detail,
+  type Source,
   type Draft,
   type Key,
   type Receipt,
@@ -180,7 +182,7 @@ export default function MemoryDetail({
   query: string;
   onChanged: (key?: Key, receipt?: Receipt) => void;
   onBack: () => void;
-  onDiscuss: (detail: Detail) => Promise<void>;
+  onDiscuss: (detail: Detail, related?: Source[]) => Promise<void>;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
@@ -469,9 +471,12 @@ export default function MemoryDetail({
                     }}
                   />
                 ) : (
-                  <div className="readable-text">
-                    <Highlight text={detail.body} query={query} />
-                  </div>
+                  <>
+                    <div className="readable-text"><Highlight text={detail.body} query={query} /></div>
+                    {!trashed && detail.current && <RelatedMemories
+                      key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
+                      revision={revision} onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
+                  </>
                 ))}
               {tab === "sources" && (
                 <div className="source-list">

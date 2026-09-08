@@ -121,3 +121,27 @@ async fn rejects_insecure_remote_or_credentials_in_url() {
         );
     }
 }
+
+#[tokio::test]
+async fn tool_responses_require_one_complete_function_call() {
+    use memivy_core::model::call_function;
+    use serde_json::json;
+    let call = json!({"type":"function","function":{"name":"create_memory","arguments":"{\"title\":\"模型标题\"}"}});
+    for (calls, finish, refusal, valid) in [
+        (json!([call]), "tool_calls", json!(null), true),
+        (json!([]), "tool_calls", json!(null), false),
+        (json!([call, call]), "tool_calls", json!(null), false),
+        (json!([call]), "length", json!(null), false),
+        (json!([call]), "stop", json!(null), false),
+        (json!([call]), "tool_calls", json!("refused"), false),
+    ] {
+        let response=json!({"choices":[{"finish_reason":finish,"message":{"tool_calls":calls,"refusal":refusal}}]}).to_string();
+        let (url, server) = endpoint(200, response, 0);
+        let result = call_function(&config(url), json!([]), json!([])).await;
+        server.join().unwrap();
+        assert_eq!(result.is_ok(), valid);
+        if let Ok(result) = result {
+            assert_eq!(result.arguments["title"], "模型标题");
+        }
+    }
+}

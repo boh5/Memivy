@@ -14,6 +14,14 @@ fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let root = args.get(1).ok_or(DataError::Invalid)?;
     let command = args.get(2).ok_or(DataError::Invalid)?;
+    if command == "open-application" {
+        let store = MemoryStore::open_application(root)?;
+        println!(
+            "{}",
+            serde_json::to_string(&store.last_restore_result()?).map_err(|_| DataError::Invalid)?
+        );
+        return Ok(());
+    }
     if command == "restore" {
         MemoryStore::restore_backup(args.get(3).ok_or(DataError::Invalid)?, root)?;
         return Ok(());
@@ -120,6 +128,16 @@ fn run() -> Result<()> {
                 serde_json::to_string(&r).map_err(|_| DataError::Invalid)?
             );
         }
+        "prepare-restore" => {
+            println!(
+                "{}",
+                serde_json::to_string(&store.prepare_restore(std::path::Path::new(
+                    args.get(3).ok_or(DataError::Invalid)?
+                ))?)
+                .map_err(|_| DataError::Invalid)?
+            )
+        }
+        "arm-restore" => store.arm_restore(args.get(3).ok_or(DataError::Invalid)?)?,
         "backup" => store.backup(PathBuf::from(args.get(3).ok_or(DataError::Invalid)?))?,
         "diagnostics" => {
             store.check_integrity()?;

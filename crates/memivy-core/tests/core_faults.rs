@@ -125,7 +125,7 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
         p.target = "M99".into();
         p.title = String::new();
         let (status,body)=match mode.as_str(){
-            "unknown_target"=>(200,json!({"choices":[{"finish_reason":"stop","message":{"content":serde_json::to_string(&p).unwrap()}}]}).to_string()),
+            "unknown_target"=>(200,json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"type":"function","function":{"name":"update_memory","arguments":json!({"target":p.target,"addition":p.addition,"changes":p.changes,"keywords":p.keywords,"reason":p.reason}).to_string()}}]}}]}).to_string()),
             "truncated"=>(200,json!({"choices":[{"finish_reason":"length","message":{"content":"{\"action\":"}}]}).to_string()),
             "empty"=>(200,json!({"choices":[]}).to_string()),
             "rate_limit"=>(429,KEY.into()),"server_error"=>(500,KEY.into()),"oversize"=>(200,"x".repeat(65537)),_=>panic!("unknown fixture mode")};

@@ -1,6 +1,7 @@
 //! Formal local data model, independent of the Phase 1 database and UI.
 //! All writes, including future UI/MCP writes, must pass through this module.
 //! Model requests are bounded and run outside database transactions.
+mod access;
 mod conversations;
 mod db;
 mod discussion;
@@ -8,6 +9,7 @@ mod library;
 mod mcp;
 mod organization;
 mod records;
+mod related;
 mod retrieval;
 mod transfer;
 mod types;
@@ -16,6 +18,8 @@ pub use db::MemoryStore;
 pub use library::*;
 pub use mcp::*;
 pub use organization::*;
+pub use related::*;
+pub use transfer::*;
 pub use types::*;
 
 /// Display and Debug deliberately omit SQL, paths, content and provider errors.
@@ -63,6 +67,11 @@ impl From<rusqlite::Error> for DataError {
                 Self::Busy
             }
             rusqlite::Error::QueryReturnedNoRows => Self::Unavailable,
+            rusqlite::Error::SqliteFailure(e, _)
+                if e.code == rusqlite::ErrorCode::OperationInterrupted =>
+            {
+                Self::SearchBudget
+            }
             _ => Self::Database,
         }
     }
