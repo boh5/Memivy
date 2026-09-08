@@ -1,3 +1,5 @@
+import MarkdownEditor from "./MarkdownEditor";
+import Markdown from "./Markdown";
 import { useEffect, useRef, useState } from "react";
 import { call, errorText, uid, type Detail, type Message, type Page, type Receipt, type Source, type Topic } from "./api";
 import { ErrorNotice, Modal } from "./components";
@@ -12,7 +14,7 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
   const [query, setQuery] = useState(""), [rows, setRows] = useState<Page["items"]>([]);
   const [target, setTarget] = useState<Detail | null>(null), [merged, setMerged] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [previewing, setPreviewing] = useState(false), [error, setError] = useState("");
-  const mergedField = useRef<HTMLTextAreaElement | null>(null);
+  const mergedField = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (merged !== null) mergedField.current?.scrollIntoView({ block: "center" }); }, [merged !== null]);
   const locked = useRef(false), attempt = useRef(uid()), generation = useRef(0), alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; generation.current++; }; }, []);
@@ -60,7 +62,7 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
   }
   return <Modal title="留下这段结论" onClose={() => { if (!busy) onClose(); }}>
     <p className="field-help">核对文字和去向后确认保存。讨论本身不会进入记忆库。</p>
-    <label className="discussion-field">要保存的结论<textarea rows={5} value={text} disabled={busy} onChange={e => { setText(e.target.value); changed(); }} /></label>
+    <MarkdownEditor label="要保存的结论" value={text} disabled={busy} onChange={value => { setText(value); changed(); }} />
     <label className="discussion-field">保存去向<select aria-label="结论保存去向" value={selection} disabled={busy} onChange={e => void select(e.target.value)}>
       <option value="">新建记忆</option>
       {target && !rows.some(r => r.key.id === target.key.id) && <option value={target.key.id}>{target.title}</option>}
@@ -71,12 +73,12 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
     <label className="discussion-field">{target ? "保存后的标题" : "标题"}<input value={title} disabled={busy} onChange={e => { setTitle(e.target.value); attempt.current = uid(); }} /></label>
     {target && <>
       <p className="field-help">默认把结论补充到「{target.title}」，保留原有正文。</p>
-      <details><summary>查看当前正文</summary><p className="readable-text">{target.body}</p></details>
+      <details><summary>查看当前正文</summary><Markdown text={target.body} /></details>
       <div className="action-row"><button className="outline-button" disabled={busy || previewing || !text.trim()} onClick={() => void preview()}>{previewing ? "正在生成融合预览…" : "预览融合成文"}</button>
         {(merged !== null || previewing) && <button className="quiet" disabled={busy} onClick={changed}>使用默认补充</button>}
       </div>
     </>}
-    {merged !== null && <label className="discussion-field">审核融合后的完整正文<textarea ref={mergedField} rows={10} value={merged} disabled={busy} onChange={e => { setMerged(e.target.value); attempt.current = uid(); }} /><span className="field-help">确认后按这里的文字保存，不再自动改写。</span></label>}
+    {merged !== null && <div ref={mergedField}><MarkdownEditor label="审核融合后的完整正文" value={merged} disabled={busy} onChange={value => { setMerged(value); attempt.current = uid(); }} /><p className="field-help">确认后按这里的文字保存，不再自动改写。</p></div>}
     <ErrorNotice text={error} />
     <div className="action-row"><button className="send-button" disabled={busy || previewing || !!(selection && !target) || !title.trim() || !text.trim() || merged?.trim() === ""} onClick={() => void save()}>{busy ? "保存中…" : merged !== null ? "确认融合并保存" : target ? "确认补充到记忆" : "确认保存新记忆"}</button><button className="outline-button" disabled={busy} onClick={onClose}>取消</button></div>
   </Modal>;

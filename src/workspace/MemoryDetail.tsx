@@ -1,3 +1,5 @@
+import MarkdownEditor from "./MarkdownEditor";
+import Markdown from "./Markdown";
 import RelatedMemories from "./RelatedMemories";
 import OrganizationReceipt from "./OrganizationReceipt";
 import { useEffect, useRef, useState } from "react";
@@ -39,15 +41,11 @@ function Editor({
     [discard, setDiscard] = useState(false),
     [latest, setLatest] = useState(false);
   const lock = useRef(false);
-  const bodyInput = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (draft.ready) bodyInput.current?.focus();
-  }, [draft.ready]);
   const conflict =
     draft.ready &&
     draft.value.expected_version !== (detail.current?.id || null);
   async function save() {
-    if (lock.current || !draft.ready) return;
+    if (lock.current || !draft.ready || conflict || !draft.value.body.trim() || !draft.value.title.trim()) return;
     lock.current = true;
     setBusy(true);
     setError("");
@@ -91,22 +89,8 @@ function Editor({
           onChange={(e) => draft.update({ title: e.target.value })}
         />
       </label>
-      <label>
-        当前内容
-        <textarea
-          ref={bodyInput}
-          aria-label="编辑记忆内容"
-          value={draft.value.body}
-          disabled={!draft.ready || busy}
-          onChange={(e) => draft.update({ body: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.metaKey && e.key === "s") {
-              e.preventDefault();
-              void save();
-            }
-          }}
-        />
-      </label>
+      {draft.ready && <MarkdownEditor label="编辑记忆内容" value={draft.value.body} disabled={busy} autoFocus
+        onChange={body => draft.update({ body })} onSave={() => void save()} />}
       <p className="field-help">保存会建立新版本，原话保持原样。⌘ S 保存。</p>
       <div className="action-row">
         <button
@@ -160,7 +144,7 @@ function Editor({
       {latest && (
         <Modal title="最新保存的内容" onClose={() => setLatest(false)}>
           <h3>{detail.title}</h3>
-          <div className="readable-text">{detail.body}</div>
+          <Markdown text={detail.body} />
         </Modal>
       )}
     </div>
@@ -472,7 +456,7 @@ export default function MemoryDetail({
                   />
                 ) : (
                   <>
-                    <div className="readable-text"><Highlight text={detail.body} query={query} /></div>
+                    <div>{detail.current ? <Markdown text={detail.body} query={query} /> : <div className="readable-text"><Highlight text={detail.body} query={query} /></div>}</div>
                     {!trashed && detail.current && <RelatedMemories
                       key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
                       revision={revision} onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
@@ -554,7 +538,7 @@ export default function MemoryDetail({
                             </button>
                           )}
                         </div>
-                        <div className="readable-text">{version.body}</div>
+                        <Markdown text={version.body} />
                         <p className="field-help">
                           依据 {version.capture_ids.length}{" "}
                           段原话。恢复会新增版本，保留现有历史。

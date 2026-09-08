@@ -67,6 +67,8 @@ function load(file) {
     if(name==='react')return hooks;
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
     if(name==='./api')return api;
+    if(name==='./MarkdownEditor')return {default:'MarkdownEditor'};
+    if(name==='./Markdown')return {default:'Markdown'};
     if(name==='../ui')return {Icon:'Icon'};
     if(name.startsWith('@tauri'))return {listen:()=>Promise.resolve(()=>{})};
     if(name.endsWith('.css')||name.endsWith('.svg'))return {};

@@ -1,0 +1,75 @@
+/* One typographic language for reading, reviewing and Milkdown editing. */
+.markdown-prose, .markdown-editor .ProseMirror {
+  color: #42454c; font-family: inherit; font-size: 15px; line-height: 1.95;
+  overflow-wrap: anywhere; white-space: normal; text-align: left;
+}
+:is(.markdown-prose, .markdown-editor .ProseMirror) > :first-child { margin-top: 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) > :last-child { margin-bottom: 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) p { margin: 0 0 16px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) :is(h1,h2,h3,h4,h5,h6) { color: #25262b; font-weight: 650; line-height: 1.5; letter-spacing: -.35px; margin: 28px 0 12px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) h1 { font-size: 25px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) h2 { font-size: 21px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) h3 { font-size: 17px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) :is(h4,h5,h6) { font-size: 15px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) :is(ul,ol) { padding-left: 25px; margin: 12px 0 20px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) li { padding-left: 4px; margin: 5px 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) li p { margin: 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) li :is(ul,ol) { margin: 5px 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) li::marker { color: #989898; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) blockquote { border-left: 3px solid #ffd02f; margin: 22px 0; padding: 8px 0 8px 19px; color: #76766f; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) blockquote p:last-child { margin-bottom: 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) strong { color: #303138; font-weight: 650; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) a { color: #484634; text-decoration-color: #d5b72d; text-underline-offset: 4px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; padding: 3px 6px; background: #f4f4f1; border-radius: 5px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) pre { overflow-x: auto; white-space: pre; padding: 17px 20px; background: #f7f7f5; border: 1px solid #eeeee9; border-radius: 10px; line-height: 1.75; margin: 20px 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) pre code { padding: 0; background: none; border-radius: 0; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) hr { border: 0; border-top: 1px solid #eaeae6; margin: 28px 0; }
+.markdown-table-scroll { overflow-x: auto; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 13px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) :is(th,td) { border: 1px solid #e8e8e3; padding: 9px 12px; min-width: 60px; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) th { background: #f8f8f5; font-weight: 600; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) :is(th,td) p { margin: 0; }
+.markdown-image { color: #92928b; font-size: 13px; }
+.markdown-prose .contains-task-list { list-style: none; padding-left: 3px; }
+.markdown-prose input[type=checkbox] { margin-right: 8px; accent-color: #b4a23c; }
+:is(.markdown-prose, .markdown-editor .ProseMirror) u { text-decoration: underline; text-underline-offset: 3px; }
+.markdown-editor .ProseMirror .editor-task-item { list-style: none; position: relative; padding-left: 0; }
+.markdown-editor .ProseMirror .editor-task-item > input { position: absolute; left: -23px; top: 7px; width: 15px; height: 15px; margin: 0; accent-color: #b4a23c; cursor: pointer; opacity: 1; }
+.markdown-editor .ProseMirror .editor-task-item[data-checked=true] > div > p { color: #96988e; text-decoration: line-through; }
+.markdown-prose .task-list-item:has(> input:checked) { color: #96988e; text-decoration: line-through; }
+.markdown-editor { margin: 22px 0 12px; }
+.markdown-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #868780; font-size: 12px; margin-bottom: 24px; }
+.markdown-editor .milkdown { position: relative; --crepe-color-surface: #fff; --crepe-color-hover: #f7f7f2; --crepe-color-selected: #fff1b8; --crepe-color-primary: #282923; --crepe-color-outline: #55564e; --crepe-color-on-background: #34352e; --crepe-shadow-1: 0 4px 20px #00000012, 0 0 0 1px #00000009; }
+.markdown-editor .ProseMirror { min-height: 270px; outline: none; padding: 0 0 14px; white-space: pre-wrap; }
+.markdown-editor .ProseMirror:focus-visible { outline: none; }
+.markdown-editor .ProseMirror > p:only-child:has(> br:only-child)::before { content: "从这里继续你的想法…"; color: #b6b7b0; pointer-events: none; position: absolute; }
+.markdown-editor .milkdown-link-edit > .link-edit { height: auto; min-height: 38px; align-items: center; padding: 5px 8px; }
+.markdown-editor .milkdown-link-edit .input-area { border: none; margin: 0; padding: 5px 6px; }
+.markdown-editor .milkdown-link-preview > .link-preview { align-items: center; }
+.markdown-editor-hint { display: flex; align-items: center; gap: 7px; color: #a0a198; font-size: 11px; line-height: 1.8; padding: 12px 0; border-top: 1px solid #f0f0ec; }
+.markdown-hint-dot { width: 5px; height: 5px; background: #e7c348; border-radius: 50%; flex-shrink: 0; }
+.workspace-dialog .markdown-editor .ProseMirror { min-height: 150px; }
+.workspace-dialog .markdown-editor-heading { margin-bottom: 18px; }
+.markdown-editor [contenteditable=false] { opacity: .65; }
+
+.markdown-editor .milkdown-table-block { max-width: 100%; overflow: visible; }
+.markdown-editor .milkdown-table-block table { margin: 18px 0; }
+.markdown-editor .milkdown-table-block .button-group button { border: 0; background: white; }
+.markdown-editor .milkdown-table-block .button-group svg { width: 18px; height: 18px; }
+
+.markdown-editor-heading { margin-bottom: 18px; }
+.formatting-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 3px; padding: 6px; margin: 0; overflow-x: auto; border: 1px solid #ebebe7; border-radius: 10px; background: #fcfcfa; }
+.formatting-toolbar button { flex-shrink: 0; width: 30px; height: 30px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: #55574f; font-size: 15px; line-height: 20px; cursor: pointer; }
+.formatting-toolbar button:hover { background: #f0f0e9; }
+.formatting-toolbar button[aria-pressed=true] { background: #fff0b1; color: #302f26; }
+.formatting-toolbar button:focus-visible { outline: 2px solid #d6b839; outline-offset: 1px; }
+.formatting-toolbar button:disabled { opacity: .4; cursor: default; }
+.formatting-toolbar svg { width: 18px; height: 18px; vertical-align: middle; }
+.format-strong { font-weight: 700; } .format-emphasis { font-family: Georgia, serif; font-style: italic; } .format-underline { text-decoration: underline; text-underline-offset: 3px; } .format-strike_through { text-decoration: line-through; }
+.format-divider { flex-shrink: 0; width: 1px; height: 19px; margin: 0 3px; background: #e6e6df; }
+.memivy-selection-tools { position: absolute; z-index: 12; width: max-content; max-width: calc(100vw - 48px); }
+.memivy-selection-tools[data-show=false] { display: none; }
+.memivy-selection-tools .formatting-toolbar { margin: 0; background: white; border-radius: 11px; box-shadow: 0 4px 20px #00000012; }
+.milkdown:has(.milkdown-link-edit[data-show=true]) .memivy-selection-tools { display: none; }
+
+.format-h1, .format-h2, .format-h3 { font-size: 12px !important; font-weight: 500; }

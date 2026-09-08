@@ -1,3 +1,4 @@
+import Markdown from "./Markdown";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import {
@@ -279,12 +280,12 @@ export default function Discussion({
             ) : m.answer ? (
               <div className="answer-content">
                 {!m.answer.recollections.length && <p className="field-help">目前没有找到足够的记忆依据。</p>}
-                {m.answer.recollections.map((claim, index) => <div key={index}><p className="readable-text">{claim.text}</p><div className="discussion-citations">{claim.sources.map(ref => {
+                {m.answer.recollections.map((claim, index) => <div key={index}><Markdown text={claim.text} /><div className="discussion-citations">{claim.sources.map(ref => {
                   const citation = m.citations.find(c => c.source.kind === ref.kind && c.source.id === ref.id);
                   return <button key={`${ref.kind}:${ref.id}`} disabled={!citation?.available} onClick={() => setSource({ ...ref, messageId: m.id })}>{citation?.available ? "查看依据" : "来源已删除"}</button>;
                 })}</div></div>)}
-                {m.answer.ideas && <div><strong className="answer-label">接着想 · 新的分析与建议</strong><p className="readable-text">{m.answer.ideas}</p></div>}
-                {m.answer.conclusion && <div><strong className="answer-label">可以留下的结论 · 需确认保存</strong><p className="readable-text">{m.answer.conclusion}</p></div>}
+                {m.answer.ideas && <div><strong className="answer-label">接着想 · 新的分析与建议</strong><Markdown text={m.answer.ideas} /></div>}
+                {m.answer.conclusion && <div><strong className="answer-label">可以留下的结论 · 需确认保存</strong><Markdown text={m.answer.conclusion} /></div>}
               </div>
             ) : (
               <p className="readable-text">

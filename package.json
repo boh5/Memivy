@@ -16,9 +16,13 @@
     "test:core-assets": "python3 scripts/verify_core_assets.py"
   },
   "dependencies": {
+    "@milkdown/crepe": "7.22.1",
+    "@milkdown/kit": "7.22.1",
     "@tauri-apps/api": "^2.11.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",
