@@ -30,7 +30,7 @@ fn require(window: &tauri::WebviewWindow) -> HostResult<()> {
         Err("窗口无权执行此操作".into())
     }
 }
-fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
+pub(crate) fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
@@ -859,6 +859,11 @@ async fn memory_export(
     })
     .await
 }
+pub(crate) fn read_model(state: &Workspace) -> HostResult<ModelConfig> {
+    validate_config(&state.config)?;
+    ModelConfig::read(&state.config)
+        .map_err(|_| "请先在设置中连接模型；原文和草稿已保留".to_string())
+}
 fn validate_config(path: &std::path::Path) -> HostResult<()> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     crate::storage::validate_config_path(path, home.as_deref())
@@ -870,6 +875,8 @@ struct Settings {
     has_key: bool,
     configured: bool,
     disable_reasoning: bool,
+    max_output_tokens: Option<u32>,
+    output_token_parameter: memivy_core::model::OutputTokenParameter,
 }
 #[tauri::command]
 fn workspace_settings(
@@ -888,9 +895,12 @@ fn workspace_settings(
         model: c.model,
         has_key: c.api_key.is_some_and(|s| !s.is_empty()),
         disable_reasoning: c.disable_reasoning,
+        max_output_tokens: c.max_output_tokens,
+        output_token_parameter: c.output_token_parameter,
     })
 }
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Existing settings IPC plus optional BYOM output controls.
 fn workspace_configure(
     window: tauri::WebviewWindow,
     state: tauri::State<Workspace>,
@@ -898,6 +908,8 @@ fn workspace_configure(
     model: String,
     api_key: Option<String>,
     disable_reasoning: bool,
+    max_output_tokens: Option<u32>,
+    output_token_parameter: memivy_core::model::OutputTokenParameter,
     replace_unreadable: bool,
 ) -> HostResult<()> {
     require_main(&window)?;
@@ -930,6 +942,8 @@ fn workspace_configure(
         model,
         api_key: key,
         disable_reasoning,
+        max_output_tokens,
+        output_token_parameter,
     }
     .save(path)
     .map_err(|e| e.to_string())
@@ -1009,7 +1023,12 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 let _ = window.emit("library-refresh", ());
             }
         })
+        .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
+            crate::cleanup::cleanup_prepare,
+            crate::cleanup::cleanup_generate,
+            crate::cleanup::cleanup_cancel,
+            crate::cleanup::cleanup_save,
             library_query,
             navigation_collections,
             navigation_record,

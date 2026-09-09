@@ -2,6 +2,7 @@
 //! All writes, including future UI/MCP writes, must pass through this module.
 //! Model requests are bounded and run outside database transactions.
 mod access;
+mod cleanup;
 mod collection_recommendations;
 mod conversations;
 mod db;
@@ -16,6 +17,7 @@ mod retrieval;
 mod transfer;
 mod types;
 
+pub use cleanup::*;
 pub use collection_recommendations::*;
 pub use db::MemoryStore;
 pub use library::*;

@@ -9,7 +9,7 @@ async function editMemory(t, version='v-a') {
   f.overrides.library_edit=async()=>({request_id:'saved',memory_id:'a'});
   const page=f.mount(f.load('src/workspace/MemoryDetail.tsx').default,{record:f.keyA,revision:0,query:'',initialReceipt:null,onChanged(){},onBack(){},onDiscuss(){}});
   await f.settle();
-  f.find(page,n=>n.type==='button'&&f.text(n)==='编辑').props.onClick();await f.settle();
+  f.find(page,n=>n.props.label==='编辑正文').props.onClick();await f.settle();
   const node=f.find(page,n=>typeof n.type==='function'&&n.type.name==='Editor');
   const editor=f.mount(node.type,node.props);await f.settle();
   return {f,editor,node,detail};

@@ -32,6 +32,8 @@ const hooks = {
   useCallback(fn, deps) { const ref = hooks.useRef({fn,deps}); if (deps.some((d,i)=>!Object.is(d,ref.current.deps[i]))) ref.current={fn,deps}; return ref.current.fn; }
 };
 hooks.useLayoutEffect = hooks.useEffect;
+hooks.useMemo = (fn,deps) => hooks.useCallback(fn,deps)();
+hooks.useId = () => hooks.useRef(randomUUID()).current;
 const jsx = (type, props, key) => ({type,props:props||{},key});
 const db = new Map(), calls = [], overrides = {};
 const windowEvents = new Map(), nativeEvents = new Map();
@@ -68,6 +70,7 @@ function load(file) {
   const req = name => {
     if (Object.hasOwn(modules, name)) return modules[name];
     if(name==='react')return hooks;
+    if(name==='react-dom')return {createPortal:children=>children};
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
     if(name==='./api')return api;
     if(name==='./MarkdownEditor')return {default:'MarkdownEditor'};

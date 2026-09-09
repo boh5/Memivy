@@ -124,7 +124,7 @@ pub(super) fn insert_capture(
     raw(db, &id)
 }
 pub(super) fn version(db: &Connection, id: &str) -> Result<Version> {
-    let mut v=db.query_row("SELECT id,memory_id,parent_id,title,body,actor,reason,created_at FROM memory_versions WHERE id=? AND body IS NOT NULL",[id],|r|Ok(Version{id:r.get(0)?,memory_id:r.get(1)?,parent_id:r.get(2)?,title:r.get(3)?,body:r.get(4)?,actor:r.get(5)?,reason:r.get(6)?,created_at:r.get(7)?,capture_ids:vec![]}))?;
+    let mut v=db.query_row("SELECT id,memory_id,parent_id,title,body,actor,COALESCE(review_kind,reason),created_at FROM memory_versions WHERE id=? AND body IS NOT NULL",[id],|r|Ok(Version{id:r.get(0)?,memory_id:r.get(1)?,parent_id:r.get(2)?,title:r.get(3)?,body:r.get(4)?,actor:r.get(5)?,reason:r.get(6)?,created_at:r.get(7)?,capture_ids:vec![]}))?;
     v.capture_ids = db
         .prepare("SELECT capture_id FROM version_captures WHERE version_id=? ORDER BY capture_id")?
         .query_map([id], |r| r.get(0))?
@@ -147,7 +147,7 @@ pub(super) fn head(db: &Connection, memory_id: &str, expected: &str) -> Result<V
 pub(super) fn write_version(db: &Connection, v: &Version) -> Result<()> {
     valid_text(&v.title, 200)?;
     valid_text(&v.body, 128 * 1024)?;
-    db.execute("INSERT INTO memory_versions(id,memory_id,parent_id,title,body,actor,reason,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![v.id,v.memory_id,v.parent_id,v.title,v.body,v.actor,v.reason,v.created_at])?;
+    db.execute("INSERT INTO memory_versions(id,memory_id,parent_id,title,body,actor,reason,created_at,review_kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![v.id,v.memory_id,v.parent_id,v.title,v.body,v.actor,if v.reason == "cleanup" { "edit" } else { &v.reason },v.created_at,if v.reason == "cleanup" { Some("cleanup") } else { None }])?;
     for source in &v.capture_ids {
         db.execute(
             "INSERT OR IGNORE INTO version_captures(version_id,capture_id) VALUES(?1,?2)",

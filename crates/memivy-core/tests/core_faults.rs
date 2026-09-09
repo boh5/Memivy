@@ -69,6 +69,8 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "synthetic-only".into(),
         api_key: Some(KEY.into()),
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
         disable_reasoning: false,
     };
     let mode = mode.to_string();
@@ -166,7 +168,9 @@ async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
                 assert!(!format!("{e:?} {e}").contains(KEY));
                 match e {
                     ProbeError::Network => "network".into(),
-                    ProbeError::InvalidResponse => "invalid_response".into(),
+                    ProbeError::InvalidResponse | ProbeError::Truncated => {
+                        "invalid_response".into()
+                    }
                     ProbeError::TooLarge => "too_large".into(),
                     ProbeError::Status(n) => format!("status_{n}"),
                     _ => panic!("unexpected error"),

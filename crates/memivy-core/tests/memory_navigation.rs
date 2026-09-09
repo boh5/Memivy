@@ -442,6 +442,8 @@ async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist()
         base_url: "invalid".into(),
         model: "unused".into(),
         api_key: None,
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
         disable_reasoning: false,
     };
     assert!(
@@ -480,6 +482,8 @@ async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new
         base_url: "invalid".into(),
         model: "unused".into(),
         api_key: None,
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
         disable_reasoning: false,
     };
     assert!(

@@ -1,3 +1,4 @@
+import IconButton from "./IconButton";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import { call, errorText, type Collection, type Key, type RecordNavigation as Navigation } from "./api";
@@ -36,8 +37,8 @@ export default function RecordNavigation({ record, revision, onChanged }: { reco
     finally { lock.current = false; setBusy(false); }
   }
   return <>
-    <button className={`record-pin ${value?.pinned ? "is-pinned" : ""}`} aria-label={value?.pinned ? "取消置顶记忆" : "置顶记忆"} title={value?.pinned ? "取消置顶" : "固定到左侧栏"} aria-pressed={value?.pinned || false} disabled={busy || !value} onClick={() => void update()}><Icon name="pin" size={15} /></button>
-    <button aria-label="管理记忆所属专题" disabled={busy || !value} onClick={() => { setOpen(true); setError(""); }}><Icon name="folder" size={15} />专题{value?.collections.length ? ` · ${value.collections.length}` : ""}</button>
+    <IconButton label="管理记忆所属专题" icon="folder" disabled={busy || !value} onClick={() => { setOpen(true); setError(""); }} />
+    <IconButton icon="pin" label={value?.pinned ? "取消置顶记忆" : "置顶记忆"} className={`record-pin ${value?.pinned ? "is-pinned" : ""}`} aria-pressed={value?.pinned || false} disabled={busy || !value} onClick={() => void update()} />
     {error && !open && <span className="navigation-inline-error" role="alert">{error}<button onClick={onChanged}>重试</button></span>}
     {open && <Modal title="加入专题" onClose={() => { if (!lock.current) setOpen(false); }} className="collection-dialog">
       <p className="field-help">一条记忆可以放进多个专题。移出专题会保留记忆。</p>

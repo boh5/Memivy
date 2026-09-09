@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { ActionTooltip } from "./IconButton";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Icon } from "../ui";
 
 export function Highlight({ text, query }: { text: string; query: string }) {
@@ -137,6 +138,7 @@ export function ErrorNotice({ text }: { text: string }) {
 }
 
 export function MoreMenu({ children }: { children: ReactNode }) {
+  const tooltipId = useId();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const close = (e: PointerEvent) => {
@@ -147,7 +149,7 @@ export function MoreMenu({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("pointerdown", close);
   }, []);
   return (
-    <details
+    <ActionTooltip label="更多操作" tooltipId={tooltipId}><details
       className="record-more"
       ref={menu}
       onKeyDown={(e) => {
@@ -158,9 +160,7 @@ export function MoreMenu({ children }: { children: ReactNode }) {
         }
       }}
     >
-      <summary aria-label="更多操作" title="更多操作">
-        •••
-      </summary>
+      <summary aria-label="更多操作" aria-describedby={tooltipId}><Icon name="ellipsis" size={18} /></summary>
       <div
         className="record-more-actions"
         onClick={(e) => {
@@ -170,6 +170,6 @@ export function MoreMenu({ children }: { children: ReactNode }) {
       >
         {children}
       </div>
-    </details>
+    </details></ActionTooltip>
   );
 }

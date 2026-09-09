@@ -31,6 +31,8 @@ fn fixture_answer(
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "synthetic-only".into(),
         api_key: None,
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
         disable_reasoning: false,
     };
     let requests = Arc::new(Mutex::new(vec![]));

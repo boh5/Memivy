@@ -30,6 +30,8 @@ fn config(base_url: String) -> ModelConfig {
         base_url,
         model: "test-only".into(),
         api_key: Some("fixture-secret".into()),
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
         disable_reasoning: false,
     }
 }
@@ -60,7 +62,7 @@ async fn validates_exact_schema_and_categorizes_failures_without_leaking() {
         (
             200,
             response(r#"{"ok":true,"echo":"先留住原话"}"#, "length"),
-            Some(ProbeError::InvalidResponse),
+            Some(ProbeError::Truncated),
         ),
         (
             200,
@@ -143,5 +145,100 @@ async fn tool_responses_require_one_complete_function_call() {
         if let Ok(result) = result {
             assert_eq!(result.arguments["title"], "模型标题");
         }
+    }
+}
+
+#[tokio::test]
+async fn full_text_accepts_long_output_and_rejects_truncation() {
+    use memivy_core::model::{OutputPolicy, complete_with_policy};
+    use serde_json::json;
+    let long_body = "保留事实、日期与不确定性。".repeat(2500);
+    for (finish, valid) in [("stop", true), ("length", false)] {
+        let content = json!({"body":long_body}).to_string();
+        let (url, server) = endpoint(200, response(&content, finish), 0);
+        let result = complete_with_policy(
+            &config(url),
+            json!([]),
+            "cleanup",
+            json!({}),
+            OutputPolicy::FullText,
+        )
+        .await;
+        server.join().unwrap();
+        if valid {
+            assert_eq!(result.unwrap()["body"], long_body);
+        } else {
+            assert_eq!(result.unwrap_err(), ProbeError::Truncated);
+        }
+    }
+}
+
+#[tokio::test]
+async fn output_budget_is_optional_and_uses_only_the_selected_parameter() {
+    use memivy_core::model::{OutputTokenParameter, complete};
+    use serde_json::{Value, json};
+    for (limit, parameter, expected) in [
+        (None, OutputTokenParameter::MaxTokens, None),
+        (
+            Some(16000),
+            OutputTokenParameter::MaxTokens,
+            Some("max_tokens"),
+        ),
+        (
+            Some(32000),
+            OutputTokenParameter::MaxCompletionTokens,
+            Some("max_completion_tokens"),
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut c = config(format!("http://{}/v1", listener.local_addr().unwrap()));
+        c.max_output_tokens = limit;
+        c.output_token_parameter = parameter;
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut part = [0; 4096];
+            let end = loop {
+                let n = socket.read(&mut part).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&part[..n]);
+                if let Some(i) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                    break i + 4;
+                }
+            };
+            let length: usize = String::from_utf8_lossy(&bytes[..end])
+                .lines()
+                .find_map(|s| {
+                    s.to_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|n| n.trim().parse().unwrap())
+                })
+                .unwrap();
+            while bytes.len() < end + length {
+                let n = socket.read(&mut part).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&part[..n]);
+            }
+            let request: Value = serde_json::from_slice(&bytes[end..end + length]).unwrap();
+            for name in ["max_tokens", "max_completion_tokens"] {
+                if expected == Some(name) {
+                    assert_eq!(request[name], limit.unwrap());
+                } else {
+                    assert!(request.get(name).is_none());
+                }
+            }
+            let body = response("{}", "stop");
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        complete(&c, json!([]), "test", json!({})).await.unwrap();
+        server.join().unwrap();
     }
 }

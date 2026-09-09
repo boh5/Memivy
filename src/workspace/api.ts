@@ -107,6 +107,8 @@ export type Settings = {
   model: string;
   has_key: boolean;
   disable_reasoning: boolean;
+  max_output_tokens: number | null;
+  output_token_parameter: "max_tokens" | "max_completion_tokens";
 };
 export const keyOf = (key: Key) => `${key.kind}:${key.id}`;
 export const uid = () => crypto.randomUUID();

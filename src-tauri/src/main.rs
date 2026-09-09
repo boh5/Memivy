@@ -1,5 +1,6 @@
 mod backup;
 mod capture_panel;
+mod cleanup;
 mod desktop;
 mod mcp;
 mod prototype;

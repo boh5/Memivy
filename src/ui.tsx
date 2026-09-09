@@ -105,6 +105,9 @@ const paths: Record<string, string> = {
   close: "m6 6 12 12M6 18 18 6",
   search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
   book: "M4 4h6c2 0 2 2 2 2s0-2 2-2h6v16h-6c-2 0-2 1-2 1s0-1-2-1H4zM12 6v15",
+  pencil: "m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 14z",
+  wand: "m5 20 12-12-3-3L2 17zM11 8l3 3M19 2v4M17 4h4M20 13v4M18 15h4M7 2v4M5 4h4",
+  ellipsis: "M5 12h.01M12 12h.01M19 12h.01",
   chat: "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2z",
   spark: "m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z",
   settings:

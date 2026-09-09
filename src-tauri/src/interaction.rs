@@ -327,6 +327,8 @@ pub fn save_model_settings(
         model,
         api_key: key,
         disable_reasoning,
+        max_output_tokens: None,
+        output_token_parameter: Default::default(),
     }
     .save(&path)
     .map_err(|e| e.to_string())
@@ -466,6 +468,8 @@ mod model_path_tests {
             base_url: "http://127.0.0.1:11435/v1".into(),
             model: "test-only".into(),
             api_key: Some("synthetic-test-key".into()),
+            max_output_tokens: None,
+            output_token_parameter: Default::default(),
             disable_reasoning: false,
         };
         config.save(&path).unwrap();

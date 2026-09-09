@@ -11,11 +11,43 @@ use std::{
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelConfig {
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub output_token_parameter: OutputTokenParameter,
     pub base_url: String,
     pub model: String,
     pub api_key: Option<String>,
     #[serde(default)]
     pub disable_reasoning: bool,
+}
+
+/// BYOM endpoints do not all support the same token parameter.
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputTokenParameter {
+    #[default]
+    MaxTokens,
+    MaxCompletionTokens,
+}
+#[derive(Clone, Copy)]
+pub enum OutputPolicy {
+    Structured,
+    FullText,
+}
+impl OutputPolicy {
+    fn bytes(self) -> usize {
+        match self {
+            Self::Structured => 65_536,
+            Self::FullText => 1_048_576,
+        }
+    }
+    fn timeout(self) -> Duration {
+        Duration::from_secs(match self {
+            Self::Structured => 90,
+            Self::FullText => 180,
+        })
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -28,10 +60,12 @@ pub enum ProbeError {
     Network,
     #[error("模型 HTTP 状态异常：{0}")]
     Status(u16),
-    #[error("模型响应超过 64 KB")]
+    #[error("模型响应超过此任务的安全大小限制")]
     TooLarge,
     #[error("模型响应不符合约定的完整 JSON")]
     InvalidResponse,
+    #[error("模型输出被截断，尚未保存；请提高模型输出上限或使用支持更长输出的模型")]
+    Truncated,
 }
 
 #[derive(Serialize, Debug)]
@@ -43,6 +77,12 @@ pub struct ProbeReport {
 
 impl ModelConfig {
     pub fn endpoint(&self) -> Result<(reqwest::Url, bool), ProbeError> {
+        if self
+            .max_output_tokens
+            .is_some_and(|n| n == 0 || n > 1_048_576)
+        {
+            return Err(ProbeError::Configuration);
+        }
         let mut url =
             reqwest::Url::parse(self.base_url.trim()).map_err(|_| ProbeError::Endpoint)?;
         let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -102,9 +142,18 @@ pub async fn complete(
     name: &str,
     schema: serde_json::Value,
 ) -> Result<serde_json::Value, ProbeError> {
+    complete_with_policy(config, messages, name, schema, OutputPolicy::Structured).await
+}
+pub async fn complete_with_policy(
+    config: &ModelConfig,
+    messages: serde_json::Value,
+    name: &str,
+    schema: serde_json::Value,
+    policy: OutputPolicy,
+) -> Result<serde_json::Value, ProbeError> {
     let choice = request(config, messages, json!({
         "response_format":{"type":"json_schema","json_schema":{"name":name,"strict":true,"schema":schema}}
-    })).await?;
+    }), policy).await?;
     if choice["finish_reason"] != "stop" {
         return Err(ProbeError::InvalidResponse);
     }
@@ -133,6 +182,7 @@ pub async fn call_function(
         json!({
             "tools":tools,"tool_choice":"required","parallel_tool_calls":false
         }),
+        OutputPolicy::Structured,
     )
     .await?;
     if choice["finish_reason"] != "tool_calls" {
@@ -161,6 +211,7 @@ async fn request(
     config: &ModelConfig,
     messages: serde_json::Value,
     options: serde_json::Value,
+    policy: OutputPolicy,
 ) -> Result<serde_json::Value, ProbeError> {
     let (url, _) = config.endpoint()?;
     // Reuse the HTTP connection pool. Credentials remain per request, never defaults.
@@ -176,14 +227,15 @@ async fn request(
         .as_ref()
         .map_err(|_| ProbeError::Network)?;
     let mut body = json!({"model":config.model,"messages":messages,"stream":false,
-        "temperature":0.2,"max_tokens":2500});
+        "temperature":0.2});
     body.as_object_mut()
         .unwrap()
         .extend(options.as_object().unwrap().clone());
     if config.disable_reasoning {
         body["reasoning_effort"] = json!("none");
     }
-    let mut request = client.post(url).json(&body);
+    apply_output_limit(config, &mut body);
+    let mut request = client.post(url).timeout(policy.timeout()).json(&body);
     if let Some(key) = config.api_key.as_ref().filter(|s| !s.is_empty()) {
         request = request.bearer_auth(key);
     }
@@ -193,7 +245,7 @@ async fn request(
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| ProbeError::Network)? {
-        if bytes.len() + chunk.len() > 65_536 {
+        if bytes.len() + chunk.len() > policy.bytes() {
             return Err(ProbeError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
@@ -207,6 +259,9 @@ async fn request(
         return Err(ProbeError::InvalidResponse);
     }
     let choice = choices.remove(0);
+    if choice["finish_reason"] == "length" {
+        return Err(ProbeError::Truncated);
+    }
     if choice["message"]["refusal"]
         .as_str()
         .is_some_and(|s| !s.is_empty())
@@ -254,6 +309,7 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
             "schema":{"type":"object","properties":{"ok":{"type":"boolean"},"echo":{"type":"string"}},"required":["ok","echo"],"additionalProperties":false}
         }}
     });
+    apply_output_limit(&config, &mut body);
     let start = Instant::now();
     if config.disable_reasoning {
         body["reasoning_effort"] = json!("none");
@@ -276,6 +332,9 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| ProbeError::InvalidResponse)?;
     let choice = &value["choices"][0];
+    if choice["finish_reason"] == "length" {
+        return Err(ProbeError::Truncated);
+    }
     if choice["finish_reason"] != "stop"
         || choice["message"]["refusal"]
             .as_str()
@@ -297,4 +356,14 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
         valid: true,
     })
+}
+
+fn apply_output_limit(config: &ModelConfig, body: &mut serde_json::Value) {
+    if let Some(limit) = config.max_output_tokens {
+        let key = match config.output_token_parameter {
+            OutputTokenParameter::MaxTokens => "max_tokens",
+            OutputTokenParameter::MaxCompletionTokens => "max_completion_tokens",
+        };
+        body[key] = json!(limit);
+    }
 }

@@ -27,6 +27,8 @@ On 2026-09-08 the user authorized the unified workspace implementation. Merge th
 
 Later in the same session the user explicitly requested completing all remaining steps now ("把这几步全部做完啊"). This supersedes the intermediate layout-feedback gate. Implement pins, on-demand review, and lightweight collections with manual membership, opt-in AI candidate recommendations, and collection-scoped RAG including follow-ups. Reuse current navigation and editor styles, preserve originals/versions/drafts and source visibility; removing collections must not delete memories or silently widen existing discussions. No notifications, automatic membership, embeddings, external sharing, or new MCP tools. Routine schema additions use the existing core database mechanism and backup path; do not introduce separate legacy or batch migration products.
 
+On 2026-09-09 the user authorized the reviewed single-memory cleanup feature and detail-toolbar icon layout. Add in-place cleanup of the current body or editing draft, editable preview/diff/refinement, explicit one-click acceptance and reversible version history. Preserve originals, sources and draft concurrency; no whole-library cleanup or new MCP tools. Replace the shared hardcoded 2500-token cap with optional BYOM output controls and task-specific response/time boundaries. Keep final verification in DEVELOPMENT_PLAN.md; this is implementation authorization, not user acceptance.
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

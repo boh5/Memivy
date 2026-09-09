@@ -19,6 +19,8 @@ export default function SettingsPanel({
     model: "",
     has_key: false,
     disable_reasoning: false,
+    max_output_tokens: null,
+    output_token_parameter: "max_tokens",
   });
   const [key, setKey] = useState(""),
     [clearKey, setClearKey] = useState(false),
@@ -61,6 +63,8 @@ export default function SettingsPanel({
       model: settings.model.trim(),
       apiKey: clearKey ? "" : key || null,
       disableReasoning: settings.disable_reasoning,
+      maxOutputTokens: settings.max_output_tokens,
+      outputTokenParameter: settings.output_token_parameter,
       replaceUnreadable: unreadable,
     });
     setKey("");
@@ -170,6 +174,15 @@ export default function SettingsPanel({
           />
           快速响应（关闭模型推理，端点需支持）
         </label>
+        <details className="model-output-settings">
+          <summary>高级：模型输出上限</summary>
+          <p className="field-help">默认使用服务商的输出上限。若长文整理被截断，按模型支持的范围填写。部分推理模型的额度包含推理用量。</p>
+          <label>输出 token 上限<input type="number" min={1} max={1048576} step={1} placeholder="使用服务商默认值" aria-label="模型输出 token 上限" value={settings.max_output_tokens ?? ""} disabled={busy || backupBusy || !ready}
+            onChange={e => setSettings(s => ({ ...s, max_output_tokens: e.target.value === "" ? null : Number(e.target.value) }))} /></label>
+          <label>服务商支持的参数<select aria-label="模型输出上限参数" value={settings.output_token_parameter} disabled={busy || backupBusy || !ready} onChange={e => setSettings(s => ({ ...s, output_token_parameter: e.target.value as Settings["output_token_parameter"] }))}>
+            <option value="max_tokens">max_tokens（兼容端点）</option><option value="max_completion_tokens">max_completion_tokens（含推理额度）</option>
+          </select></label>
+        </details>
         <p className="field-help">
           Key 单独保存在本机配置文件中。更换 API 地址时需要重新填写
           Key。连接测试只发送一段固定测试文字。

@@ -1,3 +1,6 @@
+import "./cleanup.css";
+import MemoryCleanup from "./MemoryCleanup";
+import IconButton from "./IconButton";
 import RecordNavigation from "./RecordNavigation";
 import MarkdownEditor from "./MarkdownEditor";
 import Markdown from "./Markdown";
@@ -173,6 +176,8 @@ export default function MemoryDetail({
   onBack: () => void;
   onDiscuss: (detail: Detail, related?: Source[]) => Promise<void>;
 }) {
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanupToolbar, setCleanupToolbar] = useState<HTMLDivElement | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -196,6 +201,8 @@ export default function MemoryDetail({
     );
   useEffect(() => { if (notice) notify(notice); }, [notice, receipt?.request_id]);
   useEffect(() => { if (exportNotice) notify(exportNotice); }, [exportNotice]);
+  const hasUnsavedReview = useRef(false);
+  hasUnsavedReview.current = cleaning || editing;
   const actionId = useRef(uid()),
     undoId = useRef(uid()),
     actionLock = useRef(false);
@@ -209,7 +216,9 @@ export default function MemoryDetail({
       })
       .catch((e) => {
         if (alive) {
-          setDetail(null);
+          // A failed background refresh must not unmount an editor or its review.
+          // The core still validates the head/draft before any write.
+          setDetail(current => hasUnsavedReview.current ? current : null);
           setError(errorText(e));
         }
       })
@@ -310,7 +319,7 @@ export default function MemoryDetail({
         <span>
           {trashed ? "回收站" : detail?.current ? "当前记忆" : "原始记录"}
         </span>
-        <div className="toolbar-actions">
+        <div className="toolbar-actions" hidden={cleaning}>
           {detail &&
             (trashed ? (
               <>
@@ -327,8 +336,7 @@ export default function MemoryDetail({
               </>
             ) : (
               <>
-                <RecordNavigation record={record} revision={revision} onChanged={() => onChanged()} />
-                <button
+                <IconButton label="接着想" icon="chat"
                   disabled={busy || loading || editing}
                   onClick={() => {
                     setError("");
@@ -337,19 +345,17 @@ export default function MemoryDetail({
                       .catch((e) => setError(errorText(e)))
                       .finally(() => setBusy(false));
                   }}
-                >
-                  <Icon name="chat" size={14} />
-                  接着想
-                </button>
-                <button
+                />
+                {detail.current && <IconButton label="整理正文" icon="wand" disabled={busy || loading} onClick={() => { setTab("current"); setCleaning(true); }} />}
+                <IconButton label="编辑正文" icon="pencil"
                   disabled={busy || loading}
                   onClick={() => {
                     setTab("current");
                     setEditing(true);
                   }}
-                >
-                  编辑
-                </button>
+                />
+                <span className="toolbar-divider" aria-hidden="true" />
+                <RecordNavigation record={record} revision={revision} onChanged={() => onChanged()} />
                 <MoreMenu>
                   <button
                     disabled={busy || loading || editing}
@@ -372,6 +378,7 @@ export default function MemoryDetail({
               </>
             ))}
         </div>
+        {cleaning && <div className="cleanup-toolbar" ref={setCleanupToolbar} />}
       </div>
       <ErrorNotice text={error} />
       {!detail ? (
@@ -386,7 +393,7 @@ export default function MemoryDetail({
               <span className="eyebrow">
                 <Icon name="leaf" size={14} />
                 {detail.current
-                  ? `${detail.current.actor === "user" ? "我编辑的" : "AI 整理"} · ${date(detail.current.created_at)}`
+                  ? `${detail.current.reason === "cleanup" ? "AI 整理，经我确认" : detail.current.actor === "user" ? "我编辑的" : "AI 整理"} · ${date(detail.current.created_at)}`
                   : "原话已保存在本机"}
               </span>
               <h1>
@@ -400,12 +407,12 @@ export default function MemoryDetail({
               {!trashed && <OrganizationReceipt presentation="status" record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
             {!trashed && <MemoryCollections record={record} currentVersion={detail.current?.id} revision={revision} onRefresh={() => onChanged()} />}
-            {detail.reviewed_conclusion && !editing && <div className="workspace-warning">
+            {detail.reviewed_conclusion && !cleaning && !editing && <div className="workspace-warning">
               <p>目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。</p>
               <details><summary>查看保留的完整审核稿</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
               <button onClick={() => { setTab("current"); setEditing(true); }}>审核保留稿并另存</button>
             </div>}
-            <div className="detail-tabs" role="tablist" aria-label="记忆内容">
+            <div className="detail-tabs" hidden={cleaning} role="tablist" aria-label="记忆内容">
               <button
                 role="tab"
                 aria-selected={tab === "current"}
@@ -429,11 +436,15 @@ export default function MemoryDetail({
               </button>
             </div>
             <div role="tabpanel">
+              {!cleaning && !editing && !trashed && receipt && detail.current?.reason === "cleanup" && receipt.after_version === detail.current.id && <div className="cleanup-receipt" role="status">整理已保存为新版本<button className="quiet" disabled={busy} onClick={() => void action("undo")}>撤销这次整理</button></div>}
               {tab === "history" && !trashed && <>
                 {receipt && <button className="toolbar-button" disabled={busy} onClick={() => void action("undo")}>撤销这次修改</button>}
                 <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
               </>}
-              {tab === "current" &&
+              {cleaning && cleanupToolbar && <MemoryCleanup key={detail.key.id} detail={detail} toolbar={cleanupToolbar}
+                onClose={() => setCleaning(false)}
+                onSaved={r => { setCleaning(false); setEditing(false); setReceipt(r); undoId.current = uid(); setNotice("整理已保存，可在下方撤销这次整理。"); onChanged(record, r); }} />}
+              {!cleaning && tab === "current" &&
                 (editing && !trashed ? (
                   <Editor
                     detail={detail}
@@ -460,7 +471,7 @@ export default function MemoryDetail({
                       revision={revision} onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
                   </>
                 ))}
-              {tab === "sources" && (
+              {!cleaning && tab === "sources" && (
                 <div className="source-list">
                   {detail.sources.map((s) => (
                     <article key={s.id} className="source-block">
@@ -515,7 +526,7 @@ export default function MemoryDetail({
                         >
                           <span>
                             v{detail.history.length - i} ·{" "}
-                            {v.actor === "user" ? "我" : "AI"}
+                            {v.reason === "cleanup" ? "AI 整理，经我确认" : v.actor === "user" ? "我" : "AI"}
                             {v.id === detail.current?.id ? " · 当前" : ""}
                           </span>
                           <small>{fullDate(v.created_at)}</small>
