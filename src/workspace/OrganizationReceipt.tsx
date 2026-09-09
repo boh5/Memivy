@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { call, errorText, uid, type Detail, type Key, type Receipt } from "./api";
 import { ErrorNotice, Modal } from "./components";
 
+
+
 type Job = { capture_id: string; attempt_id: string; status: string; reason: string; receipt: Receipt | null };
-export default function OrganizationReceipt({ record, revision, onOpen, onRefresh }: {
+export default function OrganizationReceipt({ record, revision, onOpen, onRefresh, presentation = "history" }: {
+  presentation?: "history" | "status";
   record: Key; revision: number; onOpen: (key: Key) => void; onRefresh: () => void;
 }) {
+  const [dismissed, setDismissed] = useState("");
   const [expanded, setExpanded] = useState(false);
   const recordKey = `${record.kind}:${record.id}`;
   const identity = useRef({ key: recordKey, owner: uid() });
@@ -66,7 +70,15 @@ export default function OrganizationReceipt({ record, revision, onOpen, onRefres
       const receipt = job.receipt, undone = receipt?.status === "undone";
       const applied = receipt?.status === "applied";
       const label = undone ? "已撤销整理，原话仍保留。" : job.status === "pending" ? "原话已保存，等待 AI 整理。未连接模型时仍可阅读和搜索。" : job.status === "processing" ? "原话已保存，正在整理…" : job.status === "deferred" ? `原话已保留，暂不判断归属。${job.reason}` : job.status === "failed" ? `原话已保留。${job.reason}` : job.status === "paused" ? "自动整理已停止，当前内容与原话仍保留。" : `${receipt?.before_version ? "已补充到已有记忆" : "已建立记忆"} · 原话已保留。${job.reason}`;
-      return <div className="organization-receipt" role="status" key={job.capture_id}>
+      if (presentation === "status") {
+        if (job !== jobs[0] || applied || undone || dismissed === job.attempt_id) return null;
+        const processing = job.status === "processing" || job.status === "pending";
+        return <div className="organization-inline-state" role="status" key={job.attempt_id}>
+          <span>{processing ? "整理中…" : "原话已保存，整理未完成"}</span>
+          {!processing && <><button className="quiet" disabled={busy} onClick={() => void run(job,"retry")}>重试</button><button className="quiet" onClick={() => setDismissed(job.attempt_id)} aria-label="收起整理状态">收起</button></>}
+        </div>;
+      }
+      return <div className="organization-history-entry" role="status" key={job.capture_id}>
         <p>{label}</p><div className="receipt-actions">
           {receipt?.memory_id && !undone && <button onClick={() => onOpen({ kind: "memory", id: receipt.memory_id! })}>查看记忆</button>}
           {applied && <><button disabled={busy} onClick={() => void run(job, "changes")}>查看变化</button><button disabled={busy} onClick={() => void run(job, "undo")}>撤销整理</button></>}
@@ -75,7 +87,7 @@ export default function OrganizationReceipt({ record, revision, onOpen, onRefres
         </div>
       </div>;
     })}
-    {jobs.length > 1 && <button className="quiet" onClick={() => setExpanded(v => !v)}>{expanded ? "收起更早回执" : `更早的整理回执（${jobs.length - 1}）`}</button>}
+    {presentation === "history" && jobs.length > 1 && <button className="quiet" onClick={() => setExpanded(v => !v)}>{expanded ? "收起更早回执" : `更早的整理回执（${jobs.length - 1}）`}</button>}
     {change && <Modal title="这次整理的变化" onClose={() => setChange(null)}><div className="change-comparison"><section><h3>修改前</h3><p className="readable-text">{change.before}</p></section><section><h3>修改后</h3><p className="readable-text">{change.after}</p></section></div></Modal>}
   </>;
 }

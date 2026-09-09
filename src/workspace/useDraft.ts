@@ -4,6 +4,7 @@ import { DraftQueue } from "./draftQueue";
 
 const drafts = new DraftQueue(call);
 export const flushDrafts = () => drafts.flushAll();
+export const flushDraft = (key: string) => drafts.flush(key);
 export const refreshDrafts = () => drafts.refresh();
 
 export function useDraft(

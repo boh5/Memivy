@@ -1,5 +1,6 @@
 use super::*;
 use rusqlite::Connection;
+use rusqlite::params;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -258,11 +259,20 @@ pub(super) struct SourceHit {
 
 /// Query the existing FTS index first; read bodies only for bounded, visible hits.
 /// Short literals use a deadline-bounded scan because trigram cannot index them.
-pub(super) fn source_hits(
+pub(super) fn source_hits_in_collection(
     db: &Connection,
     queries: &[String],
     scope: VersionScope,
+    collection: Option<&str>,
 ) -> Result<Vec<SourceHit>> {
+    if let Some(collection) = collection {
+        super::navigation::active_collection(db, collection)?;
+    }
+    let collection_filter = if collection.is_some() {
+        super::navigation::COLLECTION_SOURCE
+    } else {
+        "(?2 IS NULL)"
+    };
     if queries.len() > 8 || queries.iter().any(|q| q.trim().is_empty() || q.len() > 120) {
         return Err(DataError::Invalid);
     }
@@ -290,7 +300,7 @@ pub(super) fn source_hits(
             LEFT JOIN memories m ON m.id=v.memory_id
             LEFT JOIN captures c ON record_fts.kind='capture' AND c.id=record_fts.source_id
             LEFT JOIN capture_state cs ON cs.capture_id=c.id
-            WHERE {predicate} AND ((record_fts.kind='version' AND m.state='active' AND v.body IS NOT NULL AND {versions} AND v.id NOT IN (SELECT rc.after_version FROM receipt_changes rc JOIN receipts r ON r.request_id=rc.request_id WHERE r.status='undone'))
+            WHERE {predicate} AND {collection_filter} AND ((record_fts.kind='version' AND m.state='active' AND v.body IS NOT NULL AND {versions} AND v.id NOT IN (SELECT rc.after_version FROM receipt_changes rc JOIN receipts r ON r.request_id=rc.request_id WHERE r.status='undone'))
                 OR (record_fts.kind='capture' AND cs.availability='active' AND c.text IS NOT NULL))
             ORDER BY 4,3 DESC,record_fts.source_id LIMIT 24");
         let term = if indexed {
@@ -300,7 +310,9 @@ pub(super) fn source_hits(
         };
         let rows: Vec<(String, String, i64)> = db
             .prepare_cached(&sql)?
-            .query_map([term], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .query_map(params![term, collection], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
             .collect::<rusqlite::Result<_>>()?;
         for (rank, (kind, id, recorded_at)) in rows.into_iter().enumerate() {
             let score = 1.0 / (10.0 + rank as f64);
@@ -337,13 +349,28 @@ impl MemoryStore {
         queries: &[String],
         pinned: &[SourceRef],
     ) -> Result<Vec<SourceRef>> {
+        self.scoped_discussion_sources(queries, pinned, None)
+    }
+    pub fn scoped_discussion_sources(
+        &self,
+        queries: &[String],
+        pinned: &[SourceRef],
+        collection: Option<&str>,
+    ) -> Result<Vec<SourceRef>> {
         if pinned.len() > 4 || queries.len() > 4 {
             return Err(DataError::Invalid);
         }
         let mut db = self.connection()?;
         budget(&db)?;
         let tx = db.transaction()?;
-        let hits = source_hits(&tx, queries, VersionScope::All)?;
+        let hits = source_hits_in_collection(&tx, queries, VersionScope::All, collection)?;
+        if let Some(collection) = collection {
+            for source in pinned {
+                if !super::navigation::source_in_collection(&tx, collection, source)? {
+                    return Err(DataError::Unavailable);
+                }
+            }
+        }
         let mut sources = Vec::new();
         let mut text_seen = std::collections::HashSet::new();
         for source in pinned

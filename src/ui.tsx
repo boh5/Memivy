@@ -110,6 +110,7 @@ const paths: Record<string, string> = {
   settings:
     "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2",
   expand: "M14 3h7v7M21 3l-8 8M10 21H3v-7m0 7 8-8",
+  folder: "M3 6h7l2 2h9v12H3zM3 6V4h7l2 2h9v2",
   pin: "m8 3 8 0-1 7 3 3v2H6v-2l3-3zM12 15v7",
   check: "m5 12 4 4L19 6",
   undo: "M8 4 3 9l5 5M3 9h11a6 6 0 0 1 0 12",

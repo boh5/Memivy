@@ -3,7 +3,8 @@ import { call, errorText, type Key, type Source } from "./api";
 import { ErrorNotice } from "./components";
 
 type Related = { memory_id: string; version_id: string; title: string; snippet: string; source: Source };
-export default function RelatedMemories({ memoryId, versionId, revision, onOpen, onDiscuss }: {
+export default function RelatedMemories({ memoryId, versionId, revision, onOpen, onDiscuss, collectionId }: {
+  collectionId?: string;
   memoryId: string; versionId: string; revision: number;
   onOpen: (key: Key) => void; onDiscuss: (sources: Source[]) => Promise<void>;
 }) {
@@ -17,12 +18,12 @@ export default function RelatedMemories({ memoryId, versionId, revision, onOpen,
     setRows([]); setSelected([]); setError("");
     // Collapse rapid refresh events into one bounded local query.
     const timer = setTimeout(() => {
-      void call<Related[]>("memory_related", { memoryId, expectedVersion: versionId })
+      void call<Related[]>("memory_related", { memoryId, expectedVersion: versionId, collectionId })
         .then(result => { if (active) setRows(result); })
         .catch(e => { if (active) setError(errorText(e)); });
     }, 180);
     return () => { active = false; clearTimeout(timer); };
-  }, [memoryId, versionId, revision]);
+  }, [memoryId, versionId, revision, collectionId]);
   async function discuss() {
     if (lock.current || !selected.length) return;
     lock.current = true; setBusy(true); setError("");

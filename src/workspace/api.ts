@@ -43,6 +43,10 @@ export type Query = {
   until?: number;
   offset?: number;
   limit?: number;
+  pinned?: boolean;
+  collection_id?: string;
+  exclude_collection_id?: string;
+  oldest?: boolean;
 };
 export type Version = {
   id: string;
@@ -83,7 +87,9 @@ export type Receipt = {
   after_version: string | null;
   action: string;
 };
-export type Topic = { id: string; title: string; updated_at: number };
+export type Topic = { id: string; title: string; updated_at: number; collection_id?: string | null };
+export type Collection = { id: string; name: string; description: string; revision: number; count: number };
+export type RecordNavigation = { pinned: boolean; collections: string[] };
 export type Message = {
   answer?: { recollections: { text: string; sources: Source[] }[]; ideas: string; conclusion: string } | null;
   seq: number;
@@ -133,13 +139,15 @@ export async function call<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return invoke<T>(name, args);
+  if (name === "navigation_collections") return [] as T;
+  if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "discussion_targets") return [] as T;
   if (name === "organization_jobs") return [] as T;
   if (name === "library_query") {
     const q = args?.query as Query;
     return {
       items:
-        q.trash || (q.query && !previewRaw.text.includes(q.query))
+        q.pinned || q.collection_id || q.trash || (q.query && !previewRaw.text.includes(q.query))
           ? []
           : [previewRow],
       next_offset: null,

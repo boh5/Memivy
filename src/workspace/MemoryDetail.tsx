@@ -1,7 +1,10 @@
+import RecordNavigation from "./RecordNavigation";
 import MarkdownEditor from "./MarkdownEditor";
 import Markdown from "./Markdown";
 import RelatedMemories from "./RelatedMemories";
 import OrganizationReceipt from "./OrganizationReceipt";
+import MemoryCollections from "./MemoryCollections";
+import { notify } from "./Toast";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import {
@@ -159,7 +162,9 @@ export default function MemoryDetail({
   onChanged,
   onDiscuss,
   onBack,
+  collectionId,
 }: {
+  collectionId?: string;
   record: Key;
   initialReceipt: Receipt | null;
   revision: number;
@@ -189,6 +194,8 @@ export default function MemoryDetail({
           ? "当前内容已保存为新版本，原话保持原样。"
           : "",
     );
+  useEffect(() => { if (notice) notify(notice); }, [notice, receipt?.request_id]);
+  useEffect(() => { if (exportNotice) notify(exportNotice); }, [exportNotice]);
   const actionId = useRef(uid()),
     undoId = useRef(uid()),
     actionLock = useRef(false);
@@ -320,6 +327,7 @@ export default function MemoryDetail({
               </>
             ) : (
               <>
+                <RecordNavigation record={record} revision={revision} onChanged={() => onChanged()} />
                 <button
                   disabled={busy || loading || editing}
                   onClick={() => {
@@ -366,23 +374,6 @@ export default function MemoryDetail({
         </div>
       </div>
       <ErrorNotice text={error} />
-      {exportNotice && (
-        <p className="record-export-notice" role="status">
-          {exportNotice}
-        </p>
-      )}
-      {detail && !trashed && <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
-      {notice && (
-        <div className="mutation-receipt" role="status">
-          <Icon name="check" size={16} />
-          <span>{notice}</span>
-          {receipt && (
-            <button disabled={busy} onClick={() => void action("undo")}>
-              撤销这次修改
-            </button>
-          )}
-        </div>
-      )}
       {!detail ? (
         <Empty
           title={loading ? "正在打开…" : "内容暂不可用"}
@@ -406,7 +397,9 @@ export default function MemoryDetail({
                   ? `${detail.current.capture_ids.length} 段原话作为来源`
                   : "尚未整理；你可以直接阅读、搜索或编辑成记忆。"}
               </p>
+              {!trashed && <OrganizationReceipt presentation="status" record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
+            {!trashed && <MemoryCollections record={record} currentVersion={detail.current?.id} revision={revision} onRefresh={() => onChanged()} />}
             {detail.reviewed_conclusion && !editing && <div className="workspace-warning">
               <p>目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。</p>
               <details><summary>查看保留的完整审核稿</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
@@ -436,6 +429,10 @@ export default function MemoryDetail({
               </button>
             </div>
             <div role="tabpanel">
+              {tab === "history" && !trashed && <>
+                {receipt && <button className="toolbar-button" disabled={busy} onClick={() => void action("undo")}>撤销这次修改</button>}
+                <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
+              </>}
               {tab === "current" &&
                 (editing && !trashed ? (
                   <Editor
@@ -458,6 +455,7 @@ export default function MemoryDetail({
                   <>
                     <div>{detail.current ? <Markdown text={detail.body} query={query} /> : <div className="readable-text"><Highlight text={detail.body} query={query} /></div>}</div>
                     {!trashed && detail.current && <RelatedMemories
+                      collectionId={collectionId}
                       key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
                       revision={revision} onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
                   </>

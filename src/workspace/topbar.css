@@ -1,0 +1,80 @@
+/* One shared compact bar; native macOS controls occupy the leading drag area. */
+.recall-workspace.app-shell {
+  --sidebar-width: 204px;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+.recall-workspace > .sidebar { grid-row: 2; width: auto; min-height: 0; padding-top: 18px; }
+.recall-workspace > .main-workspace { grid-row: 2; height: auto; min-height: 0; }
+.workspace-topbar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  position: relative;
+  z-index: 20;
+  min-width: 0;
+  user-select: none;
+}
+.titlebar-leading { background: #f8f9fb; border-right: 1px solid #ebecf0; }
+.titlebar-center { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 0 20px; }
+.titlebar-query { position: relative; width: 100%; max-width: 560px; min-width: 0; }
+.recall-trigger {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 34px;
+  padding: 0 11px; text-align: left; color: #93959e;
+  border: 1px solid #e7e7eb; border-radius: 9px; background: #f9f9fb;
+  transition: border-color .15s, background .15s;
+}
+.recall-trigger:hover { background: #f4f4f7; border-color: #dadbe0; }
+.recall-trigger[aria-expanded="true"] { background: #fffdf5; border-color: #d9c67d; }
+.recall-trigger > svg { flex-shrink: 0; }
+.recall-trigger-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.recall-trigger:has(.recall-draft-label) .recall-trigger-text { color: #53545c; }
+.recall-trigger kbd, .new-capture-button kbd { font: 10px -apple-system, sans-serif; white-space: nowrap; color: #9b9ca4; }
+.recall-draft-label { font-size: 10px; color: #a3904a; flex-shrink: 0; }
+.recall-scope-badge { font-size: 10px; color: #8b742c; background: #f4eed8; border-radius: 4px; padding: 2px 5px; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titlebar-actions { display: flex; align-items: center; padding: 0 22px 0 0; }
+.new-capture-button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 9px; background: #ffd02f; color: #423813; font-size: 12px; font-weight: 550; white-space: nowrap; }
+.new-capture-button:hover { background: #f7c820; }
+.new-capture-button kbd { margin-left: 5px; color: #877426; }
+.recall-panel {
+  position: absolute; top: calc(100% + 11px); left: 0; width: 100%; min-width: 320px;
+  max-height: calc(100vh - 80px); overflow-y: auto; padding: 14px 16px 12px;
+  background: #fff; border: 1px solid #e7e5df; border-radius: 14px;
+  box-shadow: 0 12px 36px #28251e18, 0 2px 8px #28251e08;
+  user-select: text;
+}
+.recall-panel[hidden] { display: none; }
+.recall-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.recall-panel-heading > span { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #96917f; }
+.recall-dismiss { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: #9b9ba2; }
+.recall-dismiss:hover { background: #f4f4f6; color: #52535b; }
+.recall-panel .recall-scope { margin: 0 0 10px; padding: 6px 8px; background: #faf7ec; border-radius: 6px; }
+.recall-input textarea {
+  display: block; width: 100%; min-height: 92px; max-height: min(240px, 40vh); resize: vertical;
+  margin: 0; padding: 0 0 10px; border: 0; outline: none; border-radius: 0;
+  background: transparent; font: inherit; font-size: 14px; line-height: 1.8; color: #303136;
+}
+.recall-input textarea::placeholder { color: #a2a2aa; }
+.recall-panel-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid #f0f0f2; }
+.recall-panel-footer > span { font-size: 10px; color: #a1a1a9; }
+.recall-submit { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: #2c2c31; color: white; flex-shrink: 0; }
+.recall-submit:disabled { background: #f0f0f3; color: #b1b2b8; opacity: 1; }
+.recall-panel > .workspace-error { margin: 10px 0 0; font-size: 12px; }
+.workspace-topbar button:focus-visible { outline: 2px solid #b89b35; outline-offset: 2px; }
+.capture-dialog.workspace-dialog { margin-top: 66px; }
+@media (max-width: 1050px) {
+  .recall-workspace.app-shell { --sidebar-width: 182px; }
+  .new-capture-button kbd { display: none; }
+}
+@media (max-width: 760px) {
+  .recall-workspace.app-shell { --sidebar-width: 164px; }
+  .titlebar-center { padding: 0 14px; }
+  .titlebar-actions { padding-right: 14px; }
+  .recall-trigger kbd { display: none; }
+  .recall-scope-badge { max-width: 70px; }
+  .recall-panel { min-width: 0; width: min(480px, calc(100vw - var(--sidebar-width) - 28px)); }
+}

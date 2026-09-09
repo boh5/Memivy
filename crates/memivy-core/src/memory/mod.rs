@@ -2,11 +2,13 @@
 //! All writes, including future UI/MCP writes, must pass through this module.
 //! Model requests are bounded and run outside database transactions.
 mod access;
+mod collection_recommendations;
 mod conversations;
 mod db;
 mod discussion;
 mod library;
 mod mcp;
+mod navigation;
 mod organization;
 mod records;
 mod related;
@@ -14,9 +16,11 @@ mod retrieval;
 mod transfer;
 mod types;
 
+pub use collection_recommendations::*;
 pub use db::MemoryStore;
 pub use library::*;
 pub use mcp::*;
+pub use navigation::*;
 pub use organization::*;
 pub use related::*;
 pub use transfer::*;
@@ -33,6 +37,10 @@ pub enum DataError {
     Database,
     #[error("数据库正忙，本次写入未确认完成，请使用原请求重试")]
     Busy,
+    #[error("已有同名专题，请换一个名称")]
+    CollectionName,
+    #[error("置顶或专题已达到 100 项，请先整理后再添加")]
+    NavigationLimit,
     #[error("输入无效或超过长度限制")]
     Invalid,
     #[error("内容不存在、已删除或不可用")]

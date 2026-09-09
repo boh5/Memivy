@@ -14,6 +14,10 @@ pub struct LibraryQuery {
     pub until: Option<i64>,
     pub offset: usize,
     pub limit: usize,
+    pub pinned: bool,
+    pub collection_id: Option<String>,
+    pub exclude_collection_id: Option<String>,
+    pub oldest: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -22,7 +26,7 @@ pub struct RecordKey {
     pub id: String,
 }
 impl RecordKey {
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         valid_id(&self.id)?;
         if !matches!(self.kind.as_str(), "memory" | "capture") {
             return Err(DataError::Invalid);
@@ -167,6 +171,12 @@ impl MemoryStore {
         {
             return Err(DataError::Invalid);
         }
+        for collection in [&q.collection_id, &q.exclude_collection_id]
+            .into_iter()
+            .flatten()
+        {
+            super::navigation::active_collection(tx, collection)?;
+        }
         let state = if q.trash { "trashed" } else { "active" };
         let availability = if q.trash { "trashed" } else { "active" };
         let source_visibility = if q.trash {
@@ -207,16 +217,28 @@ impl MemoryStore {
             let p = bind(until.into());
             filters.push(format!("updated_at<{p}"));
         }
+        if q.pinned {
+            filters.push("EXISTS(SELECT 1 FROM record_pins p WHERE p.kind=items.kind AND p.record_id=items.id)".into());
+        }
+        for (collection, exclude) in [(&q.collection_id, false), (&q.exclude_collection_id, true)] {
+            if let Some(collection) = collection {
+                let p = bind(Value::Text(collection.clone()));
+                filters.push(format!("{}EXISTS(SELECT 1 FROM collection_entries ce WHERE ce.collection_id={p} AND ce.kind=items.kind AND ce.record_id=items.id)", if exclude { "NOT " } else { "" }));
+            }
+        }
         let limit = if q.limit == 0 { 40 } else { q.limit.min(100) };
         let raw_filter = if q.trash {
             "s.trash_owner IS NULL"
+        } else if q.pinned || q.collection_id.is_some() {
+            "1"
         } else {
             "s.understanding!='attached'"
         };
+        let chronological = if q.oldest { "ASC" } else { "DESC" };
         let sql = format!("WITH items AS (
           SELECT 'memory' kind,m.id,v.id version_id,v.title,v.body,m.updated_at FROM memories m JOIN memory_versions v ON v.id=m.current_version_id WHERE m.state='{state}'
           UNION ALL SELECT 'capture',c.id,NULL,'',c.text,c.created_at FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='{availability}' AND {raw_filter}
-        ) SELECT kind,id,version_id,title,body,updated_at FROM items WHERE {} ORDER BY ({}) DESC,updated_at DESC,kind,id LIMIT {} OFFSET {}", filters.join(" AND "), score.join("+"), limit+1,q.offset);
+        ) SELECT kind,id,version_id,title,body,updated_at FROM items WHERE {} ORDER BY ({}) DESC,updated_at {chronological},kind,id LIMIT {} OFFSET {}", filters.join(" AND "), score.join("+"), limit+1,q.offset);
         type Row = (String, String, Option<String>, String, String, i64);
         let rows: Vec<Row> = tx
             .prepare(&sql)

@@ -57,10 +57,21 @@ fn turn(db: &Connection, id: &str) -> Result<Turn> {
 }
 impl MemoryStore {
     pub fn create_conversation(&self, conversation: &str, title: &str) -> Result<Conversation> {
+        self.create_scoped_conversation(conversation, title, None)
+    }
+    pub fn create_scoped_conversation(
+        &self,
+        conversation: &str,
+        title: &str,
+        collection: Option<&str>,
+    ) -> Result<Conversation> {
         valid_id(conversation)?;
         valid_text(title, 200)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(collection) = collection {
+            super::navigation::active_collection(&tx, collection)?;
+        }
         if let Some(old) = tx
             .query_row(
                 "SELECT title FROM conversations WHERE id=?",
@@ -69,7 +80,14 @@ impl MemoryStore {
             )
             .optional()?
         {
-            if old != title {
+            let old_scope: Option<String> = tx
+                .query_row(
+                    "SELECT collection_id FROM conversation_collections WHERE conversation_id=?",
+                    [conversation],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if old != title || old_scope.as_deref() != collection {
                 return Err(DataError::RequestConflict);
             }
         } else {
@@ -78,12 +96,15 @@ impl MemoryStore {
                 params![conversation, title, now()?],
             )?;
         }
+        if let Some(collection) = collection {
+            tx.execute("INSERT OR IGNORE INTO conversation_collections(conversation_id,collection_id) VALUES(?1,?2)",params![conversation,collection])?;
+        }
         tx.commit()?;
         self.conversation(conversation)
     }
     pub fn conversation(&self, conversation: &str) -> Result<Conversation> {
         Ok(self.connection()?.query_row(
-            "SELECT id,title,draft,updated_at FROM conversations WHERE id=?",
+            "SELECT id,title,draft,updated_at,(SELECT collection_id FROM conversation_collections cc WHERE cc.conversation_id=conversations.id) FROM conversations WHERE id=?",
             [conversation],
             |r| {
                 Ok(Conversation {
@@ -91,12 +112,13 @@ impl MemoryStore {
                     title: r.get(1)?,
                     draft: r.get(2)?,
                     updated_at: r.get(3)?,
+                    collection_id: r.get(4)?,
                 })
             },
         )?)
     }
     pub fn conversations(&self, limit: usize) -> Result<Vec<Conversation>> {
-        Ok(self.connection()?.prepare("SELECT id,title,draft,updated_at FROM conversations ORDER BY updated_at DESC,id LIMIT ?")?.query_map([limit.clamp(1,100) as i64],|r|Ok(Conversation{id:r.get(0)?,title:r.get(1)?,draft:r.get(2)?,updated_at:r.get(3)?}))?.collect::<rusqlite::Result<_>>()?)
+        Ok(self.connection()?.prepare("SELECT id,title,draft,updated_at,(SELECT collection_id FROM conversation_collections cc WHERE cc.conversation_id=conversations.id) FROM conversations ORDER BY updated_at DESC,id LIMIT ?")?.query_map([limit.clamp(1,100) as i64],|r|Ok(Conversation{id:r.get(0)?,title:r.get(1)?,draft:r.get(2)?,updated_at:r.get(3)?,collection_id:r.get(4)?}))?.collect::<rusqlite::Result<_>>()?)
     }
     pub fn save_conversation_draft(&self, conversation: &str, text: &str) -> Result<()> {
         if text.len() > 32 * 1024 {
@@ -209,6 +231,16 @@ impl MemoryStore {
         let allowed = sources(&tx, &current.assistant.id, false)?;
         if citations.iter().any(|s| !allowed.contains(s)) {
             return Err(DataError::Invalid);
+        }
+        let scope: Option<String> = tx.query_row("SELECT cc.collection_id FROM conversation_collections cc JOIN turns t ON t.conversation_id=cc.conversation_id WHERE t.id=?",[request],|r|r.get(0)).optional()?;
+        if let Some(collection) = &scope {
+            super::navigation::active_collection(&tx, collection)?;
+            // Recheck all supplied evidence, including facts used for ideas/conclusion.
+            for source in &allowed {
+                if !super::navigation::source_in_collection(&tx, collection, source)? {
+                    return Err(DataError::Unavailable);
+                }
+            }
         }
         for source in citations {
             match resolve(&tx, source, 1) {

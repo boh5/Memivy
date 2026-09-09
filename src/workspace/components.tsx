@@ -22,10 +22,12 @@ export function Modal({
   title,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const backdropPointer = useRef<number | null>(null);
@@ -41,7 +43,7 @@ export function Modal({
   }, []);
   return (
     <dialog
-      className="workspace-dialog"
+      className={`workspace-dialog ${className}`.trim()}
       ref={dialog}
       aria-label={title}
       onCancel={(e) => {

@@ -68,15 +68,17 @@ test('late acknowledgement clears the same sent draft in a reopened input', asyn
 test('a receipt is shown only for its record and undo targets that record', async t => {
   const f=workspaceFixture(t), App=f.load('src/workspace/App.tsx').default, Detail=f.load('src/workspace/MemoryDetail.tsx').default;
   const app=f.mount(App);await f.settle();
-  f.find(app,n=>n.type==='button'&&f.text(n)==='记忆库').props.onClick();await f.settle();
-  const select=async id=>{f.find(app,n=>n.type==='button'&&n.key===`memory:${id}`).props.onClick();await f.settle();};
+  const List=f.load('src/workspace/MemoryList.tsx').default;
+  const select=async id=>{f.find(app,n=>n.type===List).props.onSelect({kind:'memory',id});await f.settle();};
   await select('a');
   const receipt={request_id:'edit-a',memory_id:'a',capture_id:'raw-a',before_version:'v-a0',after_version:'v-a1',action:'edit'};
   f.find(app,n=>n.type===Detail).props.onChanged(f.keyA,receipt);await f.settle();
   await select('b');
   const b=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
+  f.find(b,n=>n.props.role==='tab'&&f.text(n).startsWith('版本历史')).props.onClick();await f.settle();
   assert(!f.nodes(b.tree).some(n=>n.type==='button'&&f.text(n)==='撤销这次修改'));f.unmount(b);
   await select('a');const a=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
+  f.find(a,n=>n.props.role==='tab'&&f.text(n).startsWith('版本历史')).props.onClick();await f.settle();
   f.find(a,n=>n.type==='button'&&f.text(n)==='撤销这次修改').props.onClick();await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='library_action').at(-1).args.action.original_request,'edit-a');
   await select('b');await select('a');assert.equal(f.find(app,n=>n.type===Detail).props.initialReceipt,null);
@@ -93,12 +95,15 @@ test('loading older messages preserves the visible message and new replies still
   f.messages(()=>[msg(51)]);f.render(view,{...props(f),revision:1});await f.settle();assert.equal(view.dom.scrolls,1);
 });
 
-test('an invalid editor draft does not prevent submitting a valid home capture', async t => {
+test('an invalid editor draft does not prevent submitting a valid quick capture', async t => {
   const f=workspaceFixture(t), {useDraft}=f.load('src/workspace/useDraft.ts');
   const a=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();
   a.tree.update({title:'中文'.repeat(40),body:'无效标题的草稿'});await f.settle();f.unmount(a);
   const App=f.load('src/workspace/App.tsx').default, app=f.mount(App);await f.settle();
-  const formNode=f.find(app,n=>typeof n.type==='function'&&n.props.mode==='capture');
+  f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
+  const Dialog=f.load('src/workspace/CaptureDialog.tsx').default;
+  const dialog=f.mount(Dialog,f.find(app,n=>n.type===Dialog).props);await f.settle();
+  const formNode=f.find(dialog,n=>typeof n.type==='function'&&n.props.mode==='capture');
   const form=f.mount(formNode.type,formNode.props);await f.settle();
   f.overrides.library_capture=async ({request})=>({id:'saved',text:request.text});
   textarea(f,form).props.onChange({target:{value:'有效的首页记录'}});await f.settle();

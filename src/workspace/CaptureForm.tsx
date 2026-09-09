@@ -3,7 +3,7 @@ import { Icon } from "../ui";
 import { call, errorText, type Key, type Raw } from "./api";
 import { ErrorNotice } from "./components";
 import { useDraft } from "./useDraft";
-import { isSubmitKey } from "./keyboard";
+import { isRecallSubmitKey, isSubmitKey } from "./keyboard";
 import DraftConflict from "./DraftConflict";
 export default function CaptureForm({
   onSaved,
@@ -11,7 +11,7 @@ export default function CaptureForm({
   mode,
   onMode,
   onEdit,
-  focus, quick = false, sourceApp = "Memivy", onBusy, onReady,
+  focus, quick = false, sourceApp = "Memivy", onBusy, onReady, presentation = "panel", onDraftChange,
 }: {
   onSaved: (key: Key) => void;
   onAsk: (question: string, id: string) => Promise<void>;
@@ -23,6 +23,8 @@ export default function CaptureForm({
   sourceApp?: string;
   onBusy?: (busy: boolean) => void;
   onReady?: () => void;
+  presentation?: "panel" | "capture" | "query";
+  onDraftChange?: (body: string) => void;
 }) {
   const draft = useDraft(quick ? (mode === "capture" ? "quick_capture" : "quick_question") : (mode === "capture" ? "capture" : "question"), {
     title: "",
@@ -36,8 +38,16 @@ export default function CaptureForm({
     lock = useRef(false),
     composing = useRef(false);
   useEffect(() => {
-    if (focus && draft.ready && !busy) { input.current?.focus(); onReady?.(); }
-  }, [focus, draft.ready, busy]);
+    if (draft.ready) onDraftChange?.(draft.value.body);
+  }, [draft.ready, draft.value.body, onDraftChange]);
+  useEffect(() => {
+    if (focus && draft.ready) { input.current?.focus(); onReady?.(); }
+  }, [focus, draft.ready]);
+  useEffect(() => {
+    // Pinned capture stays ready for another note; a submitted query hands focus
+    // to the discussion instead of taking it back when the request finishes.
+    if (presentation !== "query" && focus && draft.ready && !busy) input.current?.focus();
+  }, [busy, presentation, focus, draft.ready]);
   async function save() {
     if (lock.current || !draft.ready || !draft.value.body.trim()) return;
     const submittedAt = Date.now();
@@ -73,8 +83,8 @@ export default function CaptureForm({
   }
   return (
     <>
-      <div className="workspace-composer">
-        <div className="composer-top">
+      <div className={presentation === "query" ? "recall-input" : "workspace-composer"}>
+        {presentation === "panel" && <div className="composer-top">
           <div className="segmented">
             <button
               aria-pressed={mode === "capture"}
@@ -96,14 +106,16 @@ export default function CaptureForm({
           <span>
             {mode === "capture" ? "想法不用整理好再来" : "结合记忆，一起接着想"}
           </span>
-        </div>
+        </div>}
         <textarea
           ref={input}
-          aria-label={mode === "capture" ? "记下想法" : "问一问"}
+          aria-label={mode === "capture" ? "记下想法" : presentation === "query" ? "搜索记忆或提问" : "问一问"}
+          rows={presentation === "query" ? 3 : undefined}
+          title={presentation === "query" ? "AI 从当前范围的记忆中查找并回答 · Enter 提问，Shift+Enter 换行" : undefined}
           placeholder={
             mode === "capture"
               ? "一句想法，一段刚刚说过的话……"
-              : "关于过去的记录，你想问些什么？"
+              : presentation === "query" ? "你想找回什么，或了解什么？" : "关于过去的记录，你想问些什么？"
           }
           value={draft.value.body}
           disabled={!draft.ready || busy}
@@ -118,13 +130,20 @@ export default function CaptureForm({
             composing.current = false;
           }}
           onKeyDown={(e) => {
-            if (isSubmitKey({ ...e, isComposing: e.nativeEvent.isComposing }, composing.current)) {
+            const submit = presentation === "query" ? isRecallSubmitKey : isSubmitKey;
+            if (submit({ ...e, isComposing: e.nativeEvent.isComposing }, composing.current)) {
               e.preventDefault();
               void save();
             }
           }}
         />
-        <div className="composer-bottom">
+        {presentation === "query" ? <div className="recall-panel-footer">
+          <span>{draft.saved ? "Enter 提问 · Shift+Enter 换行" : "保存草稿中…"}</span>
+          <button className="recall-submit" aria-label="从记忆中查找并回答" title="查找并回答"
+            disabled={!draft.ready || busy || !draft.value.body.trim()} onClick={() => void save()}>
+            <Icon name={busy ? "refresh" : "arrow"} size={16} />
+          </button>
+        </div> : <div className="composer-bottom">
           <span>
             {draft.saved
               ? mode === "capture"
@@ -147,7 +166,7 @@ export default function CaptureForm({
                 : "问一问"}
             <Icon name="arrow" size={16} />
           </button>
-        </div>
+        </div>}
       </div>
       {quick && mode === "capture" && <div className="quick-source">
         <span>来源</span>

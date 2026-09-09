@@ -40,3 +40,12 @@ test('backup selection stages only, cancel discards it, restore requires the exp
   f.unmount(view);await f.settle();assert.deepEqual(restore,['staged']);
   assert.equal(f.calls.filter(c=>c.name==='backup_discard').length,1,'unmount must not discard an approved restore');
 });
+
+test('related-memory requests retain the visible collection scope',async t=>{
+ const f=workspaceFixture(t);f.overrides.memory_related=()=>[];
+ const props={memoryId:'a',versionId:'av',revision:0,collectionId:'scope-a',onOpen(){},onDiscuss(){}};
+ const view=f.mount(f.load('src/workspace/RelatedMemories.tsx').default,props);
+ await wait();await f.settle();assert.equal(f.calls.at(-1).args.collectionId,'scope-a');
+ f.render(view,{...props,collectionId:undefined});await wait();await f.settle();
+ assert.equal(f.calls.at(-1).args.collectionId,undefined);
+});

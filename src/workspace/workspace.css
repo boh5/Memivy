@@ -342,17 +342,21 @@ mark {
   gap: 6px;
   margin-left: auto;
 }
-.toolbar-actions button {
+.toolbar-actions > button,
+.toolbar-button {
   border: 1px solid #e7e8eb;
   border-radius: 20px;
   padding: 7px 11px;
   font-size: 11px;
   color: #676971;
+  white-space: nowrap;
 }
-.toolbar-actions button:hover {
+.toolbar-actions > button:hover:not(:disabled),
+.toolbar-button:hover:not(:disabled) {
   background: #f8f8fa;
 }
-.toolbar-actions button.danger-text {
+.toolbar-actions > button.danger-text,
+.record-more-actions button.danger-text {
   color: #ae4f4f;
 }
 .detail-back {
@@ -728,6 +732,8 @@ mark {
   border: 1px solid var(--line);
   border-radius: 20px;
   letter-spacing: 2px;
+  font-size: 11px;
+  color: #676971;
 }
 .record-more > summary::-webkit-details-marker {
   display: none;
@@ -747,7 +753,7 @@ mark {
   box-shadow: 0 8px 24px #1c1c1e12;
   z-index: 20;
 }
-.toolbar-actions .record-more-actions button {
+.record-more-actions button {
   display: block;
   width: 100%;
   text-align: left;
@@ -755,11 +761,14 @@ mark {
   border-radius: 6px;
   padding: 9px 12px;
   white-space: nowrap;
+  font-size: 11px;
+  color: #676971;
 }
 .record-more-actions button:hover {
   background: #f6f6f3;
 }
-.toolbar-actions > button {
+.toolbar-actions > button,
+.toolbar-button {
   display: inline-flex;
   align-items: center;
   gap: 5px;

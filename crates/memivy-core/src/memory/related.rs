@@ -19,12 +19,29 @@ impl MemoryStore {
         memory_id: &str,
         expected_version: &str,
     ) -> Result<Vec<RelatedMemory>> {
+        self.related_memories_in_collection(memory_id, expected_version, None)
+    }
+    pub fn related_memories_in_collection(
+        &self,
+        memory_id: &str,
+        expected_version: &str,
+        collection: Option<&str>,
+    ) -> Result<Vec<RelatedMemory>> {
         valid_id(memory_id)?;
         valid_id(expected_version)?;
         let mut db = self.connection()?;
         retrieval::budget(&db)?;
         let tx = db.transaction()?;
         let current = records::head(&tx, memory_id, expected_version)?;
+        if let Some(collection) = collection
+            && !super::navigation::source_in_collection(
+                &tx,
+                collection,
+                &SourceRef::Version(expected_version.into()),
+            )?
+        {
+            return Err(DataError::Unavailable);
+        }
         let mut terms: Vec<String> = tx.prepare("SELECT k.terms FROM capture_keywords k JOIN version_captures vc ON vc.capture_id=k.capture_id JOIN capture_state cs ON cs.capture_id=k.capture_id WHERE vc.version_id=? AND cs.availability='active' ORDER BY k.capture_id LIMIT 8")?
             .query_map([expected_version], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?
             .into_iter().flat_map(|s| s.split_whitespace().map(str::to_owned).collect::<Vec<_>>()).collect();
@@ -38,8 +55,8 @@ impl MemoryStore {
         fallback.truncate(4);
         let mut ranked: HashMap<String, (f64, String, SourceRef)> = HashMap::new();
         // Start from indexed version/capture IDs, never scan all memory heads per hit.
-        let mut targets = tx.prepare_cached("SELECT m.id,m.current_version_id FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=?1 AND m.current_version_id=v.id AND m.state='active' AND m.id!=?3
-            UNION ALL SELECT m.id,m.current_version_id FROM version_captures vc INDEXED BY versions_by_capture CROSS JOIN memory_versions v CROSS JOIN memories m WHERE vc.capture_id=?2 AND v.id=vc.version_id AND m.id=v.memory_id AND m.current_version_id=v.id AND m.state='active' AND m.id!=?3 LIMIT 8")?;
+        let mut targets = tx.prepare_cached("SELECT m.id,m.current_version_id FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=?1 AND m.current_version_id=v.id AND m.state='active' AND m.id!=?3 AND (?4 IS NULL OR EXISTS(SELECT 1 FROM collection_entries ce WHERE ce.collection_id=?4 AND ce.kind='memory' AND ce.record_id=m.id))
+            UNION ALL SELECT m.id,m.current_version_id FROM version_captures vc INDEXED BY versions_by_capture CROSS JOIN memory_versions v CROSS JOIN memories m WHERE vc.capture_id=?2 AND v.id=vc.version_id AND m.id=v.memory_id AND m.current_version_id=v.id AND m.state='active' AND m.id!=?3 AND (?4 IS NULL OR EXISTS(SELECT 1 FROM collection_entries ce WHERE ce.collection_id=?4 AND ce.kind='memory' AND ce.record_id=m.id)) LIMIT 8")?;
         for (pass, queries) in [terms.clone(), fallback].into_iter().enumerate() {
             if pass == 1 {
                 if ranked.len() >= 3 {
@@ -47,15 +64,22 @@ impl MemoryStore {
                 }
                 terms.extend(queries.clone());
             }
-            let hits = retrieval::source_hits(&tx, &queries, retrieval::VersionScope::Current)?;
+            let hits = retrieval::source_hits_in_collection(
+                &tx,
+                &queries,
+                retrieval::VersionScope::Current,
+                collection,
+            )?;
             for hit in hits {
                 let (version, capture) = match &hit.source {
                     SourceRef::Version(id) => (Some(id), None),
                     SourceRef::Capture(id) => (None, Some(id)),
                 };
-                for row in targets.query_map(params![version, capture, memory_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })? {
+                for row in targets
+                    .query_map(params![version, capture, memory_id, collection], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
+                {
                     let (id, version) = row?;
                     ranked
                         .entry(id)

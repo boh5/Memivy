@@ -17,6 +17,7 @@ pub(crate) struct Workspace {
     config_lock: Mutex<()>,
     pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
     pub(crate) exiting: AtomicBool,
+    recommendation_lock: tokio::sync::Mutex<()>,
     tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
 pub(crate) fn model_available(state: &Workspace) -> bool {
@@ -51,11 +52,16 @@ async fn discussion_open(
     id: String,
     title: String,
     context: Vec<SourceRef>,
+    collection_id: Option<String>,
 ) -> HostResult<Conversation> {
     require(&window)?;
     let s = state.store.clone();
     blocking(move || {
-        let topic = s.create_conversation(&id, &title.chars().take(60).collect::<String>())?;
+        let topic = s.create_scoped_conversation(
+            &id,
+            &title.chars().take(60).collect::<String>(),
+            collection_id.as_deref(),
+        )?;
         let draft_key = format!("discussion:{id}");
         if s.workspace_draft(&draft_key)?.is_none() {
             s.save_workspace_draft(&WorkspaceDraft {
@@ -73,6 +79,7 @@ async fn discussion_open(
     .await
 }
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Three framework arguments; retain the shared main/panel IPC contract.
 async fn discussion_ask(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
@@ -81,6 +88,7 @@ async fn discussion_ask(
     topic_id: String,
     question: String,
     context: Vec<SourceRef>,
+    collection_id: Option<String>,
 ) -> HostResult<Conversation> {
     require(&window)?;
     validate_config(&state.config)?;
@@ -98,15 +106,28 @@ async fn discussion_ask(
     // Retried command delivery reuses the attempt, never starts another request.
     if let Ok(old) = store.turn(&id) {
         let _ = old;
+        let previous = store.conversation(&topic_id).map_err(|e| e.to_string())?;
+        if (collection_id.is_some() || id == topic_id) && previous.collection_id != collection_id {
+            return Err(DataError::RequestConflict.to_string());
+        }
         store
             .start_turn(&id, &topic_id, &question, &context)
             .map_err(|e| e.to_string())?;
         return store.conversation(&topic_id).map_err(|e| e.to_string());
     }
     let topic = match store.conversation(&topic_id) {
-        Ok(topic) => topic,
+        Ok(topic) => {
+            if collection_id.is_some() && topic.collection_id != collection_id {
+                return Err(DataError::Conflict.to_string());
+            }
+            topic
+        }
         Err(DataError::Unavailable) => store
-            .create_conversation(&topic_id, &question.chars().take(60).collect::<String>())
+            .create_scoped_conversation(
+                &topic_id,
+                &question.chars().take(60).collect::<String>(),
+                collection_id.as_deref(),
+            )
             .map_err(|e| e.to_string())?,
         Err(e) => return Err(e.to_string()),
     };
@@ -333,7 +354,29 @@ fn start_organizer(app: tauri::AppHandle) {
                         })
                         .await
                         {
-                            Ok(Ok(_)) => None,
+                            Ok(Ok(receipt)) => {
+                                let _ = app.emit("organization-complete", &receipt);
+                                if receipt.status == "applied" {
+                                    let app = app.clone();
+                                    let config = config.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        let state = app.state::<Workspace>();
+                                        let _guard = state.recommendation_lock.lock().await;
+                                        if state.exiting.load(Ordering::Relaxed) {
+                                            return;
+                                        }
+                                        let _ = state
+                                            .store
+                                            .recommend_organization_collections(
+                                                &config,
+                                                &receipt.request_id,
+                                            )
+                                            .await;
+                                        let _ = app.emit("library-refresh", ());
+                                    });
+                                }
+                                None
+                            }
                             Ok(Err(DataError::Invalid)) => Some("invalid"),
                             Ok(Err(DataError::Conflict | DataError::Unavailable)) => {
                                 Some("conflict")
@@ -356,6 +399,163 @@ fn start_organizer(app: tauri::AppHandle) {
             let _ = app.emit("library-refresh", ());
         }
     });
+}
+#[tauri::command]
+async fn navigation_collections(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+) -> HostResult<Vec<Collection>> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.collections()).await
+}
+#[tauri::command]
+async fn navigation_record(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    key: RecordKey,
+) -> HostResult<RecordNavigation> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.record_navigation(&key)).await
+}
+#[tauri::command]
+async fn navigation_pin(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    key: RecordKey,
+    pinned: bool,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.pin_record(&key, pinned)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn navigation_collect(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    key: RecordKey,
+    collection: String,
+    included: bool,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.collect_record(&collection, &key, included)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn navigation_save_collection(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    name: String,
+    description: String,
+    expected: Option<i64>,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.save_collection(&id, &name, &description, expected)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn navigation_archive_collection(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    archived: bool,
+    expected: i64,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let s = state.store.clone();
+    blocking(move || s.archive_collection(&id, archived, expected)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn organization_collections(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    receipt: String,
+) -> HostResult<Vec<CollectionRecommendation>> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    let receipt_id = receipt.clone();
+    if let Some(cached) =
+        blocking(move || store.organization_collection_feedback(&receipt_id)).await?
+    {
+        return Ok(cached);
+    }
+    validate_config(&state.config)?;
+    let config =
+        ModelConfig::read(&state.config).map_err(|_| "连接模型后可重试专题推荐".to_string())?;
+    let _guard = state.recommendation_lock.lock().await;
+    state
+        .store
+        .recommend_organization_collections(&config, &receipt)
+        .await
+        .map_err(|_| "专题推荐暂未完成，记忆已保存。可重试，或在记忆页手动选择专题。".to_string())
+}
+#[tauri::command]
+async fn organization_states(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    keys: Vec<RecordKey>,
+) -> HostResult<Vec<OrganizationState>> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.organization_states(&keys)).await
+}
+#[tauri::command]
+async fn organization_dismiss(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    receipt: String,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.dismiss_organization_collections(&receipt)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn organization_collect(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    receipt: String,
+    collection: String,
+    revision: i64,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.accept_organization_collection(&receipt, &collection, revision)).await?;
+    let _ = app.emit("library-refresh", ());
+    Ok(())
+}
+#[tauri::command]
+async fn navigation_suggest(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    collection: String,
+) -> HostResult<Vec<LibraryRow>> {
+    require_main(&window)?;
+    validate_config(&state.config)?;
+    let config = ModelConfig::read(&state.config)
+        .map_err(|_| "连接模型后即可推荐，专题和记忆保持原样".to_string())?;
+    state
+        .store
+        .suggest_collection(&config, &collection)
+        .await
+        .map_err(|_| "推荐未完成，请检查模型连接后重试".to_string())
 }
 #[tauri::command]
 async fn library_query(
@@ -582,10 +782,18 @@ async fn memory_related(
     state: tauri::State<'_, Workspace>,
     memory_id: String,
     expected_version: String,
+    collection_id: Option<String>,
 ) -> HostResult<Vec<RelatedMemory>> {
     require_main(&window)?;
     let store = state.store.clone();
-    blocking(move || store.related_memories(&memory_id, &expected_version)).await
+    blocking(move || {
+        store.related_memories_in_collection(
+            &memory_id,
+            &expected_version,
+            collection_id.as_deref(),
+        )
+    })
+    .await
 }
 #[tauri::command]
 async fn memory_export(
@@ -785,6 +993,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 restore_request: Mutex::new(None),
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
+                recommendation_lock: tokio::sync::Mutex::new(()),
             });
             crate::desktop::setup(app)?;
             start_organizer(app.handle().clone());
@@ -802,6 +1011,17 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         })
         .invoke_handler(tauri::generate_handler![
             library_query,
+            navigation_collections,
+            navigation_record,
+            navigation_pin,
+            navigation_collect,
+            navigation_save_collection,
+            navigation_archive_collection,
+            navigation_suggest,
+            organization_collections,
+            organization_collect,
+            organization_states,
+            organization_dismiss,
             discussion_open,
             discussion_messages,
             discussion_ask,

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 import { randomUUID } from 'node:crypto';
 
-export function workspaceFixture(t, {native = false} = {}) {
+export function workspaceFixture(t, {native = false, modules = {}, timers = {setTimeout, clearTimeout}} = {}) {
 let active;
 const fibers = [];
 const hooks = {
@@ -34,7 +34,7 @@ const hooks = {
 hooks.useLayoutEffect = hooks.useEffect;
 const jsx = (type, props, key) => ({type,props:props||{},key});
 const db = new Map(), calls = [], overrides = {};
-const windowEvents = new Map();
+const windowEvents = new Map(), nativeEvents = new Map();
 let askResolve, messageResponse, scrolls=0;
 const topic = {id:'topic-a',title:'测试讨论',updated_at:1};
 const keyA={kind:'memory',id:'a'}, keyB={kind:'memory',id:'b'};
@@ -51,6 +51,8 @@ const api = {
     if(name==='discussion_messages') return messageResponse ? messageResponse(args) : [];
     if(name==='discussion_ask') return new Promise(resolve=>{askResolve=()=>resolve(topic)});
     if(name==='library_query') return {items:[row(keyA),row(keyB)],next_offset:null};
+    if(name==='navigation_collections') return [];
+    if(name==='navigation_record') return {pinned:false,collections:[]};
     if(name==='library_topics' || name==='library_projects') return [];
     if(name==='workspace_settings') return {configured:true};
     if(name==='library_detail') return {key:args.key,state:'active',title:args.key.id,body:'test',current:{id:'v-'+args.key.id,capture_ids:[],created_at:1,actor:'user'},history:[],sources:[]};
@@ -64,19 +66,20 @@ function load(file) {
   const module={exports:{}};cache.set(file,module.exports);
   const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
   const req = name => {
+    if (Object.hasOwn(modules, name)) return modules[name];
     if(name==='react')return hooks;
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
     if(name==='./api')return api;
     if(name==='./MarkdownEditor')return {default:'MarkdownEditor'};
     if(name==='./Markdown')return {default:'Markdown'};
     if(name==='../ui')return {Icon:'Icon'};
-    if(name.startsWith('@tauri'))return {listen:()=>Promise.resolve(()=>{})};
+    if(name.startsWith('@tauri'))return {listen:(event,fn)=>{if(!nativeEvents.has(event))nativeEvents.set(event,new Set());nativeEvents.get(event).add(fn);return Promise.resolve(()=>nativeEvents.get(event)?.delete(fn));}};
     if(name.endsWith('.css')||name.endsWith('.svg'))return {};
     let p=path.resolve(path.dirname(file),name);
     for(const ext of ['','.tsx','.ts'])if(fs.existsSync(p+ext))return load(p+ext);
     throw Error(name);
   };
-  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,setTimeout,clearTimeout,performance,crypto:{randomUUID},window:{
+  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,...timers,performance,crypto:{randomUUID},window:{
     addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
     removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
   },document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
@@ -111,6 +114,8 @@ function find(f,predicate){const node=nodes(f.tree).find(predicate);assert(node,
   t.after(()=>{for(const f of fibers)if(f.alive)unmount(f);});
   return {load,mount,unmount,settle,find,nodes,text,db,calls,overrides,topic,keyA,keyB,
     focus(){windowEvents.get('focus')?.forEach(fn=>fn());},
+    key(event){windowEvents.get('keydown')?.forEach(fn=>fn(event));},
+    emit(name,payload){nativeEvents.get(name)?.forEach(fn=>fn({payload}));},
     completeAsk(){assert(askResolve);askResolve();},
     messages(fn){messageResponse=fn;},
     render(f,props){f.props=props;render(f);}

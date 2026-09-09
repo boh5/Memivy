@@ -165,6 +165,8 @@ pub struct DiscussionAnswer {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Conversation {
+    #[serde(default)]
+    pub collection_id: Option<String>,
     pub id: String,
     pub title: String,
     pub draft: String,

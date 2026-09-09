@@ -3,6 +3,7 @@ import type { CrepeBuilder } from "@milkdown/crepe/builder";
 import "@milkdown/crepe/theme/common/prosemirror.css";
 import { createRoot } from "react-dom/client";
 import FormattingToolbar from "./FormattingToolbar";
+import Markdown from "./Markdown";
 import type { Format } from "./editorFormatting";
 import "@milkdown/crepe/theme/common/link-tooltip.css";
 import "@milkdown/crepe/theme/common/table.css";
@@ -23,6 +24,7 @@ export default function MarkdownEditor(props: Props) {
     const host = root.current;
     let editor: CrepeBuilder | undefined;
     let created = false;
+    let stage = "resources";
     setReady(false); setError("");
     void (async () => {
       const [{ CrepeBuilder }, { TooltipProvider }, { linkTooltip }, core, { $prose, replaceAll }, { Plugin }, formatting, link, { table }, extensions] = await Promise.all([
@@ -32,6 +34,7 @@ export default function MarkdownEditor(props: Props) {
         import("@milkdown/crepe/feature/table"), import("./editorExtensions"),
       ]);
       if (cancelled) return;
+      stage = "initialize";
       applied.current = latest.current.value;
       editor = new CrepeBuilder({ root: host, defaultValue: latest.current.value })
         .addFeature(linkTooltip, { inputPlaceholder: "粘贴链接地址" })
@@ -92,8 +95,16 @@ export default function MarkdownEditor(props: Props) {
       setReady(true);
       if (autoFocus) editor.editor.action(ctx => ctx.get(core.editorViewCtx).focus());
     })().catch(async () => {
+      if (!cancelled) {
+        instance.current = null; sync.current = null;
+        setReady(false);
+        // Do not log the exception message: parser errors can contain memory text.
+        console.warn(`[Memivy editor] ${stage} failed`);
+        setError(stage === "resources"
+          ? "编辑器资源未能加载，正文仍可查看。请重试。"
+          : "编辑器未能打开这段内容，正文与草稿仍然保留。请重试。");
+      }
       try { await editor?.destroy(); } catch { /* A partially created editor may already be disposed. */ }
-      if (!cancelled) setError("编辑器未能加载，文字已保留，请重试。");
     });
     return () => { cancelled = true; instance.current = null; sync.current = null; if (created && editor) void editor.destroy(); };
   }, [attempt, label, autoFocus]);
@@ -106,7 +117,8 @@ export default function MarkdownEditor(props: Props) {
   }}>
     <div className="markdown-editor-heading"><span>{label}</span></div>
     {error && <p className="field-help" role="alert">{error} <button type="button" className="quiet" onClick={() => setAttempt(n => n + 1)}>重新加载</button></p>}
-    <div key={attempt} ref={root} className="markdown-editor-host" aria-busy={!ready && !error} />
+    <div key={attempt} ref={root} className="markdown-editor-host" hidden={!!error} aria-busy={!ready && !error} />
+    {error && <section aria-label="保留的正文预览"><Markdown text={value} /></section>}
     {!ready && !error && <p className="field-help">正在准备编辑器…</p>}
     <div className="markdown-editor-hint"><span className="markdown-hint-dot" />支持 Markdown 输入 · 选中文字调整格式</div>
   </div>;

@@ -1,7 +1,7 @@
 //! Bounded, version-bound discussion. The caller owns request cancellation.
 use super::{db::*, records::*, *};
 use crate::model::{self, ModelConfig};
-use rusqlite::{TransactionBehavior, params};
+use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -48,6 +48,15 @@ impl MemoryStore {
             [request],
             |r| r.get(0),
         )?;
+        let scope:Option<String> = tx.query_row("SELECT cc.collection_id FROM conversation_collections cc JOIN turns t ON t.conversation_id=cc.conversation_id WHERE t.id=?",[request],|r|r.get(0)).optional()?;
+        if let Some(collection) = scope {
+            super::navigation::active_collection(&tx, &collection)?;
+            for source in sources {
+                if !super::navigation::source_in_collection(&tx, &collection, source)? {
+                    return Err(DataError::Unavailable);
+                }
+            }
+        }
         let evidence = sources
             .iter()
             .map(|s| resolve_excerpt(&tx, s, 1800, queries, None))
@@ -95,6 +104,16 @@ impl MemoryStore {
         if pinned.len() > 4 || turn.user.text.len() > 16_000 {
             return Err(Failure::InvalidAnswer);
         }
+        let scope = self
+            .conversation_collection(conversation)
+            .map_err(|_| Failure::SourceUnavailable)?;
+        if let Some(collection) = &scope {
+            super::navigation::active_collection(
+                &self.connection().map_err(|_| Failure::SourceUnavailable)?,
+                collection,
+            )
+            .map_err(|_| Failure::SourceUnavailable)?;
+        }
         let history = self
             .discussion_history(conversation, turn.user.seq)
             .map_err(|_| Failure::InvalidAnswer)?;
@@ -124,11 +143,12 @@ impl MemoryStore {
         let store = self.clone();
         let queries = plan.queries.clone();
         let selected = pinned.to_vec();
-        let sources =
-            tokio::task::spawn_blocking(move || store.discussion_sources(&queries, &selected))
-                .await
-                .map_err(|_| Failure::InvalidAnswer)?
-                .map_err(|_| Failure::SourceUnavailable)?;
+        let sources = tokio::task::spawn_blocking(move || {
+            store.scoped_discussion_sources(&queries, &selected, scope.as_deref())
+        })
+        .await
+        .map_err(|_| Failure::InvalidAnswer)?
+        .map_err(|_| Failure::SourceUnavailable)?;
         let evidence = self
             .bind_excerpts(&turn.id, &sources, &plan.queries)
             .map_err(|_| Failure::SourceUnavailable)?;

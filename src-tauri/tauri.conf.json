@@ -14,6 +14,9 @@
       {
         "label": "main",
         "title": "Memivy",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 28 },
         "width": 1140,
         "height": 790,
         "minWidth": 760,
