@@ -46,7 +46,8 @@ export function useDraft(
     // Publish to every current mount and retain failures for retry.
     void drafts.write(next).catch(() => {});
   }
-  async function flush() {
+  async function flush(persistInitial = false) {
+    if (persistInitial && !current.current) await drafts.write(empty.current);
     await drafts.flush(key);
     return current.current || empty.current;
   }

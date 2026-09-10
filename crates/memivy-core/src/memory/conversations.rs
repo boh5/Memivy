@@ -178,6 +178,9 @@ impl MemoryStore {
             return Err(DataError::Conflict);
         }
         for source in evidence {
+            if !super::search::current_source(&tx, source)? {
+                return Err(DataError::Unavailable);
+            }
             resolve(&tx, source, 1)?;
         }
         tx.execute(
@@ -243,6 +246,11 @@ impl MemoryStore {
             }
         }
         for source in citations {
+            if !super::search::current_source(&tx, source)? {
+                tx.execute("UPDATE messages SET status='failed',error_code='source_unavailable' WHERE id=?",[&current.assistant.id])?;
+                tx.commit()?;
+                return Err(DataError::Unavailable);
+            }
             match resolve(&tx, source, 1) {
                 Ok(_) => (),
                 Err(DataError::Unavailable) => {
@@ -319,13 +327,17 @@ impl MemoryStore {
             "DELETE FROM workspace_drafts WHERE key=?",
             [format!("discussion:{conversation}")],
         )?;
+        tx.execute(
+            "DELETE FROM workspace_drafts WHERE key IN (SELECT 'conclusion:'||id FROM messages WHERE conversation_id=?)",
+            [conversation],
+        )?;
         tx.execute("DELETE FROM conversations WHERE id=?", [conversation])?;
         tx.commit()?;
         Ok(())
     }
-    /// Explicit reviewed intent, exact text and destination. A stale/deleted
-    /// destination commits the confirmation capture with a needs_review receipt.
-    /// Deleting its conversation later cannot erase this independent capture.
+    /// Save exactly the reviewed text to its selected destination. A stale target
+    /// rolls back the write; the caller's review draft remains available.
+    /// Deleting a conversation never erases its successfully saved memories.
     pub fn save_conclusion(&self, r: &ConclusionRequest) -> Result<Receipt> {
         self.save_reviewed_conclusion(r, None)
     }
@@ -400,22 +412,29 @@ impl MemoryStore {
                 },
             )
         })() {
-            Ok(result) => result,
-            Err(DataError::Conflict) => Receipt {
-                request_id: r.request_id.clone(),
-                action: "conclusion".into(),
-                capture_id: Some(capture.id),
-                memory_id: None,
-                before_version: None,
-                after_version: None,
-                status: "needs_review".into(),
-            },
-            Err(e) => return Err(e),
+            Ok(receipt) => receipt,
+            Err(DataError::Conflict | DataError::Unavailable) => {
+                // Dropping this transaction also discards its archive writes.
+                return Ok(Receipt {
+                    request_id: r.request_id.clone(),
+                    action: "conclusion".into(),
+                    capture_id: None,
+                    memory_id: None,
+                    before_version: None,
+                    after_version: None,
+                    status: "needs_review".into(),
+                });
+            }
+            Err(error) => return Err(error),
         };
         receipt.action = "conclusion".into();
-        // conclusion_intents preserves the reviewed title and destination even
-        // when the target no longer exists; its IDs deliberately have no FK.
+        // A conflict rolls this transaction back, including the archive.
+        // The caller retains the complete review in its local workspace draft.
         save_receipt(&tx, &receipt, &hash)?;
+        tx.execute(
+            "DELETE FROM workspace_drafts WHERE key=? AND json_extract(payload,'$.request_id')=?",
+            params![format!("conclusion:{}", r.message_id), r.request_id],
+        )?;
         tx.commit()?;
         Ok(receipt)
     }

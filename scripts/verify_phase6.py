@@ -88,7 +88,7 @@ def check(binary):
         assert client.tool("memory_capture",args)["capture_id"] == receipt["capture_id"]
         assert client.tool("memory_capture",{**args,"text":"不一致重试"},failed=True)["code"] == "request_conflict"
         hit = client.tool("memory_search",{"query":"合成证据"})["items"][0]
-        assert hit["record"]["id"] == receipt["capture_id"]
+        assert hit["record"]["id"] == receipt["memory_id"]
         assert hit["origin"]["project"] == "测试项目"
         assert client.call("tools/call", {"name":"memory_search","arguments":{"query":"合成证据","trash":True}})["isError"]
         client.call("tools/call", {"name":"memory_delete","arguments":{}},error=True)
@@ -97,7 +97,7 @@ def check(binary):
         # Acknowledged transaction survives abrupt MCP process death.
         client.close(kill=True)
         client = Client(binary,data,latest=True)
-        assert client.tool("memory_search",{"query":"合成证据"})["items"][0]["record"]["id"] == receipt["capture_id"]
+        assert client.tool("memory_search",{"query":"合成证据"})["items"][0]["record"]["id"] == receipt["memory_id"]
         switch(False)
         assert client.tool("memory_search",{"query":"合成证据"},failed=True)["code"] == "mcp_disabled"
         switch(True)

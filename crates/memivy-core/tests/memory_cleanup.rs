@@ -6,9 +6,10 @@ fn id() -> String {
 fn setup() -> (tempfile::TempDir, MemoryStore, Receipt, RawCapture) {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
+    let capture_request = id();
     let raw = store
         .capture(&CaptureRequest {
-            request_id: id(),
+            request_id: capture_request.clone(),
             text: "9月9日可能上线，不承诺。预算 2500 元。".into(),
             origin: Origin::User {
                 app: "test".into(),
@@ -17,17 +18,9 @@ fn setup() -> (tempfile::TempDir, MemoryStore, Receipt, RawCapture) {
             },
         })
         .unwrap();
-    let receipt = store
-        .apply_capture(&ChangeRequest {
-            request_id: id(),
-            capture_id: raw.id.clone(),
-            destination: Destination::New,
-            title: "计划".into(),
-            body: raw.text.clone(),
-            actor: Actor::User,
-        })
-        .unwrap();
-    (dir, store, receipt, raw)
+    let receipt = store.receipt(&capture_request).unwrap();
+    let archive = store.capture_by_id(&raw.capture_id).unwrap();
+    (dir, store, receipt, archive)
 }
 fn prepare(store: &MemoryStore, r: &Receipt) -> CleanupSnapshot {
     store
@@ -39,6 +32,7 @@ fn prepare(store: &MemoryStore, r: &Receipt) -> CleanupSnapshot {
 }
 fn draft(snapshot: &CleanupSnapshot) -> WorkspaceDraft {
     WorkspaceDraft {
+        conclusion: None,
         key: format!("memory:{}", snapshot.memory_id),
         request_id: id(),
         title: "草稿标题".into(),

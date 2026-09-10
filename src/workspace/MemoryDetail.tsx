@@ -185,8 +185,9 @@ export default function MemoryDetail({
   const [tab, setTab] = useState<"current" | "sources" | "history">("current"),
     [editing, setEditing] = useState(false),
     [version, setVersion] = useState<Version | null>(null);
+  const [archive, setArchive] = useState<{ id: string; text: string } | null>(null);
   const [confirmation, setConfirmation] = useState<
-      "trash" | "purge" | "restore_version" | null
+      "trash" | "purge" | "restore_version" | "restore_archive" | null
     >(null),
     [busy, setBusy] = useState(false),
     [receipt, setReceipt] = useState<Receipt | null>(
@@ -230,7 +231,7 @@ export default function MemoryDetail({
     };
   }, [record.id, record.kind, revision]);
   async function action(
-    kind: "trash" | "purge" | "restore" | "restore_version" | "undo",
+    kind: "trash" | "purge" | "restore" | "restore_version" | "restore_archive" | "undo",
   ) {
     if (!detail || actionLock.current) return;
     actionLock.current = true;
@@ -238,7 +239,10 @@ export default function MemoryDetail({
     setError("");
     try {
       const payload =
-        kind === "restore_version"
+        kind === "restore_archive" ? {
+          action: "restore_archive", request_id: actionId.current, memory_id: record.id,
+          expected: detail.current?.id, capture_id: archive?.id,
+        } : kind === "restore_version"
           ? {
               action: "restore_version",
               request_id: actionId.current,
@@ -308,6 +312,13 @@ export default function MemoryDetail({
       setBusy(false);
     }
   }
+  if (detail?.state === "merged") return <section className="memory-detail-pane" aria-label="归并回执">
+    <div className="memory-detail-toolbar"><button className="detail-back" onClick={onBack}><Icon name="chevron" size={15} />返回列表</button><span>已归并</span></div>
+    <div className="memory-detail-scroll"><header className="memory-title-block"><h1>{detail.title}</h1><p>这条内容已归入另一篇记忆。可以查看目标，或通过回执撤销这次整理。</p></header>
+      <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
+      <ErrorNotice text={error} />
+    </div>
+  </section>;
   const trashed = detail?.state === "trashed";
   return (
     <section className="memory-detail-pane" aria-label="记忆正文">
@@ -334,7 +345,7 @@ export default function MemoryDetail({
                   永久删除
                 </button>
               </>
-            ) : (
+            ) : !detail.current ? null : (
               <>
                 <IconButton label="接着想" icon="chat"
                   disabled={busy || loading || editing}
@@ -393,7 +404,7 @@ export default function MemoryDetail({
               <span className="eyebrow">
                 <Icon name="leaf" size={14} />
                 {detail.current
-                  ? `${detail.current.reason === "cleanup" ? "AI 整理，经我确认" : detail.current.actor === "user" ? "我编辑的" : "AI 整理"} · ${date(detail.current.created_at)}`
+                  ? `${detail.current.reason === "cleanup" ? "AI 整理，经我确认" : detail.current.actor === "user" ? (detail.current.reason === "create" ? "我记录的" : "我编辑的") : "AI 整理"} · ${date(detail.current.created_at)}`
                   : "原话已保存在本机"}
               </span>
               <h1>
@@ -401,16 +412,16 @@ export default function MemoryDetail({
               </h1>
               <p>
                 {detail.current
-                  ? `${detail.current.capture_ids.length} 段原话作为来源`
-                  : "尚未整理；你可以直接阅读、搜索或编辑成记忆。"}
+                  ? `${detail.current.capture_ids.length} 份输入归档`
+                  : "输入归档，仅供核对与恢复，不参与检索。"}
               </p>
               {!trashed && <OrganizationReceipt presentation="status" record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
-            {!trashed && <MemoryCollections record={record} currentVersion={detail.current?.id} revision={revision} onRefresh={() => onChanged()} />}
+            {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} revision={revision} onRefresh={() => onChanged()} />}
             {detail.reviewed_conclusion && !cleaning && !editing && <div className="workspace-warning">
               <p>目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。</p>
               <details><summary>查看保留的完整审核稿</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
-              <button onClick={() => { setTab("current"); setEditing(true); }}>审核保留稿并另存</button>
+              <p className="field-help">请从原讨论重新打开结论审核；输入归档仅供核对。</p>
             </div>}
             <div className="detail-tabs" hidden={cleaning} role="tablist" aria-label="记忆内容">
               <button
@@ -425,7 +436,7 @@ export default function MemoryDetail({
                 aria-selected={tab === "sources"}
                 onClick={() => setTab("sources")}
               >
-                原话与来源 <span>{detail.sources.length}</span>
+                输入归档与来源 <span>{detail.sources.length}</span>
               </button>
               <button
                 role="tab"
@@ -498,6 +509,9 @@ export default function MemoryDetail({
                               附带来源 · <span>{s.capture.origin.uri}</span>
                             </p>
                           )}
+                          {!trashed && detail.current && <button className="outline-button" disabled={busy || editing} onClick={() => {
+                            setArchive({ id: s.id, text: s.capture!.text }); actionId.current = uid(); setConfirmation("restore_archive");
+                          }}>恢复这份输入为正文</button>}
                           <small>
                             原始输入 · {fullDate(s.capture.created_at)}
                           </small>
@@ -576,7 +590,7 @@ export default function MemoryDetail({
               ? "将这条记忆移到回收站？"
               : confirmation === "purge"
                 ? "永久删除这条记忆？"
-                : "恢复所选版本？"
+                : confirmation === "restore_archive" ? "恢复这份输入为正文？" : "恢复所选版本？"
           }
           onClose={() => {
             if (!busy) setConfirmation(null);
@@ -589,6 +603,7 @@ export default function MemoryDetail({
                 ? "这会永久擦除当前内容、专属原话和历史，无法通过 Memivy 恢复。"
                 : "所选内容会成为一个新版本；现在的版本仍保留在历史中。"}
           </p>
+          {confirmation === "restore_archive" && archive && <div className="readable-text">{archive.text}</div>}
           <ErrorNotice text={error} />
           <div className="action-row">
             <button

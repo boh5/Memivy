@@ -55,8 +55,8 @@ fn retries_preserve_exact_text_source_and_one_pending_job() {
     req.text.push('！');
     assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::RequestConflict);
     let key = RecordKey {
-        kind: "capture".into(),
-        id: receipt.capture_id,
+        kind: "memory".into(),
+        id: receipt.memory_id,
     };
     let jobs = s.organization_jobs(&key).unwrap();
     assert_eq!(jobs.len(), 1);
@@ -103,6 +103,7 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     s.create_conversation(&c, "私有草稿秘密").unwrap();
     s.save_conversation_draft(&c, "私有草稿秘密").unwrap();
     s.save_workspace_draft(&WorkspaceDraft {
+        conclusion: None,
         key: "capture".into(),
         request_id: id(),
         title: "私有草稿秘密".into(),
@@ -113,7 +114,11 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     })
     .unwrap();
     let deleted = s.mcp_capture(&request("私有删除秘密")).unwrap();
-    s.trash_capture(&deleted.capture_id).unwrap();
+    s.trash_memory(
+        &deleted.memory_id,
+        &s.memory(&deleted.memory_id).unwrap().current.id,
+    )
+    .unwrap();
     assert!(s.mcp_search(&query("私有")).unwrap().items.is_empty());
 }
 #[test]
@@ -122,13 +127,12 @@ fn snippets_reference_the_used_version_or_original_and_omit_old_bodies() {
     s.set_mcp_enabled(true).unwrap();
     let raw = s.mcp_capture(&request("原始证据 蜂蜜柚子茶")).unwrap();
     let receipt = s
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: raw.capture_id.clone(),
-            destination: Destination::New,
+            memory_id: raw.memory_id.clone(),
+            expected_version: s.memory(&raw.memory_id).unwrap().current.id,
             title: "当前标题".into(),
             body: "当前正文 绿茶".into(),
-            actor: Actor::User,
         })
         .unwrap();
     let current = s.mcp_search(&query("绿茶")).unwrap();
@@ -136,8 +140,13 @@ fn snippets_reference_the_used_version_or_original_and_omit_old_bodies() {
         matches!(&current.items[0].source, SourceRef::Version(v) if Some(v)==receipt.after_version.as_ref())
     );
     let source = s.mcp_search(&query("蜂蜜柚子茶")).unwrap();
-    assert!(matches!(&source.items[0].source, SourceRef::Capture(c) if c==&raw.capture_id));
-    assert!(source.items[0].snippet.contains("蜂蜜柚子茶"));
+    assert!(source.items.is_empty());
+    assert!(
+        s.capture_by_id(&raw.capture_id)
+            .unwrap()
+            .text
+            .contains("蜂蜜柚子茶")
+    );
     let updated = s
         .edit_memory(&EditRequest {
             request_id: id(),

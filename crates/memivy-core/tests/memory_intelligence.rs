@@ -3,7 +3,7 @@ use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
-fn capture(store: &MemoryStore, text: &str) -> RawCapture {
+fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
     store
         .capture(&CaptureRequest {
             request_id: id(),
@@ -16,22 +16,22 @@ fn capture(store: &MemoryStore, text: &str) -> RawCapture {
         })
         .unwrap()
 }
-fn key(raw: &RawCapture) -> RecordKey {
+fn key(raw: &CaptureResult) -> RecordKey {
     RecordKey {
-        kind: "capture".into(),
-        id: raw.id.clone(),
+        kind: "memory".into(),
+        id: raw.memory_id.clone(),
     }
 }
 fn proposal(action: &str) -> OrganizationProposal {
     OrganizationProposal {
         action: action.into(),
         target: String::new(),
-        title: if action == "new" {
+        title: if action == "keep" {
             "测试记忆".into()
         } else {
             String::new()
         },
-        addition: if action == "new" {
+        addition: if action == "keep" {
             "保留这段合成记录".into()
         } else {
             String::new()
@@ -41,9 +41,18 @@ fn proposal(action: &str) -> OrganizationProposal {
         reason: "依据本次原话整理".into(),
     }
 }
+fn keep(s: &MemoryStore, request: &str, saved: &CaptureResult) -> Result<Receipt> {
+    s.edit_memory(&EditRequest {
+        request_id: request.into(),
+        memory_id: saved.memory_id.clone(),
+        expected_version: saved.version_id.clone(),
+        title: "测试记忆".into(),
+        body: s.capture_by_id(&saved.capture_id)?.text,
+    })
+}
 fn seeded(store: &MemoryStore, text: &str) -> Receipt {
     let raw = capture(store, text);
-    store.capture_as_new(&id(), &raw.id).unwrap()
+    keep(store, &id(), &raw).unwrap()
 }
 #[test]
 fn capture_transaction_enqueues_once_and_restart_application_is_idempotent() {
@@ -59,7 +68,7 @@ fn capture_transaction_enqueues_once_and_restart_application_is_idempotent() {
         },
     };
     let raw = store.capture(&req).unwrap();
-    assert_eq!(store.capture(&req).unwrap().id, raw.id);
+    assert_eq!(store.capture(&req).unwrap().memory_id, raw.memory_id);
     let task = store.claim_organization().unwrap().unwrap();
     assert!(store.claim_organization().unwrap().is_none());
     let reopened = MemoryStore::open(dir.path()).unwrap();
@@ -67,15 +76,18 @@ fn capture_transaction_enqueues_once_and_restart_application_is_idempotent() {
     let resumed = reopened.claim_organization().unwrap().unwrap();
     assert_eq!(task.attempt_id, resumed.attempt_id);
     let r = reopened
-        .apply_organization(&resumed, &proposal("new"))
+        .apply_organization(&resumed, &proposal("keep"))
         .unwrap();
     assert_eq!(
         reopened
-            .apply_organization(&resumed, &proposal("new"))
+            .apply_organization(&resumed, &proposal("keep"))
             .unwrap(),
         r
     );
-    assert_eq!(reopened.capture_by_id(&raw.id).unwrap().text, req.text);
+    assert_eq!(
+        reopened.capture_by_id(&raw.capture_id).unwrap().text,
+        req.text
+    );
     reopened.recover_organization().unwrap();
     assert!(reopened.claim_organization().unwrap().is_none());
     assert_eq!(
@@ -98,7 +110,7 @@ fn patches_preserve_unaffected_text_and_undo_does_not_restart_ai() {
         .iter()
         .position(|v| Some(&v.memory_id) == old.memory_id.as_ref())
         .unwrap();
-    let mut p = proposal("append");
+    let mut p = proposal("merge");
     p.target = format!("M{}", index + 1);
     p.changes = vec![LocalChange {
         before: "默认先注册。".into(),
@@ -127,13 +139,15 @@ fn patches_preserve_unaffected_text_and_undo_does_not_restart_ai() {
             .body,
         original
     );
-    assert_eq!(s.capture_by_id(&raw.id).unwrap().understanding, "pending");
+    assert_eq!(
+        s.memory(&raw.memory_id).unwrap().current.body,
+        "首次体验改成先试用，保留其他原则"
+    );
     s.recover_organization().unwrap();
     assert!(s.claim_organization().unwrap().is_none());
-    s.retry_organization(&raw.id).unwrap();
-    assert_ne!(
-        s.claim_organization().unwrap().unwrap().attempt_id,
-        task.attempt_id
+    assert_eq!(
+        s.retry_organization(&raw.memory_id).unwrap_err(),
+        DataError::Conflict
     );
 }
 #[test]
@@ -155,7 +169,7 @@ fn stale_unknown_and_destructive_proposals_never_change_memory() {
         let raw = capture(&s, "原则甲需要补充");
         let mut task = s.claim_organization().unwrap().unwrap();
         s.prepare_organization(&mut task).unwrap();
-        let mut p = proposal("append");
+        let mut p = proposal("merge");
         p.target = "M1".into();
         p.addition = "补充记录".into();
         match mode {
@@ -201,10 +215,14 @@ fn stale_unknown_and_destructive_proposals_never_change_memory() {
                 .unwrap();
             }
             "deleted" => {
-                s.trash_capture(&raw.id).unwrap();
+                s.trash_memory(
+                    &raw.memory_id,
+                    &s.memory(&raw.memory_id).unwrap().current.id,
+                )
+                .unwrap();
             }
             "manual" => {
-                s.capture_as_new(&id(), &raw.id).unwrap();
+                keep(&s, &id(), &raw).unwrap();
             }
             _ => unreachable!(),
         }
@@ -232,14 +250,17 @@ fn deferral_failure_and_retry_keep_raw_without_automatic_loops() {
     let r = s.apply_organization(&task, &proposal("defer")).unwrap();
     assert_eq!(r.action, "defer");
     assert!(s.claim_organization().unwrap().is_none());
-    s.retry_organization(&raw.id).unwrap();
+    s.retry_organization(&raw.memory_id).unwrap();
     let next = s.claim_organization().unwrap().unwrap();
     s.fail_organization(&next.attempt_id, "unavailable")
         .unwrap();
     assert_eq!(s.organization_jobs(&key(&raw)).unwrap()[0].status, "failed");
     assert!(s.claim_organization().unwrap().is_none());
-    assert_eq!(s.capture_by_id(&raw.id).unwrap().text, raw.text);
-    assert!(s.apply_organization(&task, &proposal("new")).is_err());
+    assert_eq!(
+        s.capture_by_id(&raw.capture_id).unwrap().text,
+        "那个方案再说吧"
+    );
+    assert!(s.apply_organization(&task, &proposal("keep")).is_err());
 }
 #[test]
 fn keywords_rebuild_and_erasure_follow_source_availability() {
@@ -247,7 +268,7 @@ fn keywords_rebuild_and_erasure_follow_source_availability() {
     let s = MemoryStore::open(dir.path()).unwrap();
     let raw = capture(&s, "保存合成输入");
     let task = s.claim_organization().unwrap().unwrap();
-    s.apply_organization(&task, &proposal("new")).unwrap();
+    s.apply_organization(&task, &proposal("keep")).unwrap();
     let query = LibraryQuery {
         query: "同义索引".into(),
         ..Default::default()
@@ -255,9 +276,13 @@ fn keywords_rebuild_and_erasure_follow_source_availability() {
     assert_eq!(s.library(&query).unwrap().items.len(), 1);
     s.rebuild_search_index().unwrap();
     assert_eq!(s.library(&query).unwrap().items.len(), 1);
-    s.trash_capture(&raw.id).unwrap();
+    s.trash_memory(
+        &raw.memory_id,
+        &s.memory(&raw.memory_id).unwrap().current.id,
+    )
+    .unwrap();
     assert!(s.library(&query).unwrap().items.is_empty());
-    s.purge_capture(&raw.id).unwrap();
+    s.purge_memory(&raw.memory_id).unwrap();
     s.rebuild_search_index().unwrap();
     assert!(s.library(&query).unwrap().items.is_empty());
     s.check_integrity().unwrap();
@@ -269,10 +294,10 @@ fn manual_new_wins_against_pending_ai_and_retries_do_not_duplicate() {
     let raw = capture(&s, "我选择另存原话");
     let task = s.claim_organization().unwrap().unwrap();
     let request = id();
-    let r = s.capture_as_new(&request, &raw.id).unwrap();
-    assert_eq!(s.capture_as_new(&request, &raw.id).unwrap(), r);
-    assert!(s.capture_as_new(&id(), &raw.id).is_err());
-    assert!(s.apply_organization(&task, &proposal("new")).is_err());
+    let r = keep(&s, &request, &raw).unwrap();
+    assert_eq!(keep(&s, &request, &raw).unwrap(), r);
+    assert!(keep(&s, &id(), &raw).is_err());
+    assert!(s.apply_organization(&task, &proposal("keep")).is_err());
 }
 fn completed(s: &MemoryStore, source: &Receipt) -> Turn {
     let topic = id();
@@ -323,7 +348,14 @@ fn conclusions_append_or_save_exact_reviewed_merge_without_auto_organization() {
         );
         let raw = s.capture_by_id(r.capture_id.as_ref().unwrap()).unwrap();
         assert_eq!(raw.text, request.text);
-        assert!(s.organization_jobs(&key(&raw)).unwrap().is_empty());
+        assert!(
+            s.organization_jobs(&RecordKey {
+                kind: "capture".into(),
+                id: raw.id.clone()
+            })
+            .unwrap()
+            .is_empty()
+        );
         assert!(
             s.save_reviewed_conclusion(&request, Some("迟到的其他融合文本"))
                 .is_err()
@@ -377,12 +409,7 @@ fn stale_merge_keeps_confirmation_without_overwriting_and_can_be_corrected() {
             .body,
         "别处刚刚编辑的正文"
     );
-    assert_eq!(
-        s.capture_by_id(r.capture_id.as_ref().unwrap())
-            .unwrap()
-            .text,
-        "确认原话"
-    );
+    assert!(r.capture_id.is_none());
     assert!(s.claim_organization().unwrap().is_none());
 }
 
@@ -411,41 +438,48 @@ fn conflict_retains_complete_review_after_restart_until_explicit_save_or_erasure
         text: "短结论".into(),
     };
     let merged = "  完整审核稿，包含另外手工修改的段落。\n ";
-    let r = s.save_reviewed_conclusion(&request, Some(merged)).unwrap();
-    let capture = r.capture_id.clone().unwrap();
-    let s = MemoryStore::open(dir.path()).unwrap();
-    assert_eq!(
-        s.save_reviewed_conclusion(&request, Some(merged)).unwrap(),
-        r
-    );
-    let key = RecordKey {
-        kind: "capture".into(),
-        id: capture.clone(),
+    let draft = WorkspaceDraft {
+        conclusion: Some(ConclusionDraft {
+            destination: request.destination.clone(),
+            merged_body: Some(merged.into()),
+        }),
+        key: format!("conclusion:{}", request.message_id),
+        request_id: request.request_id.clone(),
+        title: request.title.clone(),
+        body: request.text.clone(),
+        expected_version: None,
+        origin: None,
+        context: vec![],
     };
-    let detail = s.library_detail(&key).unwrap();
-    let reviewed = detail.reviewed_conclusion.unwrap();
-    assert_eq!(reviewed.body, merged);
-    assert_eq!(reviewed.title, request.title);
-    assert_eq!(detail.body, request.text);
-    assert!(
-        s.library(&LibraryQuery {
-            query: "完整审核稿".into(),
-            ..Default::default()
-        })
-        .unwrap()
-        .items
-        .is_empty()
+    s.save_workspace_draft(&draft).unwrap();
+    let r = s.save_reviewed_conclusion(&request, Some(merged)).unwrap();
+    assert_eq!(r.status, "needs_review");
+    assert!(r.capture_id.is_none());
+    let s = MemoryStore::open(dir.path()).unwrap();
+    let restored = s.workspace_draft(&draft.key).unwrap().unwrap();
+    assert_eq!(restored.body, request.text);
+    assert_eq!(
+        restored.conclusion.unwrap().merged_body.as_deref(),
+        Some(merged)
     );
+    assert!(
+        s.search(&SearchRequest::text("完整审核稿", 8))
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    // Explicitly rechecking the target allows the exact reviewed text to save.
+    let current = s.memory(old.memory_id.as_ref().unwrap()).unwrap().current;
+    let confirmed = ConclusionRequest {
+        request_id: id(),
+        destination: Destination::Existing {
+            memory_id: current.memory_id,
+            expected_version: current.id,
+        },
+        ..request
+    };
     let saved = s
-        .save_library_edit(&WorkspaceDraft {
-            key: format!("capture:{capture}"),
-            request_id: id(),
-            title: reviewed.title,
-            body: reviewed.body,
-            expected_version: None,
-            origin: None,
-            context: vec![],
-        })
+        .save_reviewed_conclusion(&confirmed, Some(merged))
         .unwrap();
     assert_eq!(
         s.memory(saved.memory_id.as_ref().unwrap())
@@ -453,26 +487,6 @@ fn conflict_retains_complete_review_after_restart_until_explicit_save_or_erasure
             .current
             .body,
         merged
-    );
-    assert_eq!(s.capture_by_id(&capture).unwrap().text, request.text);
-    s.undo(&id(), &saved.request_id).unwrap();
-    s.trash_capture(&capture).unwrap();
-    assert!(
-        s.library_detail(&key)
-            .unwrap()
-            .reviewed_conclusion
-            .is_none()
-    );
-    s.purge_capture(&capture).unwrap();
-    let db = rusqlite::Connection::open(s.database_path()).unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM conclusion_intents WHERE capture_id=?",
-            [&capture],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0
     );
 }
 
@@ -493,12 +507,12 @@ fn organization_keeps_project_provenance_and_rejects_cross_project_targets() {
         .unwrap()
     };
     let a = scoped("项目 A", "SQLite 连接池默认 4 个连接");
-    let memory_a = s.capture_as_new(&id(), &a.id).unwrap();
+    let memory_a = keep(&s, &id(), &a).unwrap();
     let b = scoped("项目 B", "SQLite 连接池默认 6 个连接");
-    let memory_b = s.capture_as_new(&id(), &b.id).unwrap();
+    let memory_b = keep(&s, &id(), &b).unwrap();
     let raw = scoped("项目 B", "SQLite 连接池改为 8 个连接");
     let mut task = s.claim_organization().unwrap().unwrap();
-    assert_eq!(task.capture.id, raw.id);
+    assert_eq!(task.capture_id, raw.capture_id);
     s.prepare_organization(&mut task).unwrap();
     assert!(
         task.candidates
@@ -520,7 +534,7 @@ fn organization_keeps_project_provenance_and_rejects_cross_project_targets() {
             .unwrap()
             .current,
     ];
-    let mut p = proposal("append");
+    let mut p = proposal("merge");
     p.target = "M1".into();
     p.addition = "连接池改为 8 个连接".into();
     assert_eq!(s.apply_organization(&task, &p), Err(DataError::Conflict));
@@ -529,6 +543,6 @@ fn organization_keeps_project_provenance_and_rejects_cross_project_targets() {
             .unwrap()
             .current
             .body,
-        a.text
+        "SQLite 连接池默认 4 个连接"
     );
 }

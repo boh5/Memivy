@@ -23,18 +23,12 @@ fn capture_request(text: &str) -> CaptureRequest {
     }
 }
 fn new_memory(store: &MemoryStore, text: &str) -> (RawCapture, Receipt) {
-    let c = store.capture(&capture_request(text)).unwrap();
-    let receipt = store
-        .apply_capture(&ChangeRequest {
-            request_id: id(),
-            capture_id: c.id.clone(),
-            destination: Destination::New,
-            title: "首次体验".into(),
-            body: text.into(),
-            actor: Actor::Ai,
-        })
-        .unwrap();
-    (c, receipt)
+    let request = capture_request(text);
+    let saved = store.capture(&request).unwrap();
+    (
+        store.capture_by_id(&saved.capture_id).unwrap(),
+        store.receipt(&request.request_id).unwrap(),
+    )
 }
 fn edit(store: &MemoryStore, r: &Receipt, text: &str) -> Receipt {
     store
@@ -76,9 +70,10 @@ fn conclusion(turn: &Turn, destination: Destination) -> ConclusionRequest {
 fn raw_and_versions_are_immutable_exact_and_request_scoped() {
     let (_dir, store) = setup();
     let request = capture_request(" \n保留空格与中文：_% OR ` ``` 🙂\n ");
-    let c = store.capture(&request).unwrap();
+    let saved = store.capture(&request).unwrap();
+    let c = store.capture_by_id(&saved.capture_id).unwrap();
     assert_eq!(c.text, request.text);
-    assert_eq!(c.id, store.capture(&request).unwrap().id);
+    assert_eq!(c.id, store.capture(&request).unwrap().capture_id);
     let mut conflicting = request.clone();
     conflicting.text = "different".into();
     assert_eq!(
@@ -87,7 +82,7 @@ fn raw_and_versions_are_immutable_exact_and_request_scoped() {
     );
     let identical_text_new_request = store.capture(&capture_request(&request.text)).unwrap();
     assert_ne!(
-        identical_text_new_request.id, c.id,
+        identical_text_new_request.capture_id, c.id,
         "separate intentional saves are not content-deduplicated"
     );
     let db = Connection::open(store.database_path()).unwrap();
@@ -241,10 +236,11 @@ fn undo_new_memory_keeps_raw_and_correction_is_atomic() {
     );
     assert!(
         store
-            .search("应归到其他地方", 20)
+            .search(&SearchRequest::text("应归到其他地方", 20))
             .unwrap()
+            .items
             .iter()
-            .any(|e| matches!(e.source, SourceRef::Version(_)))
+            .any(|e| matches!(e.evidence.source, SourceRef::Version(_)))
     );
 }
 
@@ -257,7 +253,13 @@ fn trash_hides_history_and_exclusive_raw_but_can_restore_everything() {
     let head = changed.after_version.as_ref().unwrap();
     store.trash_memory(memory, head).unwrap();
     store.trash_memory(memory, head).unwrap();
-    assert!(store.search("", 50).unwrap().is_empty());
+    assert!(
+        store
+            .library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
     assert!(store.capture_by_id(&c.id).is_err());
     assert!(
         store
@@ -344,17 +346,17 @@ fn successive_corrections_do_not_restore_old_mistakes_and_undo_checks_both_memor
 }
 
 #[test]
-fn undoing_a_new_assignment_returns_the_exact_raw_to_pending() {
+fn undoing_a_capture_keeps_its_archive_outside_search() {
     let (_dir, store) = setup();
-    let (capture, r) = new_memory(&store, "撤销后仍能找到的原话");
+    let (capture, r) = new_memory(&store, "撤销后仅供恢复的原话");
     store.undo(&id(), &r.request_id).unwrap();
-    assert_eq!(
-        store.capture_by_id(&capture.id).unwrap().understanding,
-        "pending"
-    );
-    assert_eq!(
-        store.search("仍能找到", 20).unwrap()[0].source,
-        SourceRef::Capture(capture.id)
+    assert_eq!(store.capture_by_id(&capture.id).unwrap().text, capture.text);
+    assert!(
+        store
+            .search(&SearchRequest::text("仅供恢复", 20))
+            .unwrap()
+            .items
+            .is_empty()
     );
 }
 
@@ -376,28 +378,47 @@ fn keyword_search_handles_chinese_short_literal_and_combined_version_sources() {
         "\"quoted\"",
         "🙂",
     ] {
-        assert_eq!(store.search(query, 10).unwrap().len(), 1, "{query}");
+        assert_eq!(
+            store
+                .search(&SearchRequest::text(query, 10))
+                .unwrap()
+                .items
+                .len(),
+            1,
+            "{query}"
+        );
     }
-    assert!(store.search("不存在", 10).unwrap().is_empty());
+    assert!(
+        store
+            .search(&SearchRequest::text("不存在", 10))
+            .unwrap()
+            .items
+            .is_empty()
+    );
     let r = store
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: raw.id.clone(),
-            destination: Destination::New,
+            memory_id: raw.memory_id.clone(),
+            expected_version: raw.version_id.clone(),
             title: "首次体验".into(),
             body: "另一种当前理解".into(),
-            actor: Actor::Ai,
         })
         .unwrap();
-    let hits = store.search("首次体验 中文短语", 10).unwrap();
-    assert_eq!(hits.len(), 1);
-    assert_eq!(
-        hits[0].source,
-        SourceRef::Version(r.after_version.clone().unwrap())
+    let hits = store
+        .search(&SearchRequest::text("首次体验 中文短语", 10))
+        .unwrap()
+        .items;
+    assert!(
+        hits.is_empty(),
+        "archive terms cannot combine with current title"
     );
     let edited = edit(&store, &r, "修改后理解");
     assert!(
-        store.search("另一种当前理解", 10).unwrap().is_empty(),
+        store
+            .search(&SearchRequest::text("另一种当前理解", 10))
+            .unwrap()
+            .items
+            .is_empty(),
         "superseded summaries must not masquerade as current memories"
     );
     store
@@ -406,7 +427,13 @@ fn keyword_search_handles_chinese_short_literal_and_combined_version_sources() {
             edited.after_version.as_ref().unwrap(),
         )
         .unwrap();
-    assert!(store.search("中文短语", 10).unwrap().is_empty());
+    assert!(
+        store
+            .search(&SearchRequest::text("中文短语", 10))
+            .unwrap()
+            .items
+            .is_empty()
+    );
     store.purge_memory(r.memory_id.as_ref().unwrap()).unwrap();
     let db = Connection::open(store.database_path()).unwrap();
     assert_eq!(
@@ -492,7 +519,13 @@ fn purging_erases_original_content_and_retries_never_resurrect_it() {
         .unwrap(),
         None
     );
-    assert!(store.search("", 50).unwrap().is_empty());
+    assert!(
+        store
+            .library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
     store.check_integrity().unwrap();
 }
 
@@ -658,7 +691,13 @@ fn withdrawn_memories_can_be_explicitly_purged_without_losing_retained_raw() {
         } else {
             let raw = store.capture_by_id(&capture.id).unwrap();
             assert_eq!(raw.text, capture.text);
-            assert_eq!(raw.understanding, "pending");
+            assert!(
+                store
+                    .library(&LibraryQuery::default())
+                    .unwrap()
+                    .items
+                    .is_empty()
+            );
         }
         store.check_integrity().unwrap();
     }
@@ -821,7 +860,13 @@ fn discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance()
     store
         .save_conversation_draft(&conversation, "尚未确定的草稿")
         .unwrap();
-    assert!(store.search("", 50).unwrap().is_empty());
+    assert!(
+        store
+            .library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
     let request = conclusion(&turn, Destination::New);
     let r = store.save_conclusion(&request).unwrap();
     let raw = store.capture_by_id(r.capture_id.as_ref().unwrap()).unwrap();
@@ -865,24 +910,28 @@ fn discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance()
 }
 
 #[test]
-fn stale_conclusion_target_keeps_exact_text_title_and_destination_for_correction() {
+fn stale_conclusion_target_leaves_no_working_archive_or_new_memory() {
     let (_dir, store) = setup();
     let (_, target) = new_memory(&store, "旧版");
     let (_, turn) = finished_turn(&store, &[]);
     edit(&store, &target, "已改版");
-    let destination = Destination::Existing {
-        memory_id: target.memory_id.clone().unwrap(),
-        expected_version: target.after_version.clone().unwrap(),
-    };
-    let request = conclusion(&turn, destination.clone());
-    let r = store.save_conclusion(&request).unwrap();
-    assert_eq!(r.status, "needs_review");
-    let capture = r.capture_id.clone().unwrap();
-    assert_eq!(store.capture_by_id(&capture).unwrap().text, request.text);
-    assert_eq!(
-        store.conclusion_intent(&capture).unwrap(),
-        (request.title.clone(), destination)
-    );
+    for destination in [
+        Destination::Existing {
+            memory_id: target.memory_id.clone().unwrap(),
+            expected_version: target.after_version.clone().unwrap(),
+        },
+        Destination::Existing {
+            memory_id: id(),
+            expected_version: id(),
+        },
+    ] {
+        let r = store
+            .save_conclusion(&conclusion(&turn, destination))
+            .unwrap();
+        assert_eq!(r.status, "needs_review");
+        assert!(r.capture_id.is_none());
+        assert!(r.memory_id.is_none());
+    }
     assert_eq!(
         store
             .memory(target.memory_id.as_ref().unwrap())
@@ -891,30 +940,11 @@ fn stale_conclusion_target_keeps_exact_text_title_and_destination_for_correction
             .body,
         "已改版"
     );
-    let corrected = store
-        .correct_assignment(
-            &r.request_id,
-            &ChangeRequest {
-                request_id: id(),
-                capture_id: capture,
-                destination: Destination::New,
-                title: request.title,
-                body: request.text,
-                actor: Actor::User,
-            },
-        )
-        .unwrap();
-    assert!(store.memory(corrected.memory_id.as_ref().unwrap()).is_ok());
-    let missing = conclusion(
-        &turn,
-        Destination::Existing {
-            memory_id: id(),
-            expected_version: id(),
-        },
-    );
+    let db = Connection::open(store.database_path()).unwrap();
     assert_eq!(
-        store.save_conclusion(&missing).unwrap().status,
-        "needs_review"
+        db.query_row("SELECT count(*) FROM captures", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
     );
 }
 
@@ -994,9 +1024,15 @@ fn cancellation_recovery_and_invalid_citations_cannot_complete_late_or_write_mem
     );
     assert_eq!(reopened.recover_interrupted_turns().unwrap(), 1);
     assert!(!store.finish_turn(&next.id, "跨重启迟到答案", &[]).unwrap());
-    assert!(store.search("", 50).unwrap().is_empty());
-    let (c, _) = new_memory(&store, "处理时删除");
-    let reference = SourceRef::Capture(c.id.clone());
+    assert!(
+        store
+            .library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let (_, memory) = new_memory(&store, "处理时删除");
+    let reference = SourceRef::Version(memory.after_version.clone().unwrap());
     let next = store
         .start_turn(
             &id(),
@@ -1005,11 +1041,17 @@ fn cancellation_recovery_and_invalid_citations_cannot_complete_late_or_write_mem
             std::slice::from_ref(&reference),
         )
         .unwrap();
-    store.trash_capture(&c.id).unwrap();
-    assert!(
-        !store
+    store
+        .trash_memory(
+            memory.memory_id.as_ref().unwrap(),
+            memory.after_version.as_ref().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        store
             .finish_turn(&next.id, "不应保存为完成", &[reference])
-            .unwrap()
+            .unwrap_err(),
+        DataError::Unavailable
     );
     assert_eq!(
         store
@@ -1039,7 +1081,13 @@ fn conversation_cursor_reads_do_not_drop_old_messages() {
     assert_eq!(second.len(), 10);
     assert!(second[0].seq > first.last().unwrap().seq);
     assert_eq!(first[0].role, "user");
-    assert!(store.search("", 50).unwrap().is_empty());
+    assert!(
+        store
+            .library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1054,7 +1102,7 @@ fn concurrent_writers_deduplicate_and_only_one_edit_wins() {
             let r = request.clone();
             std::thread::spawn(move || {
                 b.wait();
-                s.capture(&r).unwrap().id
+                s.capture(&r).unwrap().capture_id
             })
         })
         .collect();
@@ -1192,11 +1240,11 @@ fn formal_migration_preserves_v1_and_rejects_prototype_future_and_partial_migrat
 fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
     let (dir, store) = setup();
     let (c, r) = new_memory(&store, "完整备份");
-    let edit = edit(&store, &r, "包含历史");
     let (conversation, turn) = finished_turn(
         &store,
         &[SourceRef::Version(r.after_version.clone().unwrap())],
     );
+    let edit = edit(&store, &r, "包含历史");
     let request = conclusion(&turn, Destination::New);
     let saved = store.save_conclusion(&request).unwrap();
     store
@@ -1249,8 +1297,11 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
 fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() {
     let (dir, store) = setup();
     let (c, r) = new_memory(&store, "  原文\n```\n含反引号与空白🙂  ");
+    let (_, turn) = finished_turn(
+        &store,
+        &[SourceRef::Version(r.after_version.clone().unwrap())],
+    );
     let edited = edit(&store, &r, "编辑的正文");
-    let (_, turn) = finished_turn(&store, &[SourceRef::Capture(c.id.clone())]);
     let request = conclusion(&turn, Destination::New);
     store.save_conclusion(&request).unwrap();
     let sentinel = "SECRET_CONFIG_DO_NOT_EXPORT";
@@ -1278,7 +1329,12 @@ fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() 
         store.export_markdown(&export).unwrap_err(),
         DataError::DestinationExists
     );
-    store.trash_capture(&c.id).unwrap();
+    store
+        .trash_memory(
+            r.memory_id.as_ref().unwrap(),
+            edited.after_version.as_ref().unwrap(),
+        )
+        .unwrap();
     let export = dir.path().join("deleted-source-export");
     store.export_markdown(&export).unwrap();
     assert!(

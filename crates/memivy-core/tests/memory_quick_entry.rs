@@ -5,6 +5,7 @@ fn id() -> String {
 }
 fn draft(key: &str, text: &str) -> WorkspaceDraft {
     WorkspaceDraft {
+        conclusion: None,
         key: key.into(),
         request_id: id(),
         title: String::new(),
@@ -84,10 +85,16 @@ fn capture_and_question_stay_separate_and_retries_preserve_exact_input_and_origi
     };
     let saved = s.capture(&request).unwrap();
     for _ in 0..10 {
-        assert_eq!(s.capture(&request).unwrap().id, saved.id);
+        assert_eq!(s.capture(&request).unwrap().memory_id, saved.memory_id);
     }
-    assert_eq!(saved.text, capture.body);
-    assert!(matches!(saved.origin, Origin::User { uri: None, .. }));
+    assert_eq!(
+        s.memory(&saved.memory_id).unwrap().current.body,
+        capture.body
+    );
+    assert!(matches!(
+        s.capture_by_id(&saved.capture_id).unwrap().origin,
+        Origin::User { uri: None, .. }
+    ));
     assert_eq!(s.library(&LibraryQuery::default()).unwrap().items.len(), 1);
     assert!(
         s.consume_workspace_draft("quick_capture", &capture.request_id)

@@ -21,20 +21,19 @@ fn capture(s: &MemoryStore, text: &str) -> RecordKey {
         })
         .unwrap();
     RecordKey {
-        kind: "capture".into(),
-        id: c.id,
+        kind: "memory".into(),
+        id: c.memory_id,
     }
 }
 fn memory(s: &MemoryStore, text: &str) -> (RecordKey, Receipt) {
     let c = capture(s, text);
     let r = s
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: c.id,
-            destination: Destination::New,
+            expected_version: s.memory(&c.id).unwrap().current.id,
+            memory_id: c.id,
             title: text.into(),
             body: text.into(),
-            actor: Actor::User,
         })
         .unwrap();
     (
@@ -43,6 +42,22 @@ fn memory(s: &MemoryStore, text: &str) -> (RecordKey, Receipt) {
             id: r.memory_id.clone().unwrap(),
         },
         r,
+    )
+}
+fn organize(s: &MemoryStore, record: &RecordKey) -> Result<Receipt> {
+    let task = s.claim_organization()?.ok_or(DataError::Unavailable)?;
+    assert_eq!(task.memory.memory_id, record.id);
+    s.apply_organization(
+        &task,
+        &OrganizationProposal {
+            action: "keep".into(),
+            target: String::new(),
+            title: task.memory.title.clone(),
+            addition: task.memory.body.clone(),
+            changes: vec![],
+            keywords: vec![],
+            reason: "保留原记忆".into(),
+        },
     )
 }
 fn collection(s: &MemoryStore, name: &str) -> String {
@@ -61,13 +76,12 @@ fn pins_collections_and_restore_preserve_content_and_original_identity() {
     s.collect_record(&c, &raw, true).unwrap();
     s.collect_record(&c, &raw, true).unwrap();
     let r = s
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: raw.id.clone(),
-            destination: Destination::New,
+            expected_version: s.memory(&raw.id).unwrap().current.id,
+            memory_id: raw.id.clone(),
             title: "整理标题".into(),
             body: "整理正文".into(),
-            actor: Actor::User,
         })
         .unwrap();
     assert_eq!(
@@ -82,7 +96,8 @@ fn pins_collections_and_restore_preserve_content_and_original_identity() {
         raw.id
     );
     assert_eq!(s.collections().unwrap()[0].count, 1);
-    s.trash_capture(&raw.id).unwrap();
+    s.trash_memory(&raw.id, r.after_version.as_ref().unwrap())
+        .unwrap();
     assert!(
         s.library(&LibraryQuery {
             pinned: true,
@@ -93,11 +108,19 @@ fn pins_collections_and_restore_preserve_content_and_original_identity() {
         .is_empty()
     );
     assert_eq!(s.collections().unwrap()[0].count, 0);
-    s.restore_capture(&raw.id).unwrap();
+    s.restore_memory(&raw.id).unwrap();
     assert!(s.record_navigation(&raw).unwrap().pinned);
     s.collect_record(&c, &raw, false).unwrap();
     assert_eq!(s.collections().unwrap()[0].count, 0);
-    assert_eq!(s.library_detail(&raw).unwrap().body, "原话不可改");
+    assert_eq!(s.library_detail(&raw).unwrap().body, "整理正文");
+    assert_eq!(
+        s.library_detail(&raw).unwrap().sources[0]
+            .capture
+            .as_ref()
+            .unwrap()
+            .text,
+        "原话不可改"
+    );
     assert_eq!(
         s.library_detail(&RecordKey {
             kind: "memory".into(),
@@ -106,7 +129,7 @@ fn pins_collections_and_restore_preserve_content_and_original_identity() {
         .unwrap()
         .history
         .len(),
-        1
+        2
     );
 }
 #[test]
@@ -151,7 +174,7 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     );
 }
 #[test]
-fn scoped_rag_filters_before_ranking_includes_history_and_rejects_outside_seeds() {
+fn scoped_rag_filters_before_ranking_excludes_history_and_rejects_outside_seeds() {
     let (_d, s) = setup();
     let (inside, r) = memory(&s, "木桥最初计划离线");
     let c = collection(&s, "木桥");
@@ -174,7 +197,7 @@ fn scoped_rag_filters_before_ranking_includes_history_and_rejects_outside_seeds(
         .unwrap();
     assert!(!sources.is_empty());
     assert!(sources.contains(&SourceRef::Version(current.after_version.unwrap())));
-    assert!(sources.contains(&SourceRef::Version(r.after_version.clone().unwrap())));
+    assert!(!sources.contains(&SourceRef::Version(r.after_version.clone().unwrap())));
     assert!(sources.iter().all(|v| {
         match v {
             SourceRef::Capture(id) => Some(id) == r.capture_id.as_ref(),
@@ -293,8 +316,9 @@ fn navigation_performance_10000_records() {
     let mut member = String::new();
     for n in 0..10000 {
         let capture = id();
+        let memory = id();
         if n == 1 {
-            member = capture.clone();
+            member = memory.clone();
         }
         tx.execute(
             "INSERT INTO captures VALUES(?1,?2,?3,?4,?5,?6)",
@@ -313,11 +337,28 @@ fn navigation_performance_10000_records() {
             [&capture],
         )
         .unwrap();
+        let version = id();
+        tx.execute(
+            "INSERT INTO memories(id,state,created_at,updated_at) VALUES(?,'active',0,0)",
+            [&memory],
+        )
+        .unwrap();
+        tx.execute("INSERT INTO memory_versions(id,memory_id,title,body,actor,reason,created_at) VALUES(?1,?2,'蓝鲸旅行',?3,'user','create',?4)", params![version, memory, format!("蓝鲸旅行 住宿想法 {n}"), n]).unwrap();
+        tx.execute(
+            "UPDATE memories SET current_version_id=?1 WHERE id=?2",
+            params![version, memory],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO version_captures VALUES(?1,?2)",
+            params![version, capture],
+        )
+        .unwrap();
     }
     tx.commit().unwrap();
     drop(db);
     let key = RecordKey {
-        kind: "capture".into(),
+        kind: "memory".into(),
         id: member,
     };
     s.pin_record(&key, true).unwrap();
@@ -370,7 +411,7 @@ fn navigation_performance_10000_records() {
 fn receipt_collection_confirmation_is_explicit_idempotent_and_rejects_stale_targets() {
     let (_d, s) = setup();
     let raw = capture(&s, "整理完成后推荐专题，保留这段原话");
-    let receipt = s.capture_as_new(&id(), &raw.id).unwrap();
+    let receipt = organize(&s, &raw).unwrap();
     let key = RecordKey {
         kind: "memory".into(),
         id: receipt.memory_id.clone().unwrap(),
@@ -414,7 +455,7 @@ fn receipt_collection_confirmation_is_explicit_idempotent_and_rejects_stale_targ
 fn receipt_collection_confirmation_rejects_a_newer_memory_version() {
     let (_d, s) = setup();
     let raw = capture(&s, "记录体验需要保持简单");
-    let r = s.capture_as_new(&id(), &raw.id).unwrap();
+    let r = organize(&s, &raw).unwrap();
     let c = collection(&s, "产品");
     let revision = s.collections().unwrap()[0].revision;
     s.edit_memory(&EditRequest {
@@ -436,7 +477,7 @@ fn receipt_collection_confirmation_rejects_a_newer_memory_version() {
 async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist() {
     let (_d, s) = setup();
     let raw = capture(&s, "木桥产品记录体验");
-    let receipt = s.capture_as_new(&id(), &raw.id).unwrap();
+    let receipt = organize(&s, &raw).unwrap();
     // An invalid endpoint would fail immediately if a model call were attempted.
     let config = memivy_core::model::ModelConfig {
         base_url: "invalid".into(),
@@ -474,7 +515,7 @@ async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist()
 async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new_input() {
     let (dir, s) = setup();
     let raw = capture(&s, "木桥记录体验");
-    let r = s.capture_as_new(&id(), &raw.id).unwrap();
+    let r = organize(&s, &raw).unwrap();
     let c = collection(&s, "木桥");
     s.dismiss_organization_collections(&r.request_id).unwrap();
     let reopened = MemoryStore::open(dir.path()).unwrap();
@@ -512,7 +553,7 @@ async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new
         0
     );
     let raw2 = capture(&reopened, "新的输入有独立建议");
-    let r2 = reopened.capture_as_new(&id(), &raw2.id).unwrap();
+    let r2 = organize(&reopened, &raw2).unwrap();
     assert!(
         reopened
             .organization_collection_feedback(&r2.request_id)
@@ -525,7 +566,7 @@ async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new
 fn permanent_erasure_cleans_receipt_feedback() {
     let (dir, s) = setup();
     let raw = capture(&s, "需要永久擦除的合成记录");
-    let r = s.capture_as_new(&id(), &raw.id).unwrap();
+    let r = organize(&s, &raw).unwrap();
     s.dismiss_organization_collections(&r.request_id).unwrap();
     s.trash_memory(
         r.memory_id.as_deref().unwrap(),
@@ -597,7 +638,7 @@ fn related_memories_keep_collection_discussions_within_their_scope() {
 fn cached_recommendations_and_batch_status_revalidate_membership_and_revision() {
     let (_d, s) = setup();
     let raw = capture(&s, "旅行记录");
-    let receipt = s.capture_as_new(&id(), &raw.id).unwrap();
+    let receipt = organize(&s, &raw).unwrap();
     let key = RecordKey {
         kind: "memory".into(),
         id: receipt.memory_id.clone().unwrap(),

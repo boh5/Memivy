@@ -96,7 +96,7 @@ export default function App() {
       listen("library-refresh", () => refresh()),
       listen<Receipt>("organization-complete", e => {
         const receipt = e.payload;
-        if (receipt.status === "applied" && receipt.before_version && receipt.memory_id) {
+        if (receipt.status === "applied" && receipt.action === "merge" && receipt.memory_id) {
           const key: Key = {kind:"memory",id:receipt.memory_id};
           void call<Detail>("library_detail",{key}).then(d => notify(`已补充到《${d.title}》`,"查看",() => { setSelected(key); setPage("library"); setCollectionId(null); })).catch(() => {});
         }

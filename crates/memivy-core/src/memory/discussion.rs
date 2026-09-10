@@ -59,7 +59,12 @@ impl MemoryStore {
         }
         let evidence = sources
             .iter()
-            .map(|s| resolve_excerpt(&tx, s, 1800, queries, None))
+            .map(|s| {
+                if !super::search::current_source(&tx, s)? {
+                    return Err(DataError::Unavailable);
+                }
+                resolve_excerpt(&tx, s, 1500, queries, None)
+            })
             .collect::<Result<Vec<_>>>()?;
         tx.execute(
             "DELETE FROM message_citations WHERE message_id=?",

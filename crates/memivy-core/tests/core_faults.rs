@@ -16,20 +16,22 @@ fn id() -> String {
     Uuid::new_v4().to_string()
 }
 fn capture(s: &MemoryStore) -> RawCapture {
-    s.capture(&CaptureRequest {
-        request_id: id(),
-        text: " \n故障中的原话 SQLite 中文\n ".into(),
-        origin: Origin::User {
-            app: "fixture".into(),
-            project: None,
-            uri: None,
-        },
-    })
-    .unwrap()
+    let saved = s
+        .capture(&CaptureRequest {
+            request_id: id(),
+            text: " \n故障中的原话 SQLite 中文\n ".into(),
+            origin: Origin::User {
+                app: "fixture".into(),
+                project: None,
+                uri: None,
+            },
+        })
+        .unwrap();
+    s.capture_by_id(&saved.capture_id).unwrap()
 }
 fn proposal() -> OrganizationProposal {
     OrganizationProposal {
-        action: "new".into(),
+        action: "keep".into(),
         target: String::new(),
         title: "故障恢复".into(),
         addition: "故障中的原话 SQLite 中文".into(),
@@ -45,7 +47,7 @@ fn counts(s: &MemoryStore) -> Vec<i64> {
         "memories",
         "memory_versions",
         "receipts",
-        "capture_keywords",
+        "memory_keywords",
     ]
     .iter()
     .map(|t| {
@@ -123,11 +125,11 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
             return;
         }
         let mut p = proposal();
-        p.action = "append".into();
+        p.action = "merge".into();
         p.target = "M99".into();
         p.title = String::new();
         let (status,body)=match mode.as_str(){
-            "unknown_target"=>(200,json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"type":"function","function":{"name":"update_memory","arguments":json!({"target":p.target,"addition":p.addition,"changes":p.changes,"keywords":p.keywords,"reason":p.reason}).to_string()}}]}}]}).to_string()),
+            "unknown_target"=>(200,json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"type":"function","function":{"name":"merge_memory","arguments":json!({"target":p.target,"addition":p.addition,"changes":p.changes,"keywords":p.keywords,"reason":p.reason}).to_string()}}]}}]}).to_string()),
             "truncated"=>(200,json!({"choices":[{"finish_reason":"length","message":{"content":"{\"action\":"}}]}).to_string()),
             "empty"=>(200,json!({"choices":[]}).to_string()),
             "rate_limit"=>(429,KEY.into()),"server_error"=>(500,KEY.into()),"oversize"=>(200,"x".repeat(65537)),_=>panic!("unknown fixture mode")};
@@ -192,12 +194,12 @@ async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
             .len(),
             1
         );
-        s.retry_organization(&raw.id).unwrap();
+        s.retry_organization(&task.memory.memory_id).unwrap();
         let retry = s.claim_organization().unwrap().unwrap();
         let p = proposal();
         let receipt = s.apply_organization(&retry, &p).unwrap();
         assert_eq!(s.apply_organization(&retry, &p).unwrap(), receipt);
-        assert_eq!(counts(&s), vec![1, 1, 1, 1, 1]);
+        assert_eq!(counts(&s), vec![1, 1, 2, 2, 1]);
         let export = temp.path().join("article.md");
         s.export_record_markdown(
             &RecordKey {
@@ -221,7 +223,7 @@ async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
 fn organization_failure_after_receipt_and_index_updates_rolls_back_every_effect() {
     let temp = tempfile::tempdir().unwrap();
     let s = MemoryStore::open(temp.path()).unwrap();
-    let raw = capture(&s);
+    capture(&s);
     let task = s.claim_organization().unwrap().unwrap();
     let before = counts(&s);
     let db = rusqlite::Connection::open(s.database_path()).unwrap();
@@ -230,7 +232,10 @@ fn organization_failure_after_receipt_and_index_updates_rolls_back_every_effect(
     assert_eq!(e, DataError::Database);
     assert!(!format!("{e:?} {e}").contains(KEY));
     assert_eq!(counts(&s), before);
-    assert_eq!(s.capture_by_id(&raw.id).unwrap().understanding, "pending");
+    assert_eq!(
+        s.memory(&task.memory.memory_id).unwrap().current.id,
+        task.memory.id
+    );
     assert!(
         s.library(&LibraryQuery {
             query: "回归".into(),
@@ -245,6 +250,6 @@ fn organization_failure_after_receipt_and_index_updates_rolls_back_every_effect(
     let p = proposal();
     let r = s.apply_organization(&task, &p).unwrap();
     assert_eq!(s.apply_organization(&task, &p).unwrap(), r);
-    assert_eq!(counts(&s), vec![1, 1, 1, 1, 1]);
+    assert_eq!(counts(&s), vec![1, 1, 2, 2, 1]);
     s.check_integrity().unwrap();
 }

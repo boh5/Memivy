@@ -36,14 +36,11 @@ impl RecordKey {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct LibraryRow {
-    #[serde(skip)]
-    pub(crate) version_id: Option<String>,
     pub key: RecordKey,
     pub title: String,
     pub snippet: String,
     pub updated_at: i64,
     pub origin: Option<Origin>,
-    pub matched_capture: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct LibraryPage {
@@ -73,7 +70,15 @@ pub struct LibraryDetail {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct ConclusionDraft {
+    pub destination: Destination,
+    pub merged_body: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceDraft {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conclusion: Option<ConclusionDraft>,
     pub key: String,
     pub request_id: String,
     pub title: String,
@@ -107,8 +112,8 @@ fn snippet(text: &str, query: &str) -> String {
 }
 fn raw_title(text: &str) -> String {
     text.lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("原始记录")
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("输入归档")
         .trim()
         .chars()
         .take(45)
@@ -149,6 +154,33 @@ impl MemoryStore {
     /// Paged library reads. Filter against fact tables before ranking/limiting.
     /// Each term may match the current version or one of its available originals.
     pub fn library(&self, q: &LibraryQuery) -> Result<LibraryPage> {
+        if !q.trash && !q.query.trim().is_empty() {
+            let result = self.search(&SearchRequest {
+                query: q.query.clone(),
+                scope: SearchScope {
+                    project: q.project.clone(),
+                    origin: q.origin.clone(),
+                    collection_id: q.collection_id.clone(),
+                    exclude_collection_id: q.exclude_collection_id.clone(),
+                    since: q.since,
+                    until: q.until,
+                    pinned: q.pinned,
+                    ..Default::default()
+                },
+                limit: if q.limit == 0 { 40 } else { q.limit.min(100) },
+                offset: q.offset,
+                excerpt_chars: 160,
+                ..Default::default()
+            })?;
+            return Ok(LibraryPage {
+                items: result
+                    .items
+                    .into_iter()
+                    .map(SearchHit::into_library_row)
+                    .collect(),
+                next_offset: result.next_offset,
+            });
+        }
         let mut db = self.connection()?;
         let started = Instant::now();
         db.progress_handler(
@@ -178,35 +210,20 @@ impl MemoryStore {
             super::navigation::active_collection(tx, collection)?;
         }
         let state = if q.trash { "trashed" } else { "active" };
-        let availability = if q.trash { "trashed" } else { "active" };
-        let source_visibility = if q.trash {
-            "(cs.availability='active' OR (cs.availability='trashed' AND (cs.trash_owner=items.id OR items.kind='capture')))"
-        } else {
-            "cs.availability='active'"
-        };
         let mut values: Vec<Value> = vec![];
         let mut bind = |value: Value| {
             values.push(value);
             format!("?{}", values.len())
         };
         let mut filters = vec!["1".to_string()];
-        let mut score = vec!["0.0".to_string()];
         for term in q.query.split_whitespace() {
-            let literal = bind(Value::Text(term.into()));
-            score.push(format!(
-                "CASE WHEN instr(lower(title),lower({literal}))>0 THEN 12 ELSE 0 END"
-            ));
-            if term.chars().count() >= 3 {
-                let ft = bind(Value::Text(format!("\"{}\"", term.replace('"', "\"\""))));
-                filters.push(format!("(version_id IN (SELECT source_id FROM record_fts WHERE kind='version' AND record_fts MATCH {ft}) OR EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND c.id IN (SELECT source_id FROM record_fts WHERE kind='capture' AND record_fts MATCH {ft})))"));
-            } else {
-                filters.push(format!("(instr(lower(title||' '||body),lower({literal}))>0 OR EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND instr(lower(c.text||' '||c.source||' '||COALESCE((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower({literal}))>0))"));
-            }
+            let p = bind(Value::Text(term.into()));
+            filters.push(format!("instr(lower(title||' '||body),lower({p}))>0"));
         }
         for (field, value) in [("kind", &q.origin), ("project", &q.project)] {
             if let Some(value) = value {
                 let p = bind(Value::Text(value.clone()));
-                filters.push(format!("EXISTS(SELECT 1 FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE {source_visibility} AND (c.id=items.id AND items.kind='capture' OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=items.version_id)) AND json_extract(c.source,'$.{field}')={p})"));
+                filters.push(format!("EXISTS(SELECT 1 FROM captures c JOIN version_captures vc ON vc.capture_id=c.id WHERE vc.version_id=items.version_id AND json_extract(c.source,'$.{field}')={p})"));
             }
         }
         if let Some(since) = q.since {
@@ -227,18 +244,10 @@ impl MemoryStore {
             }
         }
         let limit = if q.limit == 0 { 40 } else { q.limit.min(100) };
-        let raw_filter = if q.trash {
-            "s.trash_owner IS NULL"
-        } else if q.pinned || q.collection_id.is_some() {
-            "1"
-        } else {
-            "s.understanding!='attached'"
-        };
         let chronological = if q.oldest { "ASC" } else { "DESC" };
         let sql = format!("WITH items AS (
           SELECT 'memory' kind,m.id,v.id version_id,v.title,v.body,m.updated_at FROM memories m JOIN memory_versions v ON v.id=m.current_version_id WHERE m.state='{state}'
-          UNION ALL SELECT 'capture',c.id,NULL,'',c.text,c.created_at FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='{availability}' AND {raw_filter}
-        ) SELECT kind,id,version_id,title,body,updated_at FROM items WHERE {} ORDER BY ({}) DESC,updated_at {chronological},kind,id LIMIT {} OFFSET {}", filters.join(" AND "), score.join("+"), limit+1,q.offset);
+        ) SELECT kind,id,version_id,title,body,updated_at FROM items WHERE {} ORDER BY updated_at {chronological},kind,id LIMIT {} OFFSET {}", filters.join(" AND "), limit+1,q.offset);
         type Row = (String, String, Option<String>, String, String, i64);
         let rows: Vec<Row> = tx
             .prepare(&sql)
@@ -259,44 +268,16 @@ impl MemoryStore {
         let has_more = rows.len() > limit;
         let mut items = vec![];
         for (kind, id, version, title, body, updated_at) in rows.into_iter().take(limit) {
-            let sources:Vec<(String,String,String)> = tx.prepare("SELECT c.id,c.text,c.source FROM captures c JOIN capture_state cs ON cs.capture_id=c.id WHERE (cs.availability='active' OR (?3 AND cs.availability='trashed' AND (cs.trash_owner=?4 OR ?5='capture'))) AND (c.id=?1 OR c.id IN (SELECT capture_id FROM version_captures WHERE version_id=?2)) ORDER BY c.created_at DESC,c.id")?.query_map(params![if kind=="capture" {Some(&id)} else {None},version,q.trash,id,kind],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>().map_err(search_error)?;
-            let matched = sources.iter().find(|(_, text, origin)| {
-                q.query.split_whitespace().any(|w| {
-                    format!("{text} {origin}")
-                        .to_lowercase()
-                        .contains(&w.to_lowercase())
-                })
-            });
-            let body_matches = q.query.split_whitespace().any(|w| {
-                format!("{title} {body}")
-                    .to_lowercase()
-                    .contains(&w.to_lowercase())
-            });
-            let source_match = if !body_matches && !q.query.trim().is_empty() {
-                matched
-            } else {
-                None
-            };
-            let origin = sources
-                .first()
-                .map(|(_, _, s)| serde_json::from_str(s))
-                .transpose()
-                .map_err(|_| DataError::Integrity)?;
+            let origin: Option<String> = tx.query_row("SELECT c.source FROM version_captures vc JOIN captures c ON c.id=vc.capture_id WHERE vc.version_id=? AND c.source IS NOT NULL ORDER BY c.created_at DESC,c.id LIMIT 1",[&version],|r|r.get(0)).optional()?;
+            let origin = origin
+                .map(|s| serde_json::from_str(&s).map_err(|_| DataError::Integrity))
+                .transpose()?;
             items.push(LibraryRow {
-                version_id: version,
                 key: RecordKey { kind, id },
-                title: if title.is_empty() {
-                    raw_title(&body)
-                } else {
-                    title
-                },
-                snippet: snippet(
-                    source_match.map(|(_, t, _)| t.as_str()).unwrap_or(&body),
-                    &q.query,
-                ),
+                title,
+                snippet: snippet(&body, &q.query),
                 updated_at,
                 origin,
-                matched_capture: source_match.map(|(id, _, _)| id.clone()),
             });
         }
         Ok(LibraryPage {
@@ -310,7 +291,7 @@ impl MemoryStore {
         let mut db = self.connection()?;
         let tx = db.transaction()?;
         let (state, current, history, source_ids, title, body) = if key.kind == "memory" {
-            let (state,head):(String,String)=tx.query_row("SELECT state,current_version_id FROM memories WHERE id=? AND state IN ('active','trashed')",[&key.id],|r|Ok((r.get(0)?,r.get(1)?)))?;
+            let (state,head):(String,String)=tx.query_row("SELECT state,current_version_id FROM memories WHERE id=? AND state IN ('active','trashed','merged')",[&key.id],|r|Ok((r.get(0)?,r.get(1)?)))?;
             let current = records::version(&tx, &head)?;
             let ids:Vec<String>=tx.prepare("SELECT id FROM memory_versions WHERE memory_id=? AND body IS NOT NULL ORDER BY rowid DESC")?.query_map([&key.id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
             let history = ids
@@ -377,7 +358,7 @@ impl MemoryStore {
     }
 
     pub fn library_projects(&self) -> Result<Vec<String>> {
-        Ok(self.connection()?.prepare("SELECT DISTINCT json_extract(c.source,'$.project') project FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='active' AND project IS NOT NULL AND project!='' ORDER BY project LIMIT 200")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)
+        Ok(self.connection()?.prepare("SELECT DISTINCT json_extract(c.source,'$.project') project FROM captures c JOIN version_captures vc ON vc.capture_id=c.id JOIN memories m ON m.current_version_id=vc.version_id WHERE m.state='active' AND project IS NOT NULL AND project!='' ORDER BY project LIMIT 200")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)
     }
     pub fn workspace_draft(&self, key: &str) -> Result<Option<WorkspaceDraft>> {
         validate_draft_key(key)?;
@@ -412,6 +393,27 @@ impl MemoryStore {
         validate_draft_key(&draft.key)?;
         valid_id(&draft.request_id)?;
         if draft.title.len() > 200 || draft.body.len() > 128 * 1024 || draft.context.len() > 4 {
+            return Err(DataError::Invalid);
+        }
+        if let Some(review) = &draft.conclusion {
+            if !draft.key.starts_with("conclusion:") {
+                return Err(DataError::Invalid);
+            }
+            if let Destination::Existing {
+                memory_id,
+                expected_version,
+            } = &review.destination
+            {
+                valid_id(memory_id)?;
+                valid_id(expected_version)?;
+            }
+            if let Some(body) = &review.merged_body {
+                valid_text(body, 128 * 1024)?;
+                if matches!(review.destination, Destination::New) {
+                    return Err(DataError::Invalid);
+                }
+            }
+        } else if draft.key.starts_with("conclusion:") {
             return Err(DataError::Invalid);
         }
         for source in &draft.context {
@@ -450,7 +452,9 @@ impl MemoryStore {
             }
         }
         if let Some((kind, id)) = draft.key.split_once(':') {
-            let sql = if kind == "discussion" {
+            let sql = if kind == "conclusion" {
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id=? AND status='complete')"
+            } else if kind == "discussion" {
                 "SELECT EXISTS(SELECT 1 FROM conversations WHERE id=?)"
             } else if kind == "memory" {
                 "SELECT EXISTS(SELECT 1 FROM memories WHERE id=? AND state IN ('active','trashed'))"
@@ -485,15 +489,9 @@ impl MemoryStore {
     pub fn rebuild_search_index(&self) -> Result<()> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch("DROP TRIGGER IF EXISTS capture_search_insert; DROP TRIGGER IF EXISTS version_search_insert; DROP TRIGGER IF EXISTS capture_search_erase; DROP TRIGGER IF EXISTS version_search_erase; DROP TABLE IF EXISTS record_fts;
-        CREATE VIRTUAL TABLE record_fts USING fts5(kind UNINDEXED,source_id UNINDEXED,title,body,origin,tokenize='trigram');
-        INSERT INTO record_fts(record_fts,rank) VALUES('secure-delete',1);
-        INSERT INTO record_fts(kind,source_id,title,body,origin) SELECT 'capture',c.id,'',c.text,c.source||' '||COALESCE(k.terms,'') FROM captures c LEFT JOIN capture_keywords k ON k.capture_id=c.id WHERE c.text IS NOT NULL;
-        INSERT INTO record_fts(kind,source_id,title,body,origin) SELECT 'version',id,title,body,'' FROM memory_versions WHERE body IS NOT NULL;
-        CREATE TRIGGER capture_search_insert AFTER INSERT ON captures WHEN NEW.text IS NOT NULL BEGIN INSERT INTO record_fts(kind,source_id,title,body,origin) VALUES('capture',NEW.id,'',NEW.text,NEW.source); END;
-        CREATE TRIGGER version_search_insert AFTER INSERT ON memory_versions WHEN NEW.body IS NOT NULL BEGIN INSERT INTO record_fts(kind,source_id,title,body,origin) VALUES('version',NEW.id,NEW.title,NEW.body,''); END;
-        CREATE TRIGGER capture_search_erase AFTER UPDATE ON captures WHEN NEW.text IS NULL BEGIN DELETE FROM record_fts WHERE kind='capture' AND source_id=NEW.id; END;
-        CREATE TRIGGER version_search_erase AFTER UPDATE ON memory_versions WHEN NEW.body IS NULL BEGIN DELETE FROM record_fts WHERE kind='version' AND source_id=NEW.id; END;")?;
+        tx.execute_batch(include_str!(
+            "../../../../migrations/memory/current_fts.sql"
+        ))?;
         tx.commit()?;
         Ok(())
     }
@@ -506,7 +504,7 @@ fn validate_draft_key(key: &str) -> Result<()> {
         return Ok(());
     }
     let (kind, id) = key.split_once(':').ok_or(DataError::Invalid)?;
-    if kind == "discussion" {
+    if matches!(kind, "discussion" | "conclusion") {
         return valid_id(id);
     }
     RecordKey {

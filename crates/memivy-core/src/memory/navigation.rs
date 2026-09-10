@@ -32,27 +32,29 @@ pub(super) fn active_collection(db: &Connection, id: &str) -> Result<()> {
 }
 fn active_record(db: &Connection, key: &RecordKey) -> Result<()> {
     key.validate()?;
+    if key.kind != "memory" {
+        return Err(DataError::Invalid);
+    }
     let exists: bool = db.query_row("SELECT CASE WHEN ?1='memory' THEN EXISTS(SELECT 1 FROM memories WHERE id=?2 AND state='active') ELSE EXISTS(SELECT 1 FROM capture_state WHERE capture_id=?2 AND availability='active') END",params![key.kind,key.id],|r|r.get(0))?;
     if !exists {
         return Err(DataError::Unavailable);
     }
     Ok(())
 }
-// Shared SQL predicate: filter the candidate pool before ranking and LIMIT.
-// Historical versions of member memories and their still-visible raw sources qualify.
-pub(super) const COLLECTION_SOURCE: &str = "EXISTS(SELECT 1 FROM collection_entries ce WHERE ce.collection_id=?2 AND ((ce.kind='memory' AND (ce.record_id=v.memory_id OR (record_fts.kind='capture' AND EXISTS(SELECT 1 FROM memories cm JOIN version_captures vc ON vc.version_id=cm.current_version_id WHERE cm.id=ce.record_id AND cm.state='active' AND vc.capture_id=c.id)))) OR (ce.kind='capture' AND record_fts.kind='capture' AND ce.record_id=c.id)))";
 pub(super) fn source_in_collection(
     db: &Connection,
     collection: &str,
     source: &SourceRef,
 ) -> Result<bool> {
     active_collection(db, collection)?;
-    let (kind, id) = source.parts();
-    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM collection_entries ce WHERE ce.collection_id=?1 AND ((ce.kind='capture' AND ?2='capture' AND ce.record_id=?3) OR (ce.kind='memory' AND EXISTS(SELECT 1 FROM memories m WHERE m.id=ce.record_id AND m.state='active' AND ((?2='version' AND EXISTS(SELECT 1 FROM memory_versions v WHERE v.id=?3 AND v.memory_id=m.id)) OR (?2='capture' AND EXISTS(SELECT 1 FROM version_captures vc WHERE vc.version_id=m.current_version_id AND vc.capture_id=?3)))))))",params![collection,kind,id],|r|r.get(0))?)
+    let SourceRef::Version(version) = source else {
+        return Ok(false);
+    };
+    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM collection_entries ce JOIN memories m ON ce.kind='memory' AND m.id=ce.record_id WHERE ce.collection_id=?1 AND m.state='active' AND m.current_version_id=?2)",params![collection,version],|r|r.get(0))?)
 }
 impl MemoryStore {
     pub fn collections(&self) -> Result<Vec<Collection>> {
-        Ok(self.connection()?.prepare("SELECT c.id,c.name,c.description,c.revision,(SELECT count(*) FROM collection_entries ce WHERE ce.collection_id=c.id AND ((ce.kind='memory' AND EXISTS(SELECT 1 FROM memories m WHERE m.id=ce.record_id AND m.state='active')) OR (ce.kind='capture' AND EXISTS(SELECT 1 FROM capture_state s WHERE s.capture_id=ce.record_id AND s.availability='active')))) FROM collections c WHERE c.archived=0 ORDER BY c.name COLLATE NOCASE,c.id LIMIT 100")?.query_map([],|r|Ok(Collection{id:r.get(0)?,name:r.get(1)?,description:r.get(2)?,revision:r.get(3)?,count:r.get(4)?}))?.collect::<rusqlite::Result<_>>()?)
+        Ok(self.connection()?.prepare("SELECT c.id,c.name,c.description,c.revision,(SELECT count(*) FROM collection_entries ce WHERE ce.collection_id=c.id AND ((ce.kind='memory' AND EXISTS(SELECT 1 FROM memories m WHERE m.id=ce.record_id AND m.state='active')))) FROM collections c WHERE c.archived=0 ORDER BY c.name COLLATE NOCASE,c.id LIMIT 100")?.query_map([],|r|Ok(Collection{id:r.get(0)?,name:r.get(1)?,description:r.get(2)?,revision:r.get(3)?,count:r.get(4)?}))?.collect::<rusqlite::Result<_>>()?)
     }
     pub fn save_collection(
         &self,
@@ -238,25 +240,24 @@ impl MemoryStore {
         let store = self.clone();
         let collection = collection.to_owned();
         tokio::task::spawn_blocking(move || {
-            let mut result = Vec::new();
-            for query in plan.queries {
-                let page = store.library(&LibraryQuery {
-                    query,
-                    exclude_collection_id: Some(collection.clone()),
-                    limit: 8,
+            let result = store.search(&SearchRequest {
+                query: plan.queries[0].clone(),
+                variants: plan.queries[1..].to_vec(),
+                scope: SearchScope {
+                    exclude_collection_id: Some(collection),
                     ..Default::default()
-                })?;
-                for row in page.items {
-                    if !result
-                        .iter()
-                        .any(|r: &LibraryRow| r.key.kind == row.key.kind && r.key.id == row.key.id)
-                    {
-                        result.push(row);
-                    }
-                }
-            }
-            result.truncate(8);
-            Ok::<_, DataError>(result)
+                },
+                limit: 8,
+                excerpt_chars: 160,
+                ..Default::default()
+            })?;
+            Ok::<_, DataError>(
+                result
+                    .items
+                    .into_iter()
+                    .map(SearchHit::into_library_row)
+                    .collect(),
+            )
         })
         .await
         .map_err(|_| Failure::InvalidAnswer)?

@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 #[test]
 fn fixed_search_corpus_matches_library_and_mcp_before_and_after_rebuild() {
     let fixture: Corpus = serde_json::from_str(SEARCH).unwrap();
-    assert_eq!(fixture.version, 1);
+    assert_eq!(fixture.version, 2);
     let temp = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(temp.path()).unwrap();
     let data = seed(&store, &fixture);
@@ -33,15 +33,6 @@ fn fixed_search_corpus_matches_library_and_mcp_before_and_after_rebuild() {
             let page = store.library(&q).unwrap();
             let actual: BTreeSet<_> = page.items.iter().map(|r| r.key.id.clone()).collect();
             assert_eq!(actual, expected, "{} rebuild={rebuilding}", case.id);
-            if let Some(raw) = &case.raw_hit {
-                assert!(
-                    page.items
-                        .iter()
-                        .any(|r| r.matched_capture.as_ref() == Some(&data.captures[raw])),
-                    "{}",
-                    case.id
-                );
-            }
             let mcp = store
                 .mcp_search(&McpSearchQuery {
                     query: q.query,
@@ -88,7 +79,7 @@ fn fixed_near_duplicates_rank_title_and_filter_before_bounded_results() {
     let data = seed(&store, &fixture);
     store.set_mcp_enabled(true).unwrap();
     for n in 0..55 {
-        store
+        let saved = store
             .capture(&CaptureRequest {
                 request_id: id(),
                 text: format!("相近结果 正文干扰 {n}"),
@@ -97,6 +88,15 @@ fn fixed_near_duplicates_rank_title_and_filter_before_bounded_results() {
                     project: Some("干扰项目".into()),
                     uri: None,
                 },
+            })
+            .unwrap();
+        store
+            .edit_memory(&EditRequest {
+                request_id: id(),
+                memory_id: saved.memory_id,
+                expected_version: saved.version_id,
+                title: format!("正文干扰项 {n}"),
+                body: format!("相近结果 正文干扰 {n}"),
             })
             .unwrap();
     }

@@ -24,7 +24,7 @@ struct Choices {
 
 fn organized_record(db: &Connection, receipt: &str) -> Result<(RecordKey, String, String)> {
     valid_id(receipt)?;
-    db.query_row("SELECT m.id,v.title,v.body FROM receipts r JOIN organization_jobs j ON j.capture_id=r.capture_id AND j.receipt_id=r.request_id JOIN memories m ON m.id=r.memory_id JOIN memory_versions v ON v.id=m.current_version_id JOIN capture_state cs ON cs.capture_id=j.capture_id WHERE r.request_id=? AND r.status='applied' AND j.status='done' AND cs.availability='active' AND m.state='active' AND m.current_version_id=r.after_version", [receipt], |r| Ok((RecordKey{kind:"memory".into(),id:r.get(0)?},r.get(1)?,r.get(2)?))).optional()?.ok_or(DataError::Unavailable)
+    db.query_row("SELECT m.id,v.title,v.body FROM receipts r JOIN organization_jobs j ON j.capture_id=r.capture_id AND j.receipt_id=r.request_id JOIN memories m ON m.id=r.memory_id JOIN memory_versions v ON v.id=m.current_version_id WHERE r.request_id=? AND r.status='applied' AND j.status='done' AND m.state='active' AND m.current_version_id=r.after_version", [receipt], |r| Ok((RecordKey{kind:"memory".into(),id:r.get(0)?},r.get(1)?,r.get(2)?))).optional()?.ok_or(DataError::Unavailable)
 }
 
 impl MemoryStore {
@@ -154,7 +154,7 @@ impl MemoryStore {
         let tx = db.transaction()?;
         // Use one snapshot/connection and only the latest job. Fetching full
         // receipt histories per row made a list refresh open hundreds of databases.
-        let mut latest = tx.prepare_cached("SELECT j.status,r.request_id,r.status FROM organization_jobs j LEFT JOIN receipts r ON r.request_id=j.receipt_id JOIN capture_state cs ON cs.capture_id=j.capture_id AND cs.availability='active' WHERE j.capture_id IN (SELECT ?1 WHERE ?2='capture' UNION ALL SELECT vc.capture_id FROM version_captures vc JOIN memories m ON m.current_version_id=vc.version_id WHERE m.id=?1 AND m.state='active' AND ?2='memory') ORDER BY j.created_at DESC LIMIT 1")?;
+        let mut latest = tx.prepare_cached("SELECT j.status,r.request_id,r.status FROM organization_jobs j LEFT JOIN receipts r ON r.request_id=j.receipt_id WHERE ?2='memory' AND (j.memory_id=?1 OR (r.memory_id=?1 AND r.status='applied')) ORDER BY j.created_at DESC LIMIT 1")?;
         keys.iter()
             .map(|key| {
                 key.validate()?;

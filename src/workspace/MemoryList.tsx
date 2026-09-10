@@ -167,10 +167,9 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
             <p>
               {r.snippet}
             </p>
-            {!trash && states[keyOf(r.key)] && <span className="row-organization-state">{states[keyOf(r.key)].recommendations ? `${states[keyOf(r.key)].recommendations} 个专题推荐` : ["processing","pending"].includes(states[keyOf(r.key)].status) ? "整理中…" : ["failed","deferred","paused"].includes(states[keyOf(r.key)].status) ? "整理未完成" : ""}</span>}
+            {!trash && states[keyOf(r.key)] && <span className="row-organization-state">{states[keyOf(r.key)].recommendations ? `${states[keyOf(r.key)].recommendations} 个专题推荐` : states[keyOf(r.key)].status === "pending" ? "等待整理" : states[keyOf(r.key)].status === "processing" ? "整理中…" : ["failed","deferred","paused"].includes(states[keyOf(r.key)].status) ? "整理未完成" : ""}</span>}
             <div className="row-meta">
               <span>
-                {r.matched_capture ? "命中原话 · " : ""}
                 {sourceName(r.origin)}
               </span>
               <time>{date(r.updated_at)}</time>
@@ -191,7 +190,7 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
                 ? "试试调整来源、项目或日期范围。"
                 : trash
                   ? "删除的记忆会留在这里，直到你明确永久删除。"
-                  : collectionId ? "在记忆正文点击“专题”手动加入，或试试上方的 AI 推荐。" : "留下的原话，即使尚未整理也会在这里。"
+                  : collectionId ? "在记忆正文点击“专题”手动加入，或试试上方的 AI 推荐。" : "记下的内容立即可用，AI 可以稍后整理。"
             }
           >
             {filtering ? (

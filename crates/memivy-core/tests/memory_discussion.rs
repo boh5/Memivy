@@ -104,13 +104,12 @@ fn setup() -> (tempfile::TempDir, MemoryStore, Receipt, SourceRef, String) {
         })
         .unwrap();
     let receipt = store
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: raw.id,
-            destination: Destination::New,
+            memory_id: raw.memory_id,
+            expected_version: raw.version_id,
             title: "桌面体验".into(),
             body: "旧版本：桌面体验优先".into(),
-            actor: Actor::User,
         })
         .unwrap();
     let source = SourceRef::Version(receipt.after_version.clone().unwrap());
@@ -129,15 +128,6 @@ async fn grounded_discussion_uses_versioned_sources_and_saves_only_after_confirm
             std::slice::from_ref(&source),
         )
         .unwrap();
-    store
-        .edit_memory(&EditRequest {
-            request_id: id(),
-            memory_id: receipt.memory_id.unwrap(),
-            expected_version: receipt.after_version.unwrap(),
-            title: "新版标题".into(),
-            body: "当前版本已经改了".into(),
-        })
-        .unwrap();
     let (config, requests, _, _, server) = fixture(false, false);
     store
         .answer_discussion(&config, &topic, &turn, std::slice::from_ref(&source))
@@ -154,16 +144,28 @@ async fn grounded_discussion_uses_versioned_sources_and_saves_only_after_confirm
     assert_eq!(payload["evidence"][0]["text"], "旧版本：桌面体验优先");
     assert!(payload["evidence"].as_array().unwrap().len() <= 8);
     drop(calls);
+    store
+        .edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: receipt.memory_id.unwrap(),
+            expected_version: receipt.after_version.unwrap(),
+            title: "新版标题".into(),
+            body: "当前版本已经改了".into(),
+        })
+        .unwrap();
+
     assert!(
         store
-            .search("generated_suggestion_not_memory", 20)
+            .search(&SearchRequest::text("generated_suggestion_not_memory", 20))
             .unwrap()
+            .items
             .is_empty()
     );
     assert!(
         store
-            .search("reviewed_conclusion_fixture", 20)
+            .search(&SearchRequest::text("reviewed_conclusion_fixture", 20))
             .unwrap()
+            .items
             .is_empty()
     );
     let confirmed = store
@@ -178,8 +180,9 @@ async fn grounded_discussion_uses_versioned_sources_and_saves_only_after_confirm
     assert!(confirmed.memory_id.is_some());
     assert_eq!(
         store
-            .search("reviewed_conclusion_fixture", 20)
+            .search(&SearchRequest::text("reviewed_conclusion_fixture", 20))
             .unwrap()
+            .items
             .len(),
         1
     );
@@ -228,8 +231,9 @@ async fn cancelled_deleted_and_unknown_evidence_never_complete_late() {
         assert!(completed.assistant.text.is_empty());
         assert!(
             store
-                .search("generated_suggestion_not_memory", 20)
+                .search(&SearchRequest::text("generated_suggestion_not_memory", 20))
                 .unwrap()
+                .items
                 .is_empty()
         );
     }
@@ -238,6 +242,7 @@ async fn cancelled_deleted_and_unknown_evidence_never_complete_late() {
 fn discussion_drafts_and_pins_survive_restart_and_history_reads_from_both_ends() {
     let (dir, store, _, source, topic) = setup();
     let draft = WorkspaceDraft {
+        conclusion: None,
         key: format!("discussion:{topic}"),
         request_id: id(),
         title: String::new(),
@@ -251,7 +256,13 @@ fn discussion_drafts_and_pins_survive_restart_and_history_reads_from_both_ends()
     let loaded = reopened.workspace_draft(&draft.key).unwrap().unwrap();
     assert_eq!(loaded.context, vec![source]);
     assert_eq!(loaded.body, draft.body);
-    assert!(reopened.search(&draft.body, 20).unwrap().is_empty());
+    assert!(
+        reopened
+            .search(&SearchRequest::text(&draft.body, 20))
+            .unwrap()
+            .items
+            .is_empty()
+    );
     for n in 0..25 {
         let t = store
             .start_turn(&id(), &topic, &format!("问题{n}"), &[])
@@ -314,7 +325,7 @@ async fn evidence_uses_matching_unicode_excerpt_and_preserves_history_identity()
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["text"] == "旧版本：桌面体验优先" && e["is_current_version"] == false)
+            .all(|e| e["text"] != "旧版本：桌面体验优先" && e["is_current_version"] == true)
     );
     let result = store.turn(&turn.id).unwrap();
     let cited = &result.assistant.citations[0].source;
@@ -377,12 +388,18 @@ async fn no_evidence_and_uncited_recollections_are_distinct() {
             assert!(matches!(result.unwrap_err(), Failure::InvalidAnswer));
             assert_eq!(store.turn(&turn.id).unwrap().assistant.status, "processing");
         }
-        assert!(store.search("", 50).unwrap().is_empty());
+        assert!(
+            store
+                .library(&LibraryQuery::default())
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
 }
 
 #[tokio::test]
-async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
+async fn multi_query_answer_reads_current_facts_without_recovering_archived_details() {
     for raw_only in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();
@@ -402,17 +419,16 @@ async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
             })
             .unwrap();
         store
-            .apply_capture(&ChangeRequest {
+            .edit_memory(&EditRequest {
                 request_id: id(),
-                capture_id: raw.id.clone(),
-                destination: Destination::New,
+                memory_id: raw.memory_id.clone(),
+                expected_version: raw.version_id.clone(),
                 title: "木桥项目".into(),
                 body: if raw_only {
                     "木桥项目概况".into()
                 } else {
                     body.clone()
                 },
-                actor: Actor::User,
             })
             .unwrap();
         let topic = id();
@@ -425,9 +441,11 @@ async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
             false,
             false,
             json!({"queries":["木桥","收费"]}),
-            Some(
-                json!({"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""}),
-            ),
+            Some(if raw_only {
+                json!({"recollections":[],"ideas":"当前记忆未提供收费信息。","conclusion":""})
+            } else {
+                json!({"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""})
+            }),
         );
         store
             .answer_discussion(&config, &topic, &turn, &[])
@@ -444,12 +462,14 @@ async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
             .find(|e| e["id"] == alias)
             .unwrap();
         let sent = supplied["text"].as_str().unwrap();
+        if raw_only {
+            assert!(!sent.contains("收费是每年 120 元"));
+            assert!(store.turn(&turn.id).unwrap().assistant.citations.is_empty());
+            continue;
+        }
         assert!(sent.contains("收费是每年 120 元"));
         let assistant = store.turn(&turn.id).unwrap().assistant;
         let source = &assistant.citations[0].source;
-        if raw_only {
-            assert_eq!(*source, SourceRef::Capture(raw.id));
-        }
         let excerpt = store.discussion_excerpt(&assistant.id, source).unwrap();
         assert_eq!(excerpt.text, sent);
         assert!(excerpt.start > 0);
@@ -457,7 +477,7 @@ async fn multi_query_answer_receives_later_raw_fact_and_exact_long_excerpt() {
             excerpt.text,
             body.chars()
                 .skip(excerpt.start)
-                .take(1800)
+                .take(1500)
                 .collect::<String>()
         );
     }

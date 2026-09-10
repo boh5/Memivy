@@ -15,7 +15,7 @@ struct Case {
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
-fn capture(store: &MemoryStore, text: &str) -> RawCapture {
+fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
     store
         .capture(&CaptureRequest {
             request_id: id(),
@@ -73,19 +73,18 @@ async fn main() {
         for (title, body) in &case.seeds {
             let c = capture(&store, body);
             store
-                .apply_capture(&ChangeRequest {
+                .edit_memory(&EditRequest {
                     request_id: id(),
-                    capture_id: c.id,
-                    destination: Destination::New,
+                    memory_id: c.memory_id,
+                    expected_version: c.version_id,
                     title: title.clone(),
                     body: body.clone(),
-                    actor: Actor::User,
                 })
                 .unwrap();
         }
         let raw = capture(&store, &case.capture);
         let mut task = store.claim_organization().unwrap().unwrap();
-        assert_eq!(task.capture.id, raw.id);
+        assert_eq!(task.capture_id, raw.capture_id);
         store.prepare_organization(&mut task).unwrap();
         let started = std::time::Instant::now();
         let result = match store.propose_organization(&config, &task).await {
@@ -99,7 +98,8 @@ async fn main() {
                     .map(|v| v.title.clone())
                     .unwrap_or_default();
                 let applied = store.apply_organization(&task, &proposal);
-                let raw_preserved = store.capture_by_id(&raw.id).unwrap().text == case.capture;
+                let raw_preserved =
+                    store.capture_by_id(&raw.capture_id).unwrap().text == case.capture;
                 let replay_pass = applied.as_ref().is_ok_and(|r| {
                     store
                         .apply_organization(&task, &proposal)
@@ -113,7 +113,7 @@ async fn main() {
                 let pass = raw_preserved
                     && replay_pass
                     && proposal.action == case.expected
-                    && (case.expected != "append" || target == case.target)
+                    && (case.expected != "merge" || target == case.target)
                     && applied.is_ok();
                 passed += usize::from(pass);
                 json!({"id":case.id,"proposal":proposal,"selected_title":target,"candidates":task.candidates,"routing_pass":pass,"raw_preserved":raw_preserved,"replay_pass":replay_pass,"final_body":final_body,"apply":applied.map_err(|e|e.to_string()),"elapsed_ms":started.elapsed().as_millis()})

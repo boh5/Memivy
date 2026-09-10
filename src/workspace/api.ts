@@ -18,6 +18,7 @@ export type Origin = {
   uri?: string | null;
   conversation_id?: string;
 };
+export type CaptureResult = { memory_id: string; version_id: string; capture_id: string; created_at: number };
 export type Raw = {
   id: string;
   text: string;
@@ -31,7 +32,6 @@ export type Row = {
   snippet: string;
   updated_at: number;
   origin: Origin | null;
-  matched_capture: string | null;
 };
 export type Page = { items: Row[]; next_offset: number | null };
 export type Query = {
@@ -69,7 +69,9 @@ export type Detail = {
   history: Version[];
   sources: { id: string; capture: Raw | null }[];
 };
+export type ConclusionDestination = { kind: "new" } | { kind: "existing"; memory_id: string; expected_version: string };
 export type Draft = {
+  conclusion?: { destination: ConclusionDestination; merged_body: string | null };
   key: string;
   request_id: string;
   title: string;
@@ -134,7 +136,6 @@ const previewRow: Row = {
   snippet: previewRaw.text,
   updated_at: previewRaw.created_at,
   origin: previewRaw.origin,
-  matched_capture: null,
 };
 export async function call<T>(
   name: string,

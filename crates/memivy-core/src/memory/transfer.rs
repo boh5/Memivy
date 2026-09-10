@@ -27,7 +27,7 @@ fn copy_database(source: &Connection, destination: &mut Connection) -> Result<()
         }
     }
 }
-fn publish_database(db: &Connection, target: &Path) -> Result<()> {
+pub(super) fn publish_database(db: &Connection, target: &Path) -> Result<()> {
     if !target.is_absolute() {
         return Err(DataError::Invalid);
     }

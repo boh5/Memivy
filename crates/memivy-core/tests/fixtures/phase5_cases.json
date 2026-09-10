@@ -1,21 +1,21 @@
 [
   {
     "id": "new-01",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [],
     "capture": "周末在河边散步时发现，先走十分钟再坐下来写东西更容易进入状态。"
   },
   {
     "id": "new-02",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [],
     "capture": "我可能喜欢纸质书，但也还没认真比较电子书，暂时不下结论。"
   },
   {
     "id": "new-03",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -27,7 +27,7 @@
   },
   {
     "id": "new-04",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -39,7 +39,7 @@
   },
   {
     "id": "new-05",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -51,7 +51,7 @@
   },
   {
     "id": "new-06",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -63,7 +63,7 @@
   },
   {
     "id": "new-07",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -75,7 +75,7 @@
   },
   {
     "id": "new-08",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -87,7 +87,7 @@
   },
   {
     "id": "new-09",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -99,7 +99,7 @@
   },
   {
     "id": "new-10",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -111,7 +111,7 @@
   },
   {
     "id": "new-11",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -123,7 +123,7 @@
   },
   {
     "id": "new-12",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -135,7 +135,7 @@
   },
   {
     "id": "new-13",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -147,7 +147,7 @@
   },
   {
     "id": "new-14",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -159,7 +159,7 @@
   },
   {
     "id": "new-15",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -171,7 +171,7 @@
   },
   {
     "id": "new-16",
-    "expected": "new",
+    "expected": "keep",
     "target": "",
     "seeds": [
       [
@@ -183,7 +183,7 @@
   },
   {
     "id": "append-01",
-    "expected": "append",
+    "expected": "merge",
     "target": "青松项目",
     "seeds": [
       [
@@ -195,7 +195,7 @@
   },
   {
     "id": "append-02",
-    "expected": "append",
+    "expected": "merge",
     "target": "读书方法",
     "seeds": [
       [
@@ -207,7 +207,7 @@
   },
   {
     "id": "append-03",
-    "expected": "append",
+    "expected": "merge",
     "target": "京都旅行",
     "seeds": [
       [
@@ -219,7 +219,7 @@
   },
   {
     "id": "append-04",
-    "expected": "append",
+    "expected": "merge",
     "target": "写作习惯",
     "seeds": [
       [
@@ -231,7 +231,7 @@
   },
   {
     "id": "append-05",
-    "expected": "append",
+    "expected": "merge",
     "target": "白鹭配色",
     "seeds": [
       [
@@ -243,7 +243,7 @@
   },
   {
     "id": "append-06",
-    "expected": "append",
+    "expected": "merge",
     "target": "研究选题",
     "seeds": [
       [
@@ -255,7 +255,7 @@
   },
   {
     "id": "append-07",
-    "expected": "append",
+    "expected": "merge",
     "target": "读书会",
     "seeds": [
       [
@@ -267,7 +267,7 @@
   },
   {
     "id": "append-08",
-    "expected": "append",
+    "expected": "merge",
     "target": "散步观察",
     "seeds": [
       [
@@ -279,7 +279,7 @@
   },
   {
     "id": "append-09",
-    "expected": "append",
+    "expected": "merge",
     "target": "项目收费",
     "seeds": [
       [
@@ -291,7 +291,7 @@
   },
   {
     "id": "append-10",
-    "expected": "append",
+    "expected": "merge",
     "target": "摄影笔记",
     "seeds": [
       [
@@ -303,7 +303,7 @@
   },
   {
     "id": "append-11",
-    "expected": "append",
+    "expected": "merge",
     "target": "早餐偏好",
     "seeds": [
       [
@@ -315,7 +315,7 @@
   },
   {
     "id": "append-12",
-    "expected": "append",
+    "expected": "merge",
     "target": "资料整理",
     "seeds": [
       [
@@ -327,7 +327,7 @@
   },
   {
     "id": "append-13",
-    "expected": "append",
+    "expected": "merge",
     "target": "原型验证",
     "seeds": [
       [
@@ -339,7 +339,7 @@
   },
   {
     "id": "append-14",
-    "expected": "append",
+    "expected": "merge",
     "target": "雨天通勤",
     "seeds": [
       [
@@ -351,7 +351,7 @@
   },
   {
     "id": "append-15",
-    "expected": "append",
+    "expected": "merge",
     "target": "晚间阅读",
     "seeds": [
       [
@@ -363,7 +363,7 @@
   },
   {
     "id": "append-16",
-    "expected": "append",
+    "expected": "merge",
     "target": "木桥实验",
     "seeds": [
       [

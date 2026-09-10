@@ -3,7 +3,7 @@ use std::{fs, time::Instant};
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
-fn capture(s: &MemoryStore, text: &str) -> RawCapture {
+fn capture(s: &MemoryStore, text: &str) -> CaptureResult {
     s.capture(&CaptureRequest {
         request_id: id(),
         text: text.into(),
@@ -17,18 +17,17 @@ fn capture(s: &MemoryStore, text: &str) -> RawCapture {
 }
 fn memory(s: &MemoryStore, title: &str, body: &str) -> Receipt {
     let raw = capture(s, body);
-    s.apply_capture(&ChangeRequest {
+    s.edit_memory(&EditRequest {
         request_id: id(),
-        capture_id: raw.id,
-        destination: Destination::New,
+        memory_id: raw.memory_id,
+        expected_version: raw.version_id,
         title: title.into(),
         body: body.into(),
-        actor: Actor::User,
     })
     .unwrap()
 }
 #[test]
-fn retrieves_relevant_old_versions_without_a_time_switch_and_keeps_different_facts() {
+fn retrieves_only_current_facts_while_historical_citations_remain_readable() {
     let dir = tempfile::tempdir().unwrap();
     let s = MemoryStore::open(dir.path()).unwrap();
     let r = memory(&s, "同步计划", "一月同步计划：成本太高，暂缓。");
@@ -58,17 +57,15 @@ fn retrieves_relevant_old_versions_without_a_time_switch_and_keeps_different_fac
         .iter()
         .map(|r| s.resolve_source(r, 1800).unwrap())
         .collect();
-    assert!(texts.iter().any(|e| e.text.contains("一月") && !e.current));
-    assert!(texts.iter().any(|e| e.text.contains("七月") && e.current));
+    assert!(texts.iter().all(|e| !e.text.contains("一月") && e.current));
+    assert!(texts.iter().any(|e| e.text.contains("七月")));
     assert!(texts.iter().all(|e| e.recorded_at > 0));
+    assert!(!found.contains(&SourceRef::Version(oldest.clone())));
     assert!(
-        found.contains(&SourceRef::Version(oldest))
-            || texts.iter().any(|e| e.text.contains("一月"))
-    );
-    assert_eq!(
-        texts.iter().filter(|e| e.text.contains("一月")).count(),
-        1,
-        "identical capture/version text should consume one evidence slot"
+        s.resolve_source(&SourceRef::Version(oldest), 1800)
+            .unwrap()
+            .text
+            .contains("一月")
     );
     s.trash_memory(&mid, &version).unwrap();
     assert!(

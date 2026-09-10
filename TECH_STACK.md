@@ -11,7 +11,7 @@
 
 阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。已验收样机保留在 `prototype.rs` / `Prototype.tsx`，用 `npm run dev:prototype` 启动，继续与显式的 `memivy-mcp-prototype` 使用独立 Phase 1 Store。没有自动迁移样机数据。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。2026-09-07 用户授权阶段 4，正式桌面快捷入口已接入；阶段 5 已接入自动 AI 整理；2026-09-07 用户授权阶段 6，默认 `memivy-mcp` 已切换到正式 MemoryStore。
 
-正式讨论使用 `MemoryStore::start_turn` 持久化问题与等待状态，再通过已有 `model::complete` 做检索词提取和回答两次请求。答案请求前冻结至多 8 份版本/原话节选，回答只允许引用这批依据；近期对话取最近 8 条消息、各至多 1000 字，作为讨论上下文。取消和重启恢复都以持久化状态阻止迟到完成。讨论输入及选定依据单独存为草稿，不加入记忆检索；结论必须经文字与目的地确认后调用 `save_conclusion`。正常正式配置缺失时可一次性沿用旧样机已有的本机模型配置，显式测试数据/配置覆盖不会读取用户旧配置。
+正式讨论使用 `MemoryStore::start_turn` 持久化问题与等待状态，再通过已有 `model::complete` 做检索词提取和回答两次请求。答案请求前冻结至多 8 份当前 Memory 版本节选，回答只允许引用这批依据；近期对话取最近 8 条消息、各至多 1000 字，作为讨论上下文。取消和重启恢复都以持久化状态阻止迟到完成。讨论输入及选定依据单独存为草稿，不加入记忆检索；结论必须经文字与目的地确认后调用 `save_conclusion`。正常正式配置缺失时可一次性沿用旧样机已有的本机模型配置，显式测试数据/配置覆盖不会读取用户旧配置。
 
 ## 1. 结论
 
@@ -147,7 +147,7 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 - `rusqlite` 使用 `bundled`，把受控 SQLite 版本一起编译，避免各系统自带版本不一致；官方项目也将其推荐给自主管理数据库的应用。[rusqlite](https://github.com/rusqlite/rusqlite)
 - 开启 foreign keys、WAL、synchronous=FULL 和合理的 busy timeout；锁定包含 WAL-reset 修复的稳定 SQLite 构建，并检查实际链接版本；
 - 使用显式 SQL migration，不引入 ORM；
-- 在同一事务保存 `captures` 与初始 pending 状态，提交后才启动 AI 调用；任何模型失败都不能回滚原话；
+- 普通捕捉同一事务保存输入归档、Memory v0、当前 FTS 与 Memory 整理任务，提交后才启动 AI；已确认结论走指定目标写入，不额外排入录入任务；
 - UI 和 MCP 并发写入时仍走相同事务规则。
 
 ### 6.2 记忆与会话分层
@@ -156,7 +156,7 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 - `conversations`、`turns`、`messages` 与 `message_citations` 保存会话、尝试 ID、消息角色、顺序、状态及引用；会话消息支持游标分页。打开数据库不打断其他活跃进程的回答，重启恢复由确认旧进程已退出的应用 host 显式执行；
 - 普通问题、AI 回答和讨论草稿只属于会话，不自动创建 capture，也不进入记忆 FTS 或 MCP 搜索；
 - 用户确认保存的结论创建独立 capture，保留确认文本、会话/消息来源及生成与确认身份，再复用记忆版本与回执机制；
-- 回答引用稳定的 capture 或 memory-version ID，不仅引用会变化的当前记忆 ID；来源被用户删除时保留不可用状态，不恢复已删除正文；
+- 新回答仅引用读取时的当前 memory-version ID；旧 capture / 历史引用保留人工解析，不进入新回答证据；来源被用户删除时保留不可用状态，不恢复已删除正文；
 - 删除会话不连带删除已确认保存的 capture 和记忆。会话在本地保留供继续讨论，导出时与长期记忆区分；
 - 不为了问答引入关系图、完整用户画像或额外记忆数据库。
 
@@ -166,15 +166,19 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 
 永久删除原话时，在同一事务擦除关联的 `undone` 隐藏记忆及其 FTS 正文，保留其他有效或回收站中的记忆。也可通过回执中的记忆 ID 显式清空已撤销的版本，此操作保留仍有效的原话；普通撤销本身不擦除原话。新生成的备份不会携带这些已擦除的隐藏正文，已有备份仍由用户自行管理。
 
-`conclusion_intents` 保存用户确认的名称和去向；目标变更或删除时，确认原文和 intent 仍提交，回执为 `needs_review`，由用户纠正。来源角色与会话 ID 保存在独立 capture 中，删除会话不级联删除已保存结论。引用表只保存稳定来源 ID，不缓存一份会在原文删除后重新出现的引用正文。
+结论保存前在 `workspace_drafts` 的 `conclusion:<message_id>` 保存完整审核文本、原目的地及融合正文，使用已有 request ID 比较写入。目标变更或删除时整笔写入回滚，返回 `needs_review` 并保留审核窗；成功时同事务消费匹配 request ID 的审核草稿，重试不重复追加。`conclusion_intents` 仅记录成功保存的归档出处。来源角色与会话 ID 保存在独立 capture 中，删除会话不级联删除已保存结论。引用表只保存稳定来源 ID，不缓存一份会在原文删除后重新出现的引用正文。
 
 ### 6.3 中文关键词搜索使用 trigram
 
-PRD 决定 MVP 不使用 embedding，但 FTS5 默认 `unicode61` 对连续中文文本不够好。使用 FTS5 `trigram` tokenizer，让连续三个 Unicode 字符形成索引，支持中文和英文子串匹配。少于三个字符的查询使用 `instr` 做字面匹配，避免把 `%`、`_` 当作通配符；结果数量有上限，短词扫描的工作量不等同于结果上限。[SQLite FTS5 trigram](https://www.sqlite.org/fts5.html#the_trigram_tokenizer)
+第一阶段采用字面检索，第二阶段已授权可选本地 Embedding；FTS5 默认 `unicode61` 对连续中文文本不够好。使用 FTS5 `trigram` tokenizer，让连续三个 Unicode 字符形成索引，支持中文和英文子串匹配。少于三个字符的查询使用 `instr` 做字面匹配，避免把 `%`、`_` 当作通配符；结果数量有上限，短词扫描的工作量不等同于结果上限。[SQLite FTS5 trigram](https://www.sqlite.org/fts5.html#the_trigram_tokenizer)
 
-阶段 2 的 `record_fts` 是一个随原话和版本写入维护的派生索引；永久删除正文时同步移除索引项，启用 FTS secure-delete。普通检索只返回有效的当前版本与未归属原话，聊天不入索引。阶段 3 的 `library()` 在限量前执行来源/项目/更新时间过滤，按标题命中权重与更新时间排序并分页；短词按字面匹配，SQLite progress handler 将查询限制在约 500ms 执行预算内。来源命中返回原文片段，独立删除的原话不借记忆重新暴露。设置提供事务性索引重建，启动时也会重建缺失的 FTS 表。`003_workspace.sql` 将 schema 升至 3，编辑草稿单独落表，不进入搜索、MCP 或 Markdown；内容提交仍走版本/回执/乐观并发检查。
+2026-09-10 检索增强第一阶段将正式 schema 升为 9。`record_fts` 只收录活动 Memory 的当前版本，由当前指针和活动状态触发维护；归档与历史正文不进入索引。当前版本派生词保存在 `memory_keywords`，编辑后随版本失效。缺失索引与手工重建共用 `current_fts.sql`。
 
-数据量在个人 MVP 阶段很小，优先采用一个 trigram 索引，不同时维护中英文两套索引。标题、当前记忆、原话、URL 和 AI 检索词可设置不同权重。关键词搜索与 MCP `memory_search` 不调用模型；应用内问答可以调用模型提取检索词，再复用这层检索，见第 7 节。
+`MemoryStore::search(SearchRequest) -> SearchResult` 是所有业务调用方的唯一搜索接口，负责范围过滤、字面变体、排序、Memory 去重和有界片段。支持文字或参考 Memory ID，调用方只传业务范围与返回预算，不选择后端或自行融合排序。第一阶段 FTS 使用 trigram 与短词字面匹配、标题权重和 RRF 变体融合；一页默认 8、最多 100，累计正文片段 12000 字符，序列化结果预留 48 KiB 上限，查询有 500 ms SQLite 预算。无查询分页浏览及明确 ID 读取属于普通数据操作。
+
+普通捕捉返回 Memory / version / archive ID；整理任务绑定 Memory 初始版本，提交前共同检查版本与编辑草稿。保留沿用原 ID；归并原子更新目标并将输入状态变为 `merged`，复用 `receipt_changes` 登记双方，撤销同时恢复。已编辑内容不自动重跑初次整理。永久删除目标同步擦除仍有效归并回执对应的隐藏输入，保护已撤销恢复的活动 Memory 及共享归档。
+
+升级前创建现有格式的备份。未归属的活动输入确定性建为 Memory，独立输入的草稿、置顶和专题关系一对一转移；已经归档的旧关系保留为归档关联，不扩大专题范围。旧的结论冲突记录恢复至审核草稿，不提升成 Memory；不运行历史批量 AI 整理。人工恢复输入归档或历史版本都创建新的当前版本；搜索资格仍只由当前版本决定。
 
 ### 6.4 备份边界
 

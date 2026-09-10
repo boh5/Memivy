@@ -105,7 +105,7 @@ export default function Desktop() {
   return <div ref={root} className={`formal-desktop ${state?.expanded ? "is-open" : ""}`}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={e => { if (e.key === "Escape" && !e.repeat && !e.nativeEvent.isComposing && !composing.current && e.keyCode !== 229 && !document.querySelector("dialog[open]")) { e.preventDefault(); void dismiss("explicit"); } }}>
-    {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>已存到本机</span><button onClick={() => void expand(state.last_capture ? { kind: "capture", id: state.last_capture } : null)}>查看</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? "已存到本机，打开 Memivy 快捷入口" : "打开 Memivy 快捷入口"}
+    {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>已存到本机</span><button onClick={() => void expand(state.last_memory ? { kind: "memory", id: state.last_memory } : null)}>查看</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? "已存到本机，打开 Memivy 快捷入口" : "打开 Memivy 快捷入口"}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
       onClick={() => { if (!suppressLeafClick.current) void dragEnd.current.then(() => call("desktop_open")).catch(e => setError(errorText(e))); suppressLeafClick.current = false; }}>
       <img src={icon} alt="" draggable={false} />{saved && <span className="leaf-check"><Icon name="check" size={11} /></span>}

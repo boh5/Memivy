@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
-import { call, errorText, type Key, type Raw } from "./api";
+import { call, errorText, type Key, type CaptureResult } from "./api";
 import { ErrorNotice } from "./components";
 import { useDraft } from "./useDraft";
 import { isRecallSubmitKey, isSubmitKey } from "./keyboard";
@@ -62,7 +62,7 @@ export default function CaptureForm({
         await draft.clear(d.request_id);
         return;
       }
-      const raw = await call<Raw>(quick ? "desktop_capture" : "library_capture", {
+      const raw = await call<CaptureResult>(quick ? "desktop_capture" : "library_capture", {
         ...(quick ? { submittedAt } : {}),
         request: {
           request_id: d.request_id,
@@ -71,7 +71,7 @@ export default function CaptureForm({
         },
       });
       await draft.clear(d.request_id);
-      onSaved({ kind: "capture", id: raw.id });
+      onSaved({ kind: "memory", id: raw.memory_id });
       input.current?.focus();
     } catch (e) {
       setError(errorText(e));

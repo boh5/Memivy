@@ -3,7 +3,7 @@ use crate::{
     capture_panel,
     workspace::{HostResult, Workspace},
 };
-use memivy_core::memory::{CaptureRequest, Conversation, Origin, RawCapture, RecordKey};
+use memivy_core::memory::{CaptureRequest, CaptureResult, Conversation, Origin, RecordKey};
 use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::Instant};
@@ -54,7 +54,7 @@ struct Preferences {
     topic_id: Option<String>,
     source_app: String,
     position: Option<(i32, i32)>,
-    last_capture: Option<String>,
+    last_memory: Option<String>,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -67,7 +67,7 @@ impl Default for Preferences {
             topic_id: None,
             source_app: "Memivy".into(),
             position: None,
-            last_capture: None,
+            last_memory: None,
         }
     }
 }
@@ -105,7 +105,7 @@ pub struct Snapshot {
     pub configured: bool,
     pub topic: Option<Conversation>,
     pub source_app: String,
-    pub last_capture: Option<String>,
+    pub last_memory: Option<String>,
     pub error: Option<String>,
     pub ready_ms: Option<u128>,
     pub save_ms: Option<u128>,
@@ -244,7 +244,7 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
             .as_ref()
             .and_then(|id| app.state::<Workspace>().store.conversation(id).ok()),
         source_app: p.source_app.clone(),
-        last_capture: p.last_capture.clone(),
+        last_memory: p.last_memory.clone(),
         error: s.error.clone(),
         ready_ms: s.ready_ms,
         save_ms: s.save_ms,
@@ -901,7 +901,7 @@ pub async fn desktop_capture(
     window: tauri::WebviewWindow,
     request: CaptureRequest,
     submitted_at: Option<u128>,
-) -> HostResult<RawCapture> {
+) -> HostResult<CaptureResult> {
     require(&window)?;
     let start = Instant::now();
     let store = app.state::<Workspace>().store.clone();
@@ -926,15 +926,15 @@ pub async fn desktop_capture(
         .and_then(|now| submitted_at.map(|start| now.as_millis().saturating_sub(start)))
         .unwrap_or_else(|| start.elapsed().as_millis());
     diagnostic("capture_committed_ms", committed_ms);
-    let capture_id = raw.id.clone();
+    let memory_id = raw.memory_id.clone();
     on_main(&app, move |h| {
         let desktop = h.state::<Desktop>();
         let mut s = desktop.inner.lock().unwrap();
         s.save_ms = Some(committed_ms);
         if window.label() == "capture" {
-            s.receipt = Some(capture_id.clone());
+            s.receipt = Some(memory_id.clone());
         }
-        s.prefs.last_capture = Some(capture_id);
+        s.prefs.last_memory = Some(memory_id);
         if let Err(e) = desktop.persist(&s.prefs) {
             s.error = Some(e);
         }
@@ -942,7 +942,7 @@ pub async fn desktop_capture(
     })
     .await?;
     let timer_app = app.clone();
-    let receipt_id = raw.id.clone();
+    let receipt_id = raw.memory_id.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(2800)).await;
         let _ = on_main(&timer_app, move |h| {

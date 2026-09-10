@@ -9,7 +9,7 @@ fn setup() -> (tempfile::TempDir, MemoryStore) {
     let s = MemoryStore::open(d.path()).unwrap();
     (d, s)
 }
-fn capture(s: &MemoryStore, text: &str, kind: &str, project: Option<&str>) -> RawCapture {
+fn capture(s: &MemoryStore, text: &str, kind: &str, project: Option<&str>) -> CaptureResult {
     let origin = if kind == "agent" {
         Origin::Agent {
             app: "Test Agent".into(),
@@ -30,14 +30,13 @@ fn capture(s: &MemoryStore, text: &str, kind: &str, project: Option<&str>) -> Ra
     })
     .unwrap()
 }
-fn organize(s: &MemoryStore, c: &RawCapture, title: &str, body: &str) -> Receipt {
-    s.apply_capture(&ChangeRequest {
+fn organize(s: &MemoryStore, c: &CaptureResult, title: &str, body: &str) -> Receipt {
+    s.edit_memory(&EditRequest {
         request_id: id(),
-        capture_id: c.id.clone(),
-        destination: Destination::New,
+        memory_id: c.memory_id.clone(),
+        expected_version: c.version_id.clone(),
         title: title.into(),
         body: body.into(),
-        actor: Actor::User,
     })
     .unwrap()
 }
@@ -61,18 +60,24 @@ fn ranking_filters_and_pagination_apply_before_limit() {
     let a = capture(&s, "最初原话 独有证据", "agent", Some("项目 A"));
     let r = organize(&s, &a, "中文检索决定", "当前摘要");
     for n in 0..55 {
-        capture(
+        let saved = capture(
             &s,
             &format!("中文检索决定 正文记录 {n}"),
             "user",
             Some("项目 B"),
+        );
+        organize(
+            &s,
+            &saved,
+            &format!("干扰项 {n}"),
+            &format!("中文检索决定 正文记录 {n}"),
         );
     }
     let result = query(&s, "中文检索决定");
     assert_eq!(result.items[0].key.id, r.memory_id.unwrap());
     let filtered = s
         .library(&LibraryQuery {
-            query: "独有证据 摘要".into(),
+            query: "当前摘要".into(),
             origin: Some("agent".into()),
             project: Some("项目 A".into()),
             limit: 1,
@@ -110,20 +115,18 @@ fn ranking_filters_and_pagination_apply_before_limit() {
     );
 }
 #[test]
-fn matching_original_shows_the_actual_hit_beyond_initial_excerpt() {
+fn excerpts_use_current_body_and_never_recover_archive_hits() {
     let (_d, s) = setup();
     let text = format!("{}这里出现 needleword 中文短语", "很长的开头".repeat(300));
-    let raw = capture(&s, &text, "user", None);
-    let r = organize(&s, &raw, "其他标题", "现在的摘要");
+    let saved = capture(&s, &text, "user", None);
     let page = query(&s, "needleword");
-    assert_eq!(page.items[0].key.id, key(&r).id);
+    assert_eq!(page.items[0].key.id, saved.memory_id);
     assert!(page.items[0].snippet.contains("needleword"));
-    assert_eq!(
-        page.items[0].matched_capture.as_deref(),
-        Some(raw.id.as_str())
-    );
-    assert!(query(&s, "中文短语").items[0].snippet.contains("中文短语"));
+    organize(&s, &saved, "其他标题", "现在的摘要");
+    assert!(query(&s, "needleword").items.is_empty());
+    assert!(query(&s, "中文短语").items.is_empty());
 }
+
 #[test]
 fn chinese_short_words_urls_and_operators_are_literal() {
     let (_d, s) = setup();
@@ -139,7 +142,7 @@ fn chinese_short_words_urls_and_operators_are_literal() {
     ] {
         let page = query(&s, term);
         assert_eq!(page.items.len(), 1, "{term}");
-        assert_eq!(page.items[0].key.id, raw.id);
+        assert_eq!(page.items[0].key.id, raw.memory_id);
     }
     assert!(query(&s, "NOTEXIST OR").items.is_empty());
     assert!(
@@ -166,12 +169,13 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
     let (_d, s) = setup();
     let raw = capture(&s, " \n原文要逐字保留\n ", "user", None);
     let mut draft = WorkspaceDraft {
+        conclusion: None,
         context: vec![],
-        key: format!("capture:{}", raw.id),
+        key: format!("memory:{}", raw.memory_id),
         request_id: id(),
         title: "手动标题".into(),
         body: "当前编辑的内容".into(),
-        expected_version: None,
+        expected_version: Some(raw.version_id.clone()),
         origin: None,
     };
     let r = s.save_library_edit(&draft).unwrap();
@@ -179,7 +183,10 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
         s.save_library_edit(&draft).unwrap().after_version,
         r.after_version
     );
-    assert_eq!(s.capture_by_id(&raw.id).unwrap().text, raw.text);
+    assert_eq!(
+        s.capture_by_id(&raw.capture_id).unwrap().text,
+        " \n原文要逐字保留\n "
+    );
     draft.key = format!("memory:{}", key(&r).id);
     draft.expected_version = r.after_version.clone();
     draft.request_id = id();
@@ -198,21 +205,25 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
     )
     .unwrap();
     let d = s.library_detail(&key(&r)).unwrap();
-    assert_eq!(d.history.len(), 3);
+    assert_eq!(d.history.len(), 4);
     assert_eq!(d.body, "当前编辑的内容");
-    assert_eq!(d.sources[0].capture.as_ref().unwrap().text, raw.text);
+    assert_eq!(
+        d.sources[0].capture.as_ref().unwrap().text,
+        s.capture_by_id(&raw.capture_id).unwrap().text
+    );
 }
 #[test]
 fn drafts_are_private_to_editing_and_survive_restart() {
     let (d, s) = setup();
     let raw = capture(&s, "可搜索记录", "user", None);
     let draft = WorkspaceDraft {
+        conclusion: None,
         context: vec![],
-        key: format!("capture:{}", raw.id),
+        key: format!("memory:{}", raw.memory_id),
         request_id: id(),
         title: "未保存的草稿标题".into(),
         body: "draft_secret_NOT_MEMORY".into(),
-        expected_version: None,
+        expected_version: Some(raw.version_id.clone()),
         origin: None,
     };
     s.save_workspace_draft(&draft).unwrap();
@@ -222,7 +233,12 @@ fn drafts_are_private_to_editing_and_survive_restart() {
         draft.body
     );
     assert!(query(&s, "draft_secret_NOT_MEMORY").items.is_empty());
-    assert!(s.search("draft_secret_NOT_MEMORY", 20).unwrap().is_empty());
+    assert!(
+        s.search(&SearchRequest::text("draft_secret_NOT_MEMORY", 20))
+            .unwrap()
+            .items
+            .is_empty()
+    );
     let export = d.path().join("export");
     s.export_markdown(&export).unwrap();
     for entry in std::fs::read_dir(export).unwrap() {
@@ -235,8 +251,8 @@ fn drafts_are_private_to_editing_and_survive_restart() {
             );
         }
     }
-    s.trash_capture(&raw.id).unwrap();
-    s.purge_capture(&raw.id).unwrap();
+    s.trash_memory(&raw.memory_id, &raw.version_id).unwrap();
+    s.purge_memory(&raw.memory_id).unwrap();
     assert!(s.workspace_draft(&draft.key).unwrap().is_none());
     // A delayed UI write must not resurrect text after permanent erasure.
     assert_eq!(
@@ -263,10 +279,14 @@ fn trash_groups_exclusive_originals_and_never_returns_them_in_normal_search() {
     assert_eq!(trash.items[0].key.kind, "memory");
     let d = s.library_detail(&key(&r)).unwrap();
     assert_eq!(d.state, "trashed");
-    assert_eq!(d.sources[0].capture.as_ref().unwrap().text, raw.text);
+    assert_eq!(
+        d.sources[0].capture.as_ref().unwrap().text,
+        "回收站专属标记"
+    );
     s.restore_memory(&key(&r).id).unwrap();
-    assert_eq!(query(&s, "回收站专属标记").items.len(), 1);
-    s.trash_capture(&raw.id).unwrap();
+    assert!(query(&s, "回收站专属标记").items.is_empty());
+    assert_eq!(query(&s, "回收正文").items.len(), 1);
+    s.trash_capture(&raw.capture_id).unwrap();
     assert!(
         s.library_detail(&key(&r)).unwrap().sources[0]
             .capture
@@ -277,14 +297,14 @@ fn trash_groups_exclusive_originals_and_never_returns_them_in_normal_search() {
         .unwrap();
     let deleted_source = s
         .library(&LibraryQuery {
-            query: "回收站专属标记".into(),
+            query: "回收正文".into(),
             trash: true,
             ..Default::default()
         })
         .unwrap();
     assert_eq!(deleted_source.items.len(), 1);
-    assert_eq!(deleted_source.items[0].key.id, raw.id);
-    assert_eq!(deleted_source.items[0].key.kind, "capture");
+    assert_eq!(deleted_source.items[0].key.id, raw.memory_id);
+    assert_eq!(deleted_source.items[0].key.kind, "memory");
 }
 #[test]
 fn rebuilding_missing_index_recovers_facts_and_preserves_erasure() {
@@ -300,7 +320,7 @@ fn rebuilding_missing_index_recovers_facts_and_preserves_erasure() {
         .execute_batch("DROP TABLE record_fts")
         .unwrap();
     let reopened = MemoryStore::open(d.path()).unwrap();
-    assert_eq!(query(&reopened, "仍然存在").items[0].key.id, keep.id);
+    assert_eq!(query(&reopened, "仍然存在").items[0].key.id, keep.memory_id);
     assert!(query(&reopened, "永久擦除").items.is_empty());
     capture(&reopened, "重建后写入", "user", None);
     assert_eq!(query(&reopened, "重建后").items.len(), 1);
@@ -329,7 +349,7 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
     let b = capture(&s, "原始来源 B", "user", Some("生活"));
     s.apply_capture(&ChangeRequest {
         request_id: id(),
-        capture_id: b.id,
+        capture_id: b.capture_id,
         destination: Destination::Existing {
             memory_id: key(&r).id.clone(),
             expected_version: r.after_version.unwrap(),
@@ -344,6 +364,7 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
         assert_eq!(
             s.library(&LibraryQuery {
                 project: Some(p.into()),
+                query: "当前记忆".into(),
                 ..Default::default()
             })
             .unwrap()
@@ -371,6 +392,7 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
         .unwrap();
     let selected = key(&current);
     s.save_workspace_draft(&WorkspaceDraft {
+        conclusion: None,
         context: vec![],
         key: format!("memory:{}", selected.id),
         request_id: id(),
@@ -434,13 +456,16 @@ fn single_raw_export_preserves_text_without_exporting_other_records() {
     capture(&s, "无关记录", "user", None);
     let selected = RecordKey {
         kind: "capture".into(),
-        id: raw.id,
+        id: raw.capture_id.clone(),
     };
     let file = d.path().join("原话.md");
     s.export_record_markdown(&selected, None, &file).unwrap();
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        format!("# 原始记录\n\n{}\n", raw.text)
+        format!(
+            "# 原始记录\n\n{}\n",
+            s.capture_by_id(&raw.capture_id).unwrap().text
+        )
     );
     assert_eq!(
         s.export_record_markdown(&selected, None, d.path().join("memivy.db"))

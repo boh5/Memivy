@@ -42,6 +42,14 @@ pub struct CaptureRequest {
     pub text: String,
     pub origin: Origin,
 }
+/// A successful capture already has an editable, searchable Memory.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CaptureResult {
+    pub memory_id: String,
+    pub version_id: String,
+    pub capture_id: String,
+    pub created_at: i64,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawCapture {
     pub id: String,

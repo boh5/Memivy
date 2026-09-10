@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 8;
+pub(super) const SCHEMA: i64 = 9;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -135,14 +135,35 @@ impl MemoryStore {
         };
         let mut db = connect(&store.database_path(), true)?;
         // Reject unrelated/newer databases before changing their journal or schema.
-        {
+        let initial = {
             let snapshot = db.transaction()?;
-            initial_schema(&snapshot)?;
+            let version = initial_schema(&snapshot)?;
             snapshot.commit()?;
+            version
+        };
+        if initial == SCHEMA {
+            if !db
+                .prepare("SELECT 1 FROM sqlite_master WHERE name='record_fts' AND type='table'")?
+                .exists([])?
+            {
+                store.rebuild_search_index()?;
+            }
+            return Ok(store);
+        }
+        if initial > 0 && initial < 9 {
+            let backups = store.root.join("backups");
+            private_dir(&backups)?;
+            super::transfer::publish_database(
+                &db,
+                &backups.join(format!("before-schema-9-{}.db", id())),
+            )?;
         }
         // Journal mode must change outside a transaction. Recheck the schema
         // after obtaining the writer lock, before executing any migration.
         db.pragma_update(None, "journal_mode", "WAL")?;
+        // SQLite's generalized ALTER TABLE sequence, confined to this opener.
+        db.pragma_update(None, "foreign_keys", false)?;
+        db.pragma_update(None, "legacy_alter_table", true)?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version = initial_schema(&tx)?;
         if version == 0 {
@@ -186,7 +207,21 @@ impl MemoryStore {
                 "../../../../migrations/memory/008_cleanup.sql"
             ))?;
         }
+        if version < 9 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/009_current_memory.sql"
+            ))?;
+            super::records::promote_unassigned_captures(&tx)?;
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/current_fts.sql"
+            ))?;
+        }
+        if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(DataError::Integrity);
+        }
         tx.commit()?;
+        db.pragma_update(None, "foreign_keys", true)?;
+        db.pragma_update(None, "legacy_alter_table", false)?;
         if !db
             .prepare("SELECT 1 FROM sqlite_master WHERE name='record_fts' AND type='table'")?
             .exists([])?

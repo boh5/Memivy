@@ -118,10 +118,112 @@ pub(super) fn insert_capture(
     let id = id();
     db.execute("INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,request,hash,text,encode(origin)?,now()?])?;
     db.execute("INSERT INTO capture_state(capture_id) VALUES(?)", [&id])?;
-    if !matches!(origin, Origin::Conversation { .. }) {
-        db.execute("INSERT INTO organization_jobs(capture_id,attempt_id,status,created_at) VALUES(?1,?2,'pending',?3)",params![id,super::db::id(),now()?])?;
-    }
     raw(db, &id)
+}
+
+/// Archive insertion is deliberately separate: confirmed conclusions append to
+/// their chosen target without creating a temporary Memory or an AI job.
+pub(super) fn create_captured_memory(
+    db: &Connection,
+    capture: &RawCapture,
+) -> Result<CaptureResult> {
+    let memory_id = id();
+    db.execute(
+        "INSERT INTO memories(id,created_at,updated_at) VALUES(?1,?2,?2)",
+        params![memory_id, capture.created_at],
+    )?;
+    let title: String = capture
+        .text
+        .lines()
+        .find(|s| !s.trim().is_empty())
+        .unwrap_or("新记忆")
+        .trim()
+        .chars()
+        .take(45)
+        .collect();
+    let v = Version {
+        id: id(),
+        memory_id: memory_id.clone(),
+        parent_id: None,
+        title,
+        body: capture.text.clone(),
+        actor: "user".into(),
+        reason: "create".into(),
+        created_at: capture.created_at,
+        capture_ids: vec![capture.id.clone()],
+    };
+    write_version(db, &v)?;
+    Ok(CaptureResult {
+        memory_id,
+        version_id: v.id,
+        capture_id: capture.id.clone(),
+        created_at: capture.created_at,
+    })
+}
+
+/// One-time deterministic promotion, never historical batch AI organization.
+pub(super) fn promote_unassigned_captures(db: &Connection) -> Result<()> {
+    let captures: Vec<String> = db.prepare("SELECT c.id FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='active' AND c.text IS NOT NULL AND NOT EXISTS(SELECT 1 FROM version_captures vc WHERE vc.capture_id=c.id) ORDER BY c.created_at,c.id")?
+        .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    for capture in captures {
+        let archive = raw(db, &capture)?;
+        let review: Option<(String, String, Option<String>)> = db
+            .query_row(
+                "SELECT title,destination,merged_body FROM conclusion_intents WHERE capture_id=?",
+                [&capture],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        if let Some((title, destination, merged_body)) = review {
+            // Old failed conclusion saves are reviews, not independent memories.
+            if let Origin::Conversation { message_id, .. } = &archive.origin {
+                let key = format!("conclusion:{message_id}");
+                let draft = WorkspaceDraft {
+                    key: key.clone(),
+                    request_id: id(),
+                    title,
+                    body: archive.text,
+                    expected_version: None,
+                    origin: None,
+                    context: vec![],
+                    conclusion: Some(ConclusionDraft {
+                        destination: serde_json::from_str(&destination)
+                            .map_err(|_| DataError::Integrity)?,
+                        merged_body,
+                    }),
+                };
+                db.execute(
+                    "INSERT OR IGNORE INTO workspace_drafts(key,payload) VALUES(?,?)",
+                    params![key, encode(&draft)?],
+                )?;
+            }
+            continue;
+        }
+        let saved = create_captured_memory(db, &archive)?;
+        let old_key = format!("capture:{capture}");
+        let payload: Option<String> = db
+            .query_row(
+                "SELECT payload FROM workspace_drafts WHERE key=?",
+                [&old_key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(payload) = payload {
+            let mut draft: WorkspaceDraft =
+                serde_json::from_str(&payload).map_err(|_| DataError::Integrity)?;
+            draft.key = format!("memory:{}", saved.memory_id);
+            draft.expected_version = Some(saved.version_id.clone());
+            db.execute(
+                "INSERT INTO workspace_drafts(key,payload) VALUES(?,?)",
+                params![draft.key, encode(&draft)?],
+            )?;
+            db.execute("DELETE FROM workspace_drafts WHERE key=?", [&old_key])?;
+        }
+
+        db.execute("UPDATE record_pins SET kind='memory',record_id=?2 WHERE kind='capture' AND record_id=?1",params![capture,saved.memory_id])?;
+        db.execute("UPDATE collection_entries SET kind='memory',record_id=?2 WHERE kind='capture' AND record_id=?1",params![capture,saved.memory_id])?;
+    }
+    Ok(())
 }
 pub(super) fn version(db: &Connection, id: &str) -> Result<Version> {
     let mut v=db.query_row("SELECT id,memory_id,parent_id,title,body,actor,COALESCE(review_kind,reason),created_at FROM memory_versions WHERE id=? AND body IS NOT NULL",[id],|r|Ok(Version{id:r.get(0)?,memory_id:r.get(1)?,parent_id:r.get(2)?,title:r.get(3)?,body:r.get(4)?,actor:r.get(5)?,reason:r.get(6)?,created_at:r.get(7)?,capture_ids:vec![]}))?;
@@ -158,15 +260,17 @@ pub(super) fn write_version(db: &Connection, v: &Version) -> Result<()> {
         "UPDATE memories SET current_version_id=?2,updated_at=?3 WHERE id=?1",
         params![v.memory_id, v.id, v.created_at],
     )?;
-    refresh_understanding(db)?;
-    Ok(())
-}
-fn refresh_understanding(db: &Connection) -> Result<()> {
-    db.execute("UPDATE capture_state SET understanding=CASE WHEN EXISTS(SELECT 1 FROM version_captures vc JOIN memories m ON m.current_version_id=vc.version_id WHERE vc.capture_id=capture_state.capture_id AND m.state='active') THEN 'attached' WHEN understanding='attached' THEN 'pending' ELSE understanding END",[])?;
+    db.execute("UPDATE capture_state SET understanding='attached' WHERE capture_id IN (SELECT capture_id FROM version_captures WHERE version_id=?) AND understanding!='attached'",[&v.id])?;
     Ok(())
 }
 pub(super) fn apply(db: &Connection, r: &ChangeRequest) -> Result<Receipt> {
-    raw(db, &r.capture_id)?;
+    valid_id(&r.capture_id)?;
+    if !db
+        .prepare("SELECT 1 FROM captures WHERE id=?")?
+        .exists([&r.capture_id])?
+    {
+        return Err(DataError::Unavailable);
+    }
     valid_text(&r.title, 200)?;
     valid_text(&r.body, 128 * 1024)?;
     let (memory_id, previous) = match &r.destination {
@@ -225,7 +329,11 @@ fn changes(db: &Connection, request: &str) -> Result<Vec<ReceiptChange>> {
         .query_map([request], |r| Ok(ReceiptChange { memory_id:r.get(0)?, before_version:r.get(1)?, after_version:r.get(2)?, before_state:r.get(3)?, after_state:r.get(4)? }))?
         .collect::<rusqlite::Result<_>>()?)
 }
-fn save_changes(db: &Connection, request: &str, changes: &[ReceiptChange]) -> Result<()> {
+pub(super) fn save_changes(
+    db: &Connection,
+    request: &str,
+    changes: &[ReceiptChange],
+) -> Result<()> {
     for c in changes {
         db.execute("INSERT INTO receipt_changes(request_id,memory_id,before_version,after_version,before_state,after_state) VALUES(?1,?2,?3,?4,?5,?6)",
             params![request,c.memory_id,c.before_version,c.after_version,c.before_state,c.after_state])?;
@@ -252,7 +360,15 @@ fn undo_inner(
         || !(restored_assignment
             || matches!(
                 original.action.as_str(),
-                "create" | "append" | "edit" | "restore" | "conclusion" | "correct"
+                "create"
+                    | "append"
+                    | "edit"
+                    | "restore"
+                    | "conclusion"
+                    | "correct"
+                    | "organize"
+                    | "merge"
+                    | "capture"
             ))
     {
         return Err(DataError::Conflict);
@@ -272,6 +388,15 @@ fn undo_inner(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         if current != effect.after_version || state != effect.after_state {
+            return Err(DataError::Conflict);
+        }
+        if db
+            .prepare("SELECT 1 FROM workspace_drafts WHERE key=?")?
+            .exists([format!("memory:{}", effect.memory_id)])?
+        {
+            return Err(DataError::Conflict);
+        }
+        if original.action == "merge" && effect.after_state == "merged" && db.query_row("SELECT EXISTS(SELECT 1 FROM record_pins WHERE kind='memory' AND record_id=?1) OR EXISTS(SELECT 1 FROM collection_entries WHERE kind='memory' AND record_id=?1)",[&effect.memory_id],|r|r.get::<_,bool>(0))? {
             return Err(DataError::Conflict);
         }
         let after = if effect.before_state == "undone" {
@@ -308,7 +433,6 @@ fn undo_inner(
             after_state: effect.before_state,
         });
     }
-    refresh_understanding(db)?;
     db.execute(
         "UPDATE receipts SET status='undone' WHERE request_id=?",
         [&original.request_id],
@@ -353,16 +477,57 @@ pub(super) fn resolve_excerpt(
     })
 }
 impl MemoryStore {
-    /// Raw input is committed independently; no AI operation can roll it back.
-    pub fn capture(&self, r: &CaptureRequest) -> Result<RawCapture> {
+    /// Current body, input archive, receipt and organization task commit together.
+    pub fn capture(&self, r: &CaptureRequest) -> Result<CaptureResult> {
         if matches!(r.origin, Origin::Conversation { .. }) {
             return Err(DataError::Invalid);
         }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let hash = fingerprint(&("capture", &r.text, &r.origin))?;
+        if let Some(receipt) = replay(&tx, &r.request_id, &hash)? {
+            let capture_id = receipt.capture_id.ok_or(DataError::Integrity)?;
+            let created_at = tx.query_row(
+                "SELECT created_at FROM captures WHERE id=?",
+                [&capture_id],
+                |row| row.get(0),
+            )?;
+            return Ok(CaptureResult {
+                memory_id: receipt.memory_id.ok_or(DataError::Integrity)?,
+                version_id: receipt.after_version.ok_or(DataError::Integrity)?,
+                capture_id,
+                created_at,
+            });
+        }
         let c = insert_capture(&tx, &r.request_id, &r.text, &r.origin)?;
+        // Old capture request IDs still replay without promoting an archive twice.
+        let linked: Option<(String,String)> = tx.query_row("SELECT m.id,m.current_version_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN memories m ON m.id=v.memory_id WHERE vc.capture_id=? ORDER BY v.created_at,v.rowid LIMIT 1",[&c.id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if let Some((memory_id, version_id)) = linked {
+            tx.commit()?;
+            return Ok(CaptureResult {
+                memory_id,
+                version_id,
+                capture_id: c.id,
+                created_at: c.created_at,
+            });
+        }
+        let saved = create_captured_memory(&tx, &c)?;
+        save_receipt(
+            &tx,
+            &Receipt {
+                request_id: r.request_id.clone(),
+                action: "capture".into(),
+                capture_id: Some(c.id.clone()),
+                memory_id: Some(saved.memory_id.clone()),
+                before_version: None,
+                after_version: Some(saved.version_id.clone()),
+                status: "applied".into(),
+            },
+            &hash,
+        )?;
+        tx.execute("INSERT INTO organization_jobs(memory_id,input_version_id,capture_id,attempt_id,status,created_at) VALUES(?1,?2,?3,?4,'pending',?5)",params![saved.memory_id,saved.version_id,c.id,id(),c.created_at])?;
         tx.commit()?;
-        Ok(c)
+        Ok(saved)
     }
     pub fn capture_by_id(&self, id: &str) -> Result<RawCapture> {
         raw(&self.connection()?, id)
@@ -420,17 +585,67 @@ impl MemoryStore {
         expected: &str,
         old_version: &str,
     ) -> Result<Receipt> {
-        let hash = fingerprint(&("restore", memory, expected, old_version))?;
+        self.restore_source(
+            request,
+            memory,
+            expected,
+            &SourceRef::Version(old_version.into()),
+        )
+    }
+    /// Manual archive recovery only; callers must show the selected text before confirmation.
+    pub fn restore_archive(
+        &self,
+        request: &str,
+        memory: &str,
+        expected: &str,
+        capture: &str,
+    ) -> Result<Receipt> {
+        self.restore_source(
+            request,
+            memory,
+            expected,
+            &SourceRef::Capture(capture.into()),
+        )
+    }
+    fn restore_source(
+        &self,
+        request: &str,
+        memory: &str,
+        expected: &str,
+        source: &SourceRef,
+    ) -> Result<Receipt> {
+        let hash = match source {
+            SourceRef::Version(v) => fingerprint(&("restore", memory, expected, v))?,
+            SourceRef::Capture(c) => fingerprint(&("restore_archive", memory, expected, c))?,
+        };
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(old) = replay(&tx, request, &hash)? {
             return Ok(old);
         }
-        head(&tx, memory, expected)?;
-        let mut v = version(&tx, old_version)?;
-        if v.memory_id != memory {
-            return Err(DataError::Invalid);
-        }
+        let current = head(&tx, memory, expected)?;
+        let mut v = match source {
+            SourceRef::Version(old) => {
+                let version = version(&tx, old)?;
+                if version.memory_id != memory {
+                    return Err(DataError::Invalid);
+                }
+                version
+            }
+            SourceRef::Capture(capture) => {
+                let linked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=? AND vc.capture_id=?)", params![memory,capture], |r|r.get(0))?;
+                if !linked {
+                    return Err(DataError::Invalid);
+                }
+                let archive = raw(&tx, capture)?;
+                let mut version = current;
+                version.body = archive.text;
+                if !version.capture_ids.contains(capture) {
+                    version.capture_ids.push(capture.clone());
+                }
+                version
+            }
+        };
         v.id = id();
         v.parent_id = Some(expected.into());
         v.actor = "user".into();
@@ -596,7 +811,6 @@ impl MemoryStore {
         // All historical sources exclusive to this memory enter trash with it.
         // Shared sources and independently trashed sources retain their own state.
         tx.execute("UPDATE capture_state SET availability='trashed',trash_owner=?1 WHERE availability='active' AND capture_id IN (SELECT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=?1) AND NOT EXISTS(SELECT 1 FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN memories m ON m.id=v.memory_id WHERE vc.capture_id=capture_state.capture_id AND m.state='active')",[memory])?;
-        refresh_understanding(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -619,7 +833,6 @@ impl MemoryStore {
         )?;
         // A shared source may have entered trash with a different memory later.
         tx.execute("UPDATE capture_state SET availability='active',trash_owner=NULL WHERE availability='trashed' AND trash_owner IS NOT NULL AND capture_id IN (SELECT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=?)",[memory])?;
-        refresh_understanding(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -667,70 +880,17 @@ impl MemoryStore {
                 erase_capture(&tx, &source)?;
             }
         }
+        let merged: Vec<String> = tx.prepare("SELECT c.memory_id FROM receipts r JOIN receipt_changes c ON c.request_id=r.request_id JOIN memories m ON m.id=c.memory_id WHERE r.memory_id=? AND r.action='merge' AND r.status='applied' AND c.after_state='merged' AND m.state='merged' AND m.current_version_id=c.after_version")?
+            .query_map([memory],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        for input in merged {
+            erase_memory(&tx, &input)?;
+        }
         erase_memory(&tx, memory)?;
         tx.commit()?;
         Ok(())
     }
     pub fn resolve_source(&self, source: &SourceRef, max_chars: usize) -> Result<Evidence> {
         resolve(&self.connection()?, source, max_chars)
-    }
-    /// Keyword reads use FTS5 trigram with literal matching for 1-2 characters.
-    /// Only active heads and unassigned originals are returned; no model calls.
-    /// Ranking, UI filters and the index-management UI belong to Phase 3.
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Evidence>> {
-        if query.len() > 512 || query.split_whitespace().count() > 16 {
-            return Err(DataError::Invalid);
-        }
-        let mut connection = self.connection()?;
-        let db = connection.transaction()?;
-        let mut memory_filters = vec!["m.state='active'".to_owned()];
-        let mut capture_filters =
-            vec!["s.availability='active' AND s.understanding!='attached'".to_owned()];
-        let mut memory_values = Vec::new();
-        let mut capture_values = Vec::new();
-        for term in query.split_whitespace() {
-            if term.chars().count() >= 3 {
-                let literal = format!("\"{}\"", term.replace('"', "\"\""));
-                memory_filters.push("(v.id IN (SELECT source_id FROM record_fts WHERE kind='version' AND record_fts MATCH ?) OR EXISTS(SELECT 1 FROM version_captures vc JOIN capture_state cs ON cs.capture_id=vc.capture_id WHERE vc.version_id=v.id AND cs.availability='active' AND vc.capture_id IN (SELECT source_id FROM record_fts WHERE kind='capture' AND record_fts MATCH ?)))".into());
-                memory_values.extend([literal.clone(), literal.clone()]);
-                capture_filters.push("c.id IN (SELECT source_id FROM record_fts WHERE kind='capture' AND record_fts MATCH ?)".into());
-                capture_values.push(literal);
-            } else {
-                memory_filters.push("(instr(lower(v.title||' '||v.body),lower(?))>0 OR EXISTS(SELECT 1 FROM version_captures vc JOIN captures c ON c.id=vc.capture_id JOIN capture_state cs ON cs.capture_id=c.id WHERE vc.version_id=v.id AND cs.availability='active' AND instr(lower(c.text||' '||c.source||' '||coalesce((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower(?))>0))".into());
-                memory_values.extend([term.to_owned(), term.to_owned()]);
-                capture_filters.push("instr(lower(c.text||' '||c.source||' '||coalesce((SELECT terms FROM capture_keywords WHERE capture_id=c.id),'')),lower(?))>0".into());
-                capture_values.push(term.to_owned());
-            }
-        }
-        let limit = limit.clamp(1, 50);
-        let sql = format!(
-            "SELECT m.current_version_id FROM memories m JOIN memory_versions v ON v.id=m.current_version_id WHERE {} ORDER BY m.updated_at DESC,m.id LIMIT {}",
-            memory_filters.join(" AND "),
-            limit
-        );
-        let ids: Vec<String> = db
-            .prepare(&sql)?
-            .query_map(rusqlite::params_from_iter(memory_values), |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let mut found: Vec<Evidence> = ids
-            .into_iter()
-            .map(|id| resolve(&db, &SourceRef::Version(id), 500))
-            .collect::<Result<_>>()?;
-        if found.len() < limit {
-            let sql = format!(
-                "SELECT c.id FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE {} ORDER BY c.created_at DESC,c.id LIMIT {}",
-                capture_filters.join(" AND "),
-                limit - found.len()
-            );
-            let ids: Vec<String> = db
-                .prepare(&sql)?
-                .query_map(rusqlite::params_from_iter(capture_values), |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            for id in ids {
-                found.push(resolve(&db, &SourceRef::Capture(id), 500)?);
-            }
-        }
-        Ok(found)
     }
 }
 fn erase_capture(db: &Connection, capture: &str) -> Result<()> {

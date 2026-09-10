@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "seeds": [
     {
       "id": "phrase",
@@ -157,19 +157,14 @@
       ]
     },
     {
-      "id": "retained-raw",
+      "id": "archive-excluded",
       "query": "网页",
-      "expected": [
-        "history"
-      ],
-      "raw_hit": "history"
+      "expected": []
     },
     {
       "id": "cross-version-raw-terms",
       "query": "桌面端 收费",
-      "expected": [
-        "history"
-      ]
+      "expected": []
     },
     {
       "id": "old-version-excluded",

@@ -59,10 +59,10 @@ def check(root):
         results = list(pool.map(
             lambda n: call("capture", str(uuid.uuid4()), f"独立进程原话 {n}"), range(24)
         ))
-        assert len({r["id"] for r in results}) == 24
+        assert len({r["memory_id"] for r in results}) == 24
         retry = str(uuid.uuid4())
         results = list(pool.map(lambda _: call("capture", retry, "同一确认重试"), range(8)))
-        assert len({r["id"] for r in results}) == 1
+        assert len({r["memory_id"] for r in results}) == 1
 
     for command in ("hold", "hold-memory"):
         process = subprocess.Popen(
@@ -78,7 +78,7 @@ def check(root):
         assert process.returncode == -9
         with sqlite3.connect(data / "memivy.db") as db:
             if command == "hold":
-                assert db.execute("SELECT text FROM captures WHERE id=?", (acknowledged["id"],)).fetchone()[0] == f"保存后强杀 {command}"
+                assert db.execute("SELECT text FROM captures WHERE id=?", (acknowledged["capture_id"],)).fetchone()[0] == f"保存后强杀 {command}"
             else:
                 assert db.execute("SELECT current_version_id FROM memories WHERE id=?", (acknowledged["memory_id"],)).fetchone()[0] == acknowledged["after_version"]
                 assert db.execute("SELECT count(*) FROM receipt_changes WHERE request_id=?", (acknowledged["request_id"],)).fetchone()[0] == 1
@@ -93,7 +93,7 @@ def check(root):
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert not db.execute("PRAGMA foreign_key_check").fetchall()
         assert db.execute("SELECT count(*) FROM captures").fetchone()[0] >= 27
-        assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == db.execute("SELECT count(*) FROM captures").fetchone()[0] + 1
         assert db.execute("SELECT count(*) FROM captures c LEFT JOIN capture_state s ON s.capture_id=c.id WHERE s.capture_id IS NULL").fetchone()[0] == 0
 
     restored = root / "restored"
@@ -102,11 +102,11 @@ def check(root):
     with sqlite3.connect(restored / "memivy.db") as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert db.execute("SELECT count(*) FROM captures").fetchone()[0] >= 27
-        assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM memory_versions").fetchone()[0] == db.execute("SELECT count(*) FROM captures").fetchone()[0] + 1
 
     result = call("diagnostics")
     assert result["captures"] == 47, result
-    assert result["versions"] == 1, result
+    assert result["versions"] == 48, result
     return {"status": "passed", **result, "checks": [
         "8 fresh databases opened by 4 concurrent processes each",
         "24 separate process writers", "8 process retries create one capture",

@@ -35,7 +35,6 @@ pub struct Query {
     pub project: Option<String>,
     pub since_at: Option<String>,
     pub until_at: Option<String>,
-    pub raw_hit: Option<String>,
 }
 pub struct Seeded {
     pub records: HashMap<String, String>,
@@ -70,13 +69,12 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
             })
             .unwrap();
         let mut receipt = store
-            .apply_capture(&ChangeRequest {
+            .edit_memory(&EditRequest {
                 request_id: id(),
-                capture_id: raw.id.clone(),
-                destination: Destination::New,
+                memory_id: raw.memory_id.clone(),
+                expected_version: raw.version_id.clone(),
                 title: row.title.clone(),
                 body: row.old_body.as_ref().unwrap_or(&row.body).clone(),
-                actor: Actor::User,
             })
             .unwrap();
         if row.old_body.is_some() {
@@ -104,10 +102,11 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
                 .unwrap_or(raw.created_at),
         );
         result.records.insert(row.id.clone(), memory);
-        result.captures.insert(row.id.clone(), raw.id);
+        result.captures.insert(row.id.clone(), raw.capture_id);
     }
     store
         .save_workspace_draft(&WorkspaceDraft {
+            conclusion: None,
             key: "capture".into(),
             request_id: id(),
             title: String::new(),

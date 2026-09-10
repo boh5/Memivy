@@ -65,6 +65,7 @@ async fn discussion_open(
         let draft_key = format!("discussion:{id}");
         if s.workspace_draft(&draft_key)?.is_none() {
             s.save_workspace_draft(&WorkspaceDraft {
+                conclusion: None,
                 key: draft_key,
                 request_id: id.clone(),
                 title: String::new(),
@@ -238,54 +239,14 @@ async fn organization_retry(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    capture_id: String,
+    memory_id: String,
 ) -> HostResult<()> {
     require(&window)?;
     let store = state.store.clone();
-    blocking(move || store.retry_organization(&capture_id)).await?;
+    blocking(move || store.retry_organization(&memory_id)).await?;
     let _ = app.emit("library-refresh", ());
     Ok(())
 }
-#[tauri::command]
-async fn organization_new(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    capture_id: String,
-    request_id: String,
-    original_request: Option<String>,
-) -> HostResult<Receipt> {
-    require(&window)?;
-    let store = state.store.clone();
-    let receipt = blocking(move || {
-        let raw = store.capture_by_id(&capture_id)?;
-        let request = ChangeRequest {
-            request_id,
-            capture_id,
-            destination: Destination::New,
-            title: raw
-                .text
-                .lines()
-                .find(|s| !s.trim().is_empty())
-                .unwrap_or("新记忆")
-                .chars()
-                .take(60)
-                .collect(),
-            body: raw.text,
-            actor: Actor::User,
-        };
-        match original_request {
-            Some(id) => store.correct_assignment(&id, &request),
-            None => store.capture_as_new(&request.request_id, &request.capture_id),
-        }
-    })
-    .await?;
-    let _ = app.emit("library-refresh", ());
-    Ok(receipt)
-}
-
-// Retain terminal writes until SQLite accepts them. Retrying this state never
-// repeats the model call; shutdown recovery handles a still-pending attempt.
 async fn flush_organization_failure(
     store: MemoryStore,
     pending: &mut Option<(String, &'static str)>,
@@ -681,7 +642,7 @@ async fn library_capture(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     request: CaptureRequest,
-) -> HostResult<RawCapture> {
+) -> HostResult<CaptureResult> {
     require(&window)?;
     if !matches!(&request.origin,Origin::User {app, ..} if app=="Memivy") {
         return Err("主窗口只能保存你主动输入的记录".into());
@@ -711,6 +672,12 @@ enum Action {
     },
     Purge {
         key: RecordKey,
+    },
+    RestoreArchive {
+        request_id: String,
+        memory_id: String,
+        expected: String,
+        capture_id: String,
     },
     RestoreVersion {
         request_id: String,
@@ -748,6 +715,16 @@ async fn library_action(
                 "capture" => s.purge_capture(&key.id)?,
                 _ => return Err(DataError::Invalid),
             },
+            Action::RestoreArchive {
+                request_id,
+                memory_id,
+                expected,
+                capture_id,
+            } => {
+                return s
+                    .restore_archive(&request_id, &memory_id, &expected, &capture_id)
+                    .map(Some);
+            }
             Action::RestoreVersion {
                 request_id,
                 memory_id,
@@ -1051,7 +1028,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             discussion_targets,
             organization_jobs,
             organization_retry,
-            organization_new,
             library_detail,
             library_projects,
             library_topics,
@@ -1143,14 +1119,14 @@ mod organization_writeback_tests {
         assert_eq!(
             store
                 .organization_jobs(&RecordKey {
-                    kind: "capture".into(),
-                    id: raw.id.clone()
+                    kind: "memory".into(),
+                    id: raw.memory_id.clone()
                 })
                 .unwrap()[0]
                 .status,
             "failed"
         );
-        store.retry_organization(&raw.id).unwrap();
+        store.retry_organization(&raw.memory_id).unwrap();
         assert!(store.claim_organization().unwrap().is_some());
     }
 }

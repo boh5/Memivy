@@ -115,18 +115,17 @@ async fn main() {
                     })
                     .unwrap();
                 let first = s
-                    .apply_capture(&ChangeRequest {
+                    .edit_memory(&EditRequest {
                         request_id: id(),
-                        capture_id: raw.id.clone(),
-                        destination: Destination::New,
+                        memory_id: raw.memory_id.clone(),
+                        expected_version: raw.version_id.clone(),
                         title: row.title.clone(),
                         body: row.raw.clone(),
-                        actor: Actor::User,
                     })
                     .unwrap();
                 let memory = first.memory_id.unwrap();
                 mapping.insert(memory.clone(), key.clone());
-                mapping.insert(raw.id, key.clone());
+                mapping.insert(raw.capture_id, key.clone());
                 mapping.insert(first.after_version.clone().unwrap(), key.clone());
                 if row.body != row.raw {
                     let edit = s

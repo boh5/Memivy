@@ -76,13 +76,12 @@ fn run() -> Result<()> {
             };
             let capture = store.capture(&request)?;
             if command == "hold-memory" {
-                let r = store.apply_capture(&ChangeRequest {
+                let r = store.edit_memory(&EditRequest {
                     request_id: Uuid::new_v4().to_string(),
-                    capture_id: capture.id,
-                    destination: Destination::New,
+                    memory_id: capture.memory_id,
+                    expected_version: capture.version_id,
                     title: "强杀前版本".into(),
                     body: request.text,
-                    actor: Actor::User,
                 })?;
                 println!(
                     "{}",
@@ -114,10 +113,10 @@ fn run() -> Result<()> {
             let r = store.apply_organization(
                 &task,
                 &OrganizationProposal {
-                    action: "new".into(),
+                    action: "keep".into(),
                     target: String::new(),
                     title: "恢复后整理".into(),
-                    addition: task.capture.text.clone(),
+                    addition: task.memory.body.clone(),
                     changes: vec![],
                     keywords: vec![],
                     reason: "合成进程验证".into(),

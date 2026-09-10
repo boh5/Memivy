@@ -19,8 +19,11 @@ export default function DraftConflict({ draft }: { draft: ReturnType<typeof useD
     {draft.error === DRAFT_CONFLICT && <button className="outline-button" onClick={() => void review()}>核对两份草稿</button>}
     {other && <Modal title="选择继续编辑的草稿" onClose={() => setOther(null)}>
       <p>请先复制需要合并的文字。确认后会以选中的内容继续编辑。</p>
-      <label className="discussion-field">这个窗口<textarea rows={4} readOnly value={draft.value.body} /></label>
-      <label className="discussion-field">另一窗口<textarea rows={4} readOnly value={other.value?.body || ""} /></label>
+      {[{ label: "这个窗口", value: draft.value }, { label: "另一窗口", value: other.value }].map(({ label, value }) => <div key={label}>
+        {value?.conclusion && <p className="field-help">{label} · {value.conclusion.destination.kind === "new" ? "新建记忆" : "已有记忆"} · {value.title}</p>}
+        <label className="discussion-field">{label}<textarea rows={4} readOnly value={value?.body || ""} /></label>
+        {value?.conclusion?.merged_body != null && <label className="discussion-field">{label}的完整融合稿<textarea rows={6} readOnly value={value.conclusion.merged_body} /></label>}
+      </div>)}
       <ErrorNotice text={error} />
       <div className="action-row">
         <button className="outline-button" onClick={() => void resolve(false)}>使用另一窗口的草稿</button>

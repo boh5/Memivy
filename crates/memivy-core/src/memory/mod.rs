@@ -14,6 +14,7 @@ mod organization;
 mod records;
 mod related;
 mod retrieval;
+mod search;
 mod transfer;
 mod types;
 
@@ -25,6 +26,7 @@ pub use mcp::*;
 pub use navigation::*;
 pub use organization::*;
 pub use related::*;
+pub use search::*;
 pub use transfer::*;
 pub use types::*;
 
