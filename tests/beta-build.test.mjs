@@ -27,14 +27,15 @@ function fixture(t) {
 const supported=process.platform==='darwin'&&process.arch==='arm64';
 test('MCP staging uses the artifact emitted by Cargo with a custom target directory', {skip:!supported}, async t=>{
   const f=fixture(t);
-  await f.command('cargo',`const fs=require('fs'),p=require('path');const executable=p.join(process.env.CARGO_TARGET_DIR,'release/memivy-mcp');fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH MCP');console.log(JSON.stringify({reason:'compiler-artifact',target:{name:'memivy-mcp',kind:['bin']},executable}));`);
+  await f.command('cargo',`const fs=require('fs'),p=require('path');const name=process.argv[process.argv.indexOf('-p')+1];const executable=p.join(process.env.CARGO_TARGET_DIR,'release',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));`);
   await f.command('lipo','process.exit(0);');
   const result=f.run('prepare-mcp.mjs');assert.equal(result.status,0,result.stderr);
-  assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin'),'utf8'),'FRESH MCP');
+  assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin'),'utf8'),'FRESH memivy-mcp');
+  assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin'),'utf8'),'FRESH memivy-embedding');
 });
 test('DMG packaging uses the just-built app rather than a stale default target bundle', {skip:!supported}, async t=>{
   const f=fixture(t);
-  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'}]}));`);
+  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
   await f.command('npm',`const fs=require('fs'),p=require('path');const args=process.argv.slice(2),i=args.indexOf('--target');const dir=p.join(process.env.CARGO_TARGET_DIR,...(i>=0?[args[i+1]]:[]),'release/bundle/macos/Memivy.app');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'build-marker'),'FRESH APP');`);
   await f.command('hdiutil',`const fs=require('fs'),p=require('path');const a=process.argv.slice(2),stage=a[a.indexOf('-srcfolder')+1];fs.writeFileSync(a.at(-1),fs.readFileSync(p.join(stage,'Memivy.app/build-marker')));`);
   const result=f.run('build-beta.mjs');assert.equal(result.status,0,result.stderr);
@@ -53,4 +54,9 @@ test('a successful Cargo exit without an executable cannot reuse a stale MCP', {
   await f.command('cargo',`console.log(JSON.stringify({reason:'build-finished',success:true}));`);
   const result=f.run('prepare-mcp.mjs');assert.notEqual(result.status,0);
   assert(!existsSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin')));
+});
+test('a missing embedding artifact cannot pass sidecar staging', {skip:!supported},async t=>{
+ const f=fixture(t);
+ await f.command('cargo',`const fs=require('fs'),p=require('path'),name=process.argv[process.argv.indexOf('-p')+1];if(name==='memivy-embedding'){console.log(JSON.stringify({reason:'build-finished',success:true}));}else{const executable=p.join(process.env.CARGO_TARGET_DIR,'release',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH');console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));}`);
+ await f.command('lipo','process.exit(0);');assert.notEqual(f.run('prepare-mcp.mjs').status,0);assert(!existsSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin')));
 });

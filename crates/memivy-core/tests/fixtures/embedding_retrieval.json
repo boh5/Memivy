@@ -1,0 +1,1567 @@
+{
+  "notes": [
+    {
+      "id": "zh-0",
+      "body": "纸鹤计划的备份每周五保存到离线硬盘。"
+    },
+    {
+      "id": "en-0",
+      "body": "Oriole backups go to an offline drive every Friday."
+    },
+    {
+      "id": "cross-0",
+      "body": "档案 X00 / dossier X00：纸鹤计划的备份每周五保存到离线硬盘。"
+    },
+    {
+      "id": "mixed-0",
+      "body": "Mix-00 note：纸鹤计划的备份每周五保存到离线硬盘。 Status: not independently verified."
+    },
+    {
+      "id": "entity-0",
+      "body": "档案编号 R-7100，金额 1800 元，截止日期 2026-11-01，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-1",
+      "body": "月桂读书会在周三晚上七点半开始。"
+    },
+    {
+      "id": "en-1",
+      "body": "The Laurel reading club starts at 7:30 on Wednesday evenings."
+    },
+    {
+      "id": "cross-1",
+      "body": "档案 X01 / dossier X01：月桂读书会在周三晚上七点半开始。"
+    },
+    {
+      "id": "mixed-1",
+      "body": "Mix-01 note：月桂读书会在周三晚上七点半开始。 Status: not independently verified."
+    },
+    {
+      "id": "entity-1",
+      "body": "档案编号 R-7101，金额 1837 元，截止日期 2026-11-02，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-2",
+      "body": "青松项目暂不做账号同步，只保存在本机。"
+    },
+    {
+      "id": "en-2",
+      "body": "Pine does not support account sync yet; data stays on the local device."
+    },
+    {
+      "id": "cross-2",
+      "body": "档案 X02 / dossier X02：青松项目暂不做账号同步，只保存在本机。"
+    },
+    {
+      "id": "mixed-2",
+      "body": "Mix-02 note：青松项目暂不做账号同步，只保存在本机。 Status: not independently verified."
+    },
+    {
+      "id": "entity-2",
+      "body": "档案编号 R-7102，金额 1874 元，截止日期 2026-11-03，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-3",
+      "body": "远山旅行的火车票预算是 360 元，还没有购买。"
+    },
+    {
+      "id": "en-3",
+      "body": "The Summit train ticket budget is 360 yuan; I have not bought the tickets."
+    },
+    {
+      "id": "cross-3",
+      "body": "档案 X03 / dossier X03：远山旅行的火车票预算是 360 元，还没有购买。"
+    },
+    {
+      "id": "mixed-3",
+      "body": "Mix-03 note：远山旅行的火车票预算是 360 元，还没有购买。 Status: not independently verified."
+    },
+    {
+      "id": "entity-3",
+      "body": "档案编号 R-7103，金额 1911 元，截止日期 2026-11-04，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-4",
+      "body": "晴空照片原片放在书房蓝色硬盘，压缩版在笔记本。"
+    },
+    {
+      "id": "en-4",
+      "body": "ClearSky original photos are on the blue drive in the study; compressed copies are on the laptop."
+    },
+    {
+      "id": "cross-4",
+      "body": "档案 X04 / dossier X04：晴空照片原片放在书房蓝色硬盘，压缩版在笔记本。"
+    },
+    {
+      "id": "mixed-4",
+      "body": "Mix-04 note：晴空照片原片放在书房蓝色硬盘，压缩版在笔记本。 Status: not independently verified."
+    },
+    {
+      "id": "entity-4",
+      "body": "档案编号 R-7104，金额 1948 元，截止日期 2026-11-05，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-5",
+      "body": "银杏食谱测试用无糖酸奶，不用蜂蜜。"
+    },
+    {
+      "id": "en-5",
+      "body": "The Ginkgo recipe test uses unsweetened yogurt and no honey."
+    },
+    {
+      "id": "cross-5",
+      "body": "档案 X05 / dossier X05：银杏食谱测试用无糖酸奶，不用蜂蜜。"
+    },
+    {
+      "id": "mixed-5",
+      "body": "Mix-05 note：银杏食谱测试用无糖酸奶，不用蜂蜜。 Status: not independently verified."
+    },
+    {
+      "id": "entity-5",
+      "body": "档案编号 R-7105，金额 1985 元，截止日期 2026-11-06，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-6",
+      "body": "晨雾演示先讲用户问题，再展示原型，最后收集反馈。"
+    },
+    {
+      "id": "en-6",
+      "body": "The Mist demo explains the user problem, shows the prototype, then collects feedback."
+    },
+    {
+      "id": "cross-6",
+      "body": "档案 X06 / dossier X06：晨雾演示先讲用户问题，再展示原型，最后收集反馈。"
+    },
+    {
+      "id": "mixed-6",
+      "body": "Mix-06 note：晨雾演示先讲用户问题，再展示原型，最后收集反馈。 Status: not independently verified."
+    },
+    {
+      "id": "entity-6",
+      "body": "档案编号 R-7106，金额 2022 元，截止日期 2026-11-07，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-7",
+      "body": "星桥实验只邀请五个新用户，结论暂时不能推广。"
+    },
+    {
+      "id": "en-7",
+      "body": "Starbridge tested only five new users; the results cannot yet be generalized."
+    },
+    {
+      "id": "cross-7",
+      "body": "档案 X07 / dossier X07：星桥实验只邀请五个新用户，结论暂时不能推广。"
+    },
+    {
+      "id": "mixed-7",
+      "body": "Mix-07 note：星桥实验只邀请五个新用户，结论暂时不能推广。 Status: not independently verified."
+    },
+    {
+      "id": "entity-7",
+      "body": "档案编号 R-7107，金额 2059 元，截止日期 2026-11-08，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-8",
+      "body": "砂砾笔记里的草稿不能自动发布，需要我点击确认。"
+    },
+    {
+      "id": "en-8",
+      "body": "Pebble drafts must not publish automatically; I need to confirm them."
+    },
+    {
+      "id": "cross-8",
+      "body": "档案 X08 / dossier X08：砂砾笔记里的草稿不能自动发布，需要我点击确认。"
+    },
+    {
+      "id": "mixed-8",
+      "body": "Mix-08 note：砂砾笔记里的草稿不能自动发布，需要我点击确认。 Status: not independently verified."
+    },
+    {
+      "id": "entity-8",
+      "body": "档案编号 R-7108，金额 2096 元，截止日期 2026-11-09，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-9",
+      "body": "芦苇会议改到周四下午两点，原来的周二安排取消。"
+    },
+    {
+      "id": "en-9",
+      "body": "The Reed meeting moved to Thursday at 2 pm; the old Tuesday slot was cancelled."
+    },
+    {
+      "id": "cross-9",
+      "body": "档案 X09 / dossier X09：芦苇会议改到周四下午两点，原来的周二安排取消。"
+    },
+    {
+      "id": "mixed-9",
+      "body": "Mix-09 note：芦苇会议改到周四下午两点，原来的周二安排取消。 Status: not independently verified."
+    },
+    {
+      "id": "entity-9",
+      "body": "档案编号 R-7109，金额 2133 元，截止日期 2026-11-10，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-10",
+      "body": "灯塔项目联系的是设计师小周，不是开发小林。"
+    },
+    {
+      "id": "en-10",
+      "body": "The Beacon contact is designer Zhou, not developer Lin."
+    },
+    {
+      "id": "cross-10",
+      "body": "档案 X10 / dossier X10：灯塔项目联系的是设计师小周，不是开发小林。"
+    },
+    {
+      "id": "mixed-10",
+      "body": "Mix-10 note：灯塔项目联系的是设计师小周，不是开发小林。 Status: not independently verified."
+    },
+    {
+      "id": "entity-10",
+      "body": "档案编号 R-7110，金额 2170 元，截止日期 2026-11-11，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-11",
+      "body": "萤火展览门票每人 80 元，学生半价。"
+    },
+    {
+      "id": "en-11",
+      "body": "Firefly exhibition tickets cost 80 yuan, with a half-price student rate."
+    },
+    {
+      "id": "cross-11",
+      "body": "档案 X11 / dossier X11：萤火展览门票每人 80 元，学生半价。"
+    },
+    {
+      "id": "mixed-11",
+      "body": "Mix-11 note：萤火展览门票每人 80 元，学生半价。 Status: not independently verified."
+    },
+    {
+      "id": "entity-11",
+      "body": "档案编号 R-7111，金额 2207 元，截止日期 2026-11-12，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-12",
+      "body": "溪流活动需要带雨伞和保温杯，现场不提供热水。"
+    },
+    {
+      "id": "en-12",
+      "body": "For the Brook event I need an umbrella and a flask; no hot water is supplied."
+    },
+    {
+      "id": "cross-12",
+      "body": "档案 X12 / dossier X12：溪流活动需要带雨伞和保温杯，现场不提供热水。"
+    },
+    {
+      "id": "mixed-12",
+      "body": "Mix-12 note：溪流活动需要带雨伞和保温杯，现场不提供热水。 Status: not independently verified."
+    },
+    {
+      "id": "entity-12",
+      "body": "档案编号 R-7112，金额 2244 元，截止日期 2026-11-13，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-13",
+      "body": "白桦稿件必须先核对引用来源，再发给编辑。"
+    },
+    {
+      "id": "en-13",
+      "body": "The Birch manuscript needs its sources checked before it is sent to the editor."
+    },
+    {
+      "id": "cross-13",
+      "body": "档案 X13 / dossier X13：白桦稿件必须先核对引用来源，再发给编辑。"
+    },
+    {
+      "id": "mixed-13",
+      "body": "Mix-13 note：白桦稿件必须先核对引用来源，再发给编辑。 Status: not independently verified."
+    },
+    {
+      "id": "entity-13",
+      "body": "档案编号 R-7113，金额 2281 元，截止日期 2026-11-14，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-14",
+      "body": "海盐客户偏好邮件沟通，只有紧急情况才打电话。"
+    },
+    {
+      "id": "en-14",
+      "body": "SeaSalt prefers email; phone calls are for urgent matters only."
+    },
+    {
+      "id": "cross-14",
+      "body": "档案 X14 / dossier X14：海盐客户偏好邮件沟通，只有紧急情况才打电话。"
+    },
+    {
+      "id": "mixed-14",
+      "body": "Mix-14 note：海盐客户偏好邮件沟通，只有紧急情况才打电话。 Status: not independently verified."
+    },
+    {
+      "id": "entity-14",
+      "body": "档案编号 R-7114，金额 2318 元，截止日期 2026-11-15，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-15",
+      "body": "石榴预算上限是 1200 元，超过就暂停购买。"
+    },
+    {
+      "id": "en-15",
+      "body": "Ruby has a spending ceiling of 1200 yuan; purchases stop above that."
+    },
+    {
+      "id": "cross-15",
+      "body": "档案 X15 / dossier X15：石榴预算上限是 1200 元，超过就暂停购买。"
+    },
+    {
+      "id": "mixed-15",
+      "body": "Mix-15 note：石榴预算上限是 1200 元，超过就暂停购买。 Status: not independently verified."
+    },
+    {
+      "id": "entity-15",
+      "body": "档案编号 R-7115，金额 2355 元，截止日期 2026-11-16，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-16",
+      "body": "秋叶借书需要在六月十八日前归还，放到前台即可。"
+    },
+    {
+      "id": "en-16",
+      "body": "Autumn borrowed books are due by June 18 and can be left at reception."
+    },
+    {
+      "id": "cross-16",
+      "body": "档案 X16 / dossier X16：秋叶借书需要在六月十八日前归还，放到前台即可。"
+    },
+    {
+      "id": "mixed-16",
+      "body": "Mix-16 note：秋叶借书需要在六月十八日前归还，放到前台即可。 Status: not independently verified."
+    },
+    {
+      "id": "entity-16",
+      "body": "档案编号 R-7116，金额 2392 元，截止日期 2026-11-17，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-17",
+      "body": "木舟产品试验只比较按钮大小，颜色和文案保持不变。"
+    },
+    {
+      "id": "en-17",
+      "body": "The Canoe product experiment changes only button size, keeping color and wording fixed."
+    },
+    {
+      "id": "cross-17",
+      "body": "档案 X17 / dossier X17：木舟产品试验只比较按钮大小，颜色和文案保持不变。"
+    },
+    {
+      "id": "mixed-17",
+      "body": "Mix-17 note：木舟产品试验只比较按钮大小，颜色和文案保持不变。 Status: not independently verified."
+    },
+    {
+      "id": "entity-17",
+      "body": "档案编号 R-7117，金额 2429 元，截止日期 2026-11-18，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-18",
+      "body": "蓝莓录音整理后先保存摘要，完整音频留作归档。"
+    },
+    {
+      "id": "en-18",
+      "body": "After processing Blueberry recordings, I save a summary and archive the complete audio."
+    },
+    {
+      "id": "cross-18",
+      "body": "档案 X18 / dossier X18：蓝莓录音整理后先保存摘要，完整音频留作归档。"
+    },
+    {
+      "id": "mixed-18",
+      "body": "Mix-18 note：蓝莓录音整理后先保存摘要，完整音频留作归档。 Status: not independently verified."
+    },
+    {
+      "id": "entity-18",
+      "body": "档案编号 R-7118，金额 2466 元，截止日期 2026-11-19，仅为报价，未付款。"
+    },
+    {
+      "id": "zh-19",
+      "body": "松露餐厅订位用王先生的名字，人数六位，晚上六点。"
+    },
+    {
+      "id": "en-19",
+      "body": "The Truffle reservation is under Mr Wang, for six people at 6 pm."
+    },
+    {
+      "id": "cross-19",
+      "body": "档案 X19 / dossier X19：松露餐厅订位用王先生的名字，人数六位，晚上六点。"
+    },
+    {
+      "id": "mixed-19",
+      "body": "Mix-19 note：松露餐厅订位用王先生的名字，人数六位，晚上六点。 Status: not independently verified."
+    },
+    {
+      "id": "entity-19",
+      "body": "档案编号 R-7119，金额 2503 元，截止日期 2026-11-20，仅为报价，未付款。"
+    },
+    {
+      "id": "other-0",
+      "body": "Le dossier Aster est rangé dans le tiroir vert."
+    },
+    {
+      "id": "other-1",
+      "body": "La réunion Cobalt commence lundi à dix heures."
+    },
+    {
+      "id": "other-2",
+      "body": "Le budget Iris est limité à deux cents euros."
+    },
+    {
+      "id": "other-3",
+      "body": "Pour Lotus je préfère recevoir un courriel, pas un appel."
+    },
+    {
+      "id": "other-4",
+      "body": "Die Rechnung Adler liegt im roten Ordner."
+    },
+    {
+      "id": "other-5",
+      "body": "Das Treffen Buche beginnt am Dienstag um acht Uhr."
+    },
+    {
+      "id": "other-6",
+      "body": "Für Dachs gilt eine Obergrenze von dreihundert Euro."
+    },
+    {
+      "id": "other-7",
+      "body": "Beim Projekt Elster bleiben alle Daten lokal."
+    },
+    {
+      "id": "other-8",
+      "body": "La carpeta Faro está guardada en el cajón azul."
+    },
+    {
+      "id": "other-9",
+      "body": "La reunión Girasol será el jueves a las nueve."
+    },
+    {
+      "id": "other-10",
+      "body": "El presupuesto Hiedra no puede superar quinientos euros."
+    },
+    {
+      "id": "other-11",
+      "body": "Para Jacinto prefiero correo electrónico en vez de llamadas."
+    },
+    {
+      "id": "other-12",
+      "body": "桜の会議は金曜日の午後三時からです。"
+    },
+    {
+      "id": "other-13",
+      "body": "楓の資料は書斎の白い棚に置いてあります。"
+    },
+    {
+      "id": "other-14",
+      "body": "菊の予算は二万円までです。"
+    },
+    {
+      "id": "other-15",
+      "body": "竹のプロジェクトではデータをローカルだけに保存します。"
+    },
+    {
+      "id": "other-16",
+      "body": "하늘 회의는 월요일 오후 네 시에 시작합니다."
+    },
+    {
+      "id": "other-17",
+      "body": "바다 문서는 서재의 검은 서랍에 있습니다."
+    },
+    {
+      "id": "other-18",
+      "body": "나무 예산은 십만 원을 넘으면 안 됩니다."
+    },
+    {
+      "id": "other-19",
+      "body": "별 프로젝트 자료는 컴퓨터 안에만 저장합니다."
+    }
+  ],
+  "queries": [
+    {
+      "id": "zh-0",
+      "query": "纸鹤的数据多久备份一次，保存在哪？",
+      "expected": [
+        "zh-0",
+        "en-0",
+        "cross-0",
+        "mixed-0"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-0",
+      "query": "Where and when do I back up Oriole?",
+      "expected": [
+        "zh-0",
+        "en-0",
+        "cross-0",
+        "mixed-0"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-0",
+      "query": "In dossier X00, Where and when do I back up 纸鹤?",
+      "expected": [
+        "cross-0"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-0",
+      "query": "Mix-00 里面，纸鹤的数据多久备份一次，保存在哪？ Is it verified?",
+      "expected": [
+        "mixed-0"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-0",
+      "query": "R-7100 1800",
+      "expected": [
+        "entity-0"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-1",
+      "query": "月桂读书会几点开始？",
+      "expected": [
+        "zh-1",
+        "en-1",
+        "cross-1",
+        "mixed-1"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-1",
+      "query": "When does the Laurel reading group meet?",
+      "expected": [
+        "zh-1",
+        "en-1",
+        "cross-1",
+        "mixed-1"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-1",
+      "query": "In dossier X01, When does the 月桂 reading group meet?",
+      "expected": [
+        "cross-1"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-1",
+      "query": "Mix-01 里面，月桂读书会几点开始？ Is it verified?",
+      "expected": [
+        "mixed-1"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-1",
+      "query": "R-7101 1837",
+      "expected": [
+        "entity-1"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-2",
+      "query": "青松会同步账号数据吗？",
+      "expected": [
+        "zh-2",
+        "en-2",
+        "cross-2",
+        "mixed-2"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-2",
+      "query": "Does Pine sync my data between accounts?",
+      "expected": [
+        "zh-2",
+        "en-2",
+        "cross-2",
+        "mixed-2"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-2",
+      "query": "In dossier X02, Does 青松 sync my data between accounts?",
+      "expected": [
+        "cross-2"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-2",
+      "query": "Mix-02 里面，青松会同步账号数据吗？ Is it verified?",
+      "expected": [
+        "mixed-2"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-2",
+      "query": "R-7102 1874",
+      "expected": [
+        "entity-2"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-3",
+      "query": "远山的车票买了吗，预算多少？",
+      "expected": [
+        "zh-3",
+        "en-3",
+        "cross-3",
+        "mixed-3"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-3",
+      "query": "Have I bought the Summit train tickets, and what is the budget?",
+      "expected": [
+        "zh-3",
+        "en-3",
+        "cross-3",
+        "mixed-3"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-3",
+      "query": "In dossier X03, Have I bought the 远山 train tickets, and what is the budget?",
+      "expected": [
+        "cross-3"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-3",
+      "query": "Mix-03 里面，远山的车票买了吗，预算多少？ Is it verified?",
+      "expected": [
+        "mixed-3"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-3",
+      "query": "R-7103 1911",
+      "expected": [
+        "entity-3"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-4",
+      "query": "晴空的照片原片存在哪里？",
+      "expected": [
+        "zh-4",
+        "en-4",
+        "cross-4",
+        "mixed-4"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-4",
+      "query": "Where are the full-resolution ClearSky photos stored?",
+      "expected": [
+        "zh-4",
+        "en-4",
+        "cross-4",
+        "mixed-4"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-4",
+      "query": "In dossier X04, Where are the full-resolution 晴空 photos stored?",
+      "expected": [
+        "cross-4"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-4",
+      "query": "Mix-04 里面，晴空的照片原片存在哪里？ Is it verified?",
+      "expected": [
+        "mixed-4"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-4",
+      "query": "R-7104 1948",
+      "expected": [
+        "entity-4"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-5",
+      "query": "银杏食谱用了哪些甜味配料？",
+      "expected": [
+        "zh-5",
+        "en-5",
+        "cross-5",
+        "mixed-5"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-5",
+      "query": "Is honey added to the Ginkgo recipe?",
+      "expected": [
+        "zh-5",
+        "en-5",
+        "cross-5",
+        "mixed-5"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-5",
+      "query": "In dossier X05, Is honey added to the 银杏 recipe?",
+      "expected": [
+        "cross-5"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-5",
+      "query": "Mix-05 里面，银杏食谱用了哪些甜味配料？ Is it verified?",
+      "expected": [
+        "mixed-5"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-5",
+      "query": "R-7105 1985",
+      "expected": [
+        "entity-5"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-6",
+      "query": "晨雾演示按什么顺序讲？",
+      "expected": [
+        "zh-6",
+        "en-6",
+        "cross-6",
+        "mixed-6"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-6",
+      "query": "What is the presentation order for the Mist demo?",
+      "expected": [
+        "zh-6",
+        "en-6",
+        "cross-6",
+        "mixed-6"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-6",
+      "query": "In dossier X06, What is the presentation order for the 晨雾 demo?",
+      "expected": [
+        "cross-6"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-6",
+      "query": "Mix-06 里面，晨雾演示按什么顺序讲？ Is it verified?",
+      "expected": [
+        "mixed-6"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-6",
+      "query": "R-7106 2022",
+      "expected": [
+        "entity-6"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-7",
+      "query": "星桥实验样本多大，结论可靠吗？",
+      "expected": [
+        "zh-7",
+        "en-7",
+        "cross-7",
+        "mixed-7"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-7",
+      "query": "How large was the Starbridge sample, and can we generalize?",
+      "expected": [
+        "zh-7",
+        "en-7",
+        "cross-7",
+        "mixed-7"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-7",
+      "query": "In dossier X07, How large was the 星桥 sample, and can we generalize?",
+      "expected": [
+        "cross-7"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-7",
+      "query": "Mix-07 里面，星桥实验样本多大，结论可靠吗？ Is it verified?",
+      "expected": [
+        "mixed-7"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-7",
+      "query": "R-7107 2059",
+      "expected": [
+        "entity-7"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-8",
+      "query": "砂砾草稿会自动发布吗？",
+      "expected": [
+        "zh-8",
+        "en-8",
+        "cross-8",
+        "mixed-8"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-8",
+      "query": "Do Pebble drafts get published without confirmation?",
+      "expected": [
+        "zh-8",
+        "en-8",
+        "cross-8",
+        "mixed-8"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-8",
+      "query": "In dossier X08, Do 砂砾 drafts get published without confirmation?",
+      "expected": [
+        "cross-8"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-8",
+      "query": "Mix-08 里面，砂砾草稿会自动发布吗？ Is it verified?",
+      "expected": [
+        "mixed-8"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-8",
+      "query": "R-7108 2096",
+      "expected": [
+        "entity-8"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-9",
+      "query": "芦苇现在什么时候开会？",
+      "expected": [
+        "zh-9",
+        "en-9",
+        "cross-9",
+        "mixed-9"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-9",
+      "query": "What is the current time of the Reed meeting?",
+      "expected": [
+        "zh-9",
+        "en-9",
+        "cross-9",
+        "mixed-9"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-9",
+      "query": "In dossier X09, What is the current time of the 芦苇 meeting?",
+      "expected": [
+        "cross-9"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-9",
+      "query": "Mix-09 里面，芦苇现在什么时候开会？ Is it verified?",
+      "expected": [
+        "mixed-9"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-9",
+      "query": "R-7109 2133",
+      "expected": [
+        "entity-9"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-10",
+      "query": "灯塔项目应该联系谁？",
+      "expected": [
+        "zh-10",
+        "en-10",
+        "cross-10",
+        "mixed-10"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-10",
+      "query": "Who is the correct contact for Beacon?",
+      "expected": [
+        "zh-10",
+        "en-10",
+        "cross-10",
+        "mixed-10"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-10",
+      "query": "In dossier X10, Who is the correct contact for 灯塔?",
+      "expected": [
+        "cross-10"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-10",
+      "query": "Mix-10 里面，灯塔项目应该联系谁？ Is it verified?",
+      "expected": [
+        "mixed-10"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-10",
+      "query": "R-7110 2170",
+      "expected": [
+        "entity-10"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-11",
+      "query": "萤火门票学生多少钱？",
+      "expected": [
+        "zh-11",
+        "en-11",
+        "cross-11",
+        "mixed-11"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-11",
+      "query": "What is the student admission price for Firefly?",
+      "expected": [
+        "zh-11",
+        "en-11",
+        "cross-11",
+        "mixed-11"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-11",
+      "query": "In dossier X11, What is the student admission price for 萤火?",
+      "expected": [
+        "cross-11"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-11",
+      "query": "Mix-11 里面，萤火门票学生多少钱？ Is it verified?",
+      "expected": [
+        "mixed-11"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-11",
+      "query": "R-7111 2207",
+      "expected": [
+        "entity-11"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-12",
+      "query": "溪流活动要带什么？",
+      "expected": [
+        "zh-12",
+        "en-12",
+        "cross-12",
+        "mixed-12"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-12",
+      "query": "What should I pack for the Brook event?",
+      "expected": [
+        "zh-12",
+        "en-12",
+        "cross-12",
+        "mixed-12"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-12",
+      "query": "In dossier X12, What should I pack for the 溪流 event?",
+      "expected": [
+        "cross-12"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-12",
+      "query": "Mix-12 里面，溪流活动要带什么？ Is it verified?",
+      "expected": [
+        "mixed-12"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-12",
+      "query": "R-7112 2244",
+      "expected": [
+        "entity-12"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-13",
+      "query": "白桦稿件发出前要检查什么？",
+      "expected": [
+        "zh-13",
+        "en-13",
+        "cross-13",
+        "mixed-13"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-13",
+      "query": "What must happen before I send Birch to the editor?",
+      "expected": [
+        "zh-13",
+        "en-13",
+        "cross-13",
+        "mixed-13"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-13",
+      "query": "In dossier X13, What must happen before I send 白桦 to the editor?",
+      "expected": [
+        "cross-13"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-13",
+      "query": "Mix-13 里面，白桦稿件发出前要检查什么？ Is it verified?",
+      "expected": [
+        "mixed-13"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-13",
+      "query": "R-7113 2281",
+      "expected": [
+        "entity-13"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-14",
+      "query": "海盐客户喜欢哪种联系方式？",
+      "expected": [
+        "zh-14",
+        "en-14",
+        "cross-14",
+        "mixed-14"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-14",
+      "query": "How does SeaSalt prefer to communicate?",
+      "expected": [
+        "zh-14",
+        "en-14",
+        "cross-14",
+        "mixed-14"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-14",
+      "query": "In dossier X14, How does 海盐 prefer to communicate?",
+      "expected": [
+        "cross-14"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-14",
+      "query": "Mix-14 里面，海盐客户喜欢哪种联系方式？ Is it verified?",
+      "expected": [
+        "mixed-14"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-14",
+      "query": "R-7114 2318",
+      "expected": [
+        "entity-14"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-15",
+      "query": "石榴最高能花多少钱？",
+      "expected": [
+        "zh-15",
+        "en-15",
+        "cross-15",
+        "mixed-15"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-15",
+      "query": "What is the spending limit for Ruby?",
+      "expected": [
+        "zh-15",
+        "en-15",
+        "cross-15",
+        "mixed-15"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-15",
+      "query": "In dossier X15, What is the spending limit for 石榴?",
+      "expected": [
+        "cross-15"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-15",
+      "query": "Mix-15 里面，石榴最高能花多少钱？ Is it verified?",
+      "expected": [
+        "mixed-15"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-15",
+      "query": "R-7115 2355",
+      "expected": [
+        "entity-15"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-16",
+      "query": "秋叶借的书何时归还，交到哪里？",
+      "expected": [
+        "zh-16",
+        "en-16",
+        "cross-16",
+        "mixed-16"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-16",
+      "query": "When and where should the Autumn books be returned?",
+      "expected": [
+        "zh-16",
+        "en-16",
+        "cross-16",
+        "mixed-16"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-16",
+      "query": "In dossier X16, When and where should the 秋叶 books be returned?",
+      "expected": [
+        "cross-16"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-16",
+      "query": "Mix-16 里面，秋叶借的书何时归还，交到哪里？ Is it verified?",
+      "expected": [
+        "mixed-16"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-16",
+      "query": "R-7116 2392",
+      "expected": [
+        "entity-16"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-17",
+      "query": "木舟实验改动了哪些变量？",
+      "expected": [
+        "zh-17",
+        "en-17",
+        "cross-17",
+        "mixed-17"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-17",
+      "query": "Which variables change in the Canoe experiment?",
+      "expected": [
+        "zh-17",
+        "en-17",
+        "cross-17",
+        "mixed-17"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-17",
+      "query": "In dossier X17, Which variables change in the 木舟 experiment?",
+      "expected": [
+        "cross-17"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-17",
+      "query": "Mix-17 里面，木舟实验改动了哪些变量？ Is it verified?",
+      "expected": [
+        "mixed-17"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-17",
+      "query": "R-7117 2429",
+      "expected": [
+        "entity-17"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-18",
+      "query": "蓝莓录音处理完之后怎么保存？",
+      "expected": [
+        "zh-18",
+        "en-18",
+        "cross-18",
+        "mixed-18"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-18",
+      "query": "What gets saved after processing Blueberry recordings?",
+      "expected": [
+        "zh-18",
+        "en-18",
+        "cross-18",
+        "mixed-18"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-18",
+      "query": "In dossier X18, What gets saved after processing 蓝莓 recordings?",
+      "expected": [
+        "cross-18"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-18",
+      "query": "Mix-18 里面，蓝莓录音处理完之后怎么保存？ Is it verified?",
+      "expected": [
+        "mixed-18"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-18",
+      "query": "R-7118 2466",
+      "expected": [
+        "entity-18"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "zh-19",
+      "query": "松露餐厅订了几个人，几点，用谁的名字？",
+      "expected": [
+        "zh-19",
+        "en-19",
+        "cross-19",
+        "mixed-19"
+      ],
+      "group": "zh"
+    },
+    {
+      "id": "en-19",
+      "query": "What name, party size, and time are on the Truffle reservation?",
+      "expected": [
+        "zh-19",
+        "en-19",
+        "cross-19",
+        "mixed-19"
+      ],
+      "group": "en"
+    },
+    {
+      "id": "cross-19",
+      "query": "In dossier X19, What name, party size, and time are on the 松露 reservation?",
+      "expected": [
+        "cross-19"
+      ],
+      "group": "cross"
+    },
+    {
+      "id": "mixed-19",
+      "query": "Mix-19 里面，松露餐厅订了几个人，几点，用谁的名字？ Is it verified?",
+      "expected": [
+        "mixed-19"
+      ],
+      "group": "mixed"
+    },
+    {
+      "id": "entity-19",
+      "query": "R-7119 2503",
+      "expected": [
+        "entity-19"
+      ],
+      "group": "entities"
+    },
+    {
+      "id": "other-0",
+      "query": "Où est rangé le dossier Aster ?",
+      "expected": [
+        "other-0"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-1",
+      "query": "À quelle heure commence la réunion Cobalt ?",
+      "expected": [
+        "other-1"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-2",
+      "query": "Quel est le plafond du budget Iris ?",
+      "expected": [
+        "other-2"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-3",
+      "query": "Comment me contacter pour Lotus ?",
+      "expected": [
+        "other-3"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-4",
+      "query": "Wo liegt die Rechnung Adler?",
+      "expected": [
+        "other-4"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-5",
+      "query": "Wann beginnt das Treffen Buche?",
+      "expected": [
+        "other-5"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-6",
+      "query": "Wie hoch ist das Budget für Dachs?",
+      "expected": [
+        "other-6"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-7",
+      "query": "Werden Daten im Projekt Elster synchronisiert?",
+      "expected": [
+        "other-7"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-8",
+      "query": "¿Dónde está guardada la carpeta Faro?",
+      "expected": [
+        "other-8"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-9",
+      "query": "¿Cuándo es la reunión Girasol?",
+      "expected": [
+        "other-9"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-10",
+      "query": "¿Cuál es el límite del presupuesto Hiedra?",
+      "expected": [
+        "other-10"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-11",
+      "query": "¿Cómo debo comunicarme sobre Jacinto?",
+      "expected": [
+        "other-11"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-12",
+      "query": "桜の会議はいつ始まりますか？",
+      "expected": [
+        "other-12"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-13",
+      "query": "楓の資料はどこにありますか？",
+      "expected": [
+        "other-13"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-14",
+      "query": "菊に使える金額の上限はいくらですか？",
+      "expected": [
+        "other-14"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-15",
+      "query": "竹のデータはクラウドに保存されますか？",
+      "expected": [
+        "other-15"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-16",
+      "query": "하늘 회의는 언제 시작하나요?",
+      "expected": [
+        "other-16"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-17",
+      "query": "바다 문서는 어디에 있나요?",
+      "expected": [
+        "other-17"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-18",
+      "query": "나무 예산의 상한은 얼마인가요?",
+      "expected": [
+        "other-18"
+      ],
+      "group": "other"
+    },
+    {
+      "id": "other-19",
+      "query": "별 프로젝트는 자료를 클라우드에 저장하나요?",
+      "expected": [
+        "other-19"
+      ],
+      "group": "other"
+    }
+  ],
+  "note": "Synthetic labelled regression set; not a general multilingual benchmark. All groups have 20 queries."
+}

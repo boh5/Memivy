@@ -2,6 +2,7 @@
 //! The root Store/conversation APIs remain the isolated Phase 1 experiment.
 mod config;
 pub mod conversation;
+pub mod embedding;
 pub mod memory;
 pub mod model;
 mod store;

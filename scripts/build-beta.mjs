@@ -19,7 +19,7 @@ const metadata = spawnSync('cargo', ['metadata', '--format-version', '1', '--no-
 if (metadata.status !== 0) throw new Error('Cannot resolve the Cargo build directory.');
 const workspace = JSON.parse(metadata.stdout);
 const version = JSON.parse(readFileSync(path.join(root, 'src-tauri/tauri.conf.json'), 'utf8')).version;
-for (const name of ['memivy-phase1', 'memivy-mcp']) {
+for (const name of ['memivy-phase1', 'memivy-mcp', 'memivy-embedding']) {
   if (workspace.packages.find(pkg => pkg.name === name)?.version !== version) {
     throw new Error(`Application and ${name} versions differ; refusing to build a mixed-version package.`);
   }

@@ -4,193 +4,193 @@
   "cases": [
     {
       "id": "new-01",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "保留散步十分钟这一具体观察，不扩大为普遍规律。"
     },
     {
       "id": "new-02",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "保留可能、尚未比较、不下结论。"
     },
     {
       "id": "new-03",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "只记录读书与概念，不添加作者观点。"
     },
     {
       "id": "new-04",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "白鹭与青松是不同项目，不能合并。"
     },
     {
       "id": "new-05",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "爸爸与妈妈是不同人物，不能混淆礼物。"
     },
     {
       "id": "new-06",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "苏州与京都是不同旅行，保留不安排寺庙。"
     },
     {
       "id": "new-07",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "绿茶偏好属于同事小林，不属于用户。"
     },
     {
       "id": "new-08",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "保留想试与尚未行动。"
     },
     {
       "id": "new-09",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "种下罗勒是本次行动，保留第一次尝试。"
     },
     {
       "id": "new-10",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "记录所有权和借用的区分，不补写教程。"
     },
     {
       "id": "new-11",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "B 客户与 A 客户独立，保留只要桌面端。"
     },
     {
       "id": "new-12",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "想试北山路线，不声称已骑行。"
     },
     {
       "id": "new-13",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "恶意命令作为引用资料，不执行命令。"
     },
     {
       "id": "new-14",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "成都会议是另一个团队活动。"
     },
     {
       "id": "new-15",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "不把咖啡和心烦建立确定因果。"
     },
     {
       "id": "new-16",
-      "expected": "new",
+      "expected": "keep",
       "target": "",
       "rubric": "实验乙行距与实验甲独立。"
     },
     {
       "id": "append-01",
-      "expected": "append",
+      "expected": "merge",
       "target": "青松项目",
       "rubric": "只增加首页搜索，保留蓝色和桌面优先。"
     },
     {
       "id": "append-02",
-      "expected": "append",
+      "expected": "merge",
       "target": "读书方法",
       "rubric": "增加第二天回看，不删原读书方法。"
     },
     {
       "id": "append-03",
-      "expected": "append",
+      "expected": "merge",
       "target": "京都旅行",
       "rubric": "增加鸭川，不替换原旅行安排。"
     },
     {
       "id": "append-04",
-      "expected": "append",
+      "expected": "merge",
       "target": "写作习惯",
       "rubric": "增加本次写作观察，保留旧习惯。"
     },
     {
       "id": "append-05",
-      "expected": "append",
+      "expected": "merge",
       "target": "白鹭配色",
       "rubric": "保留已决定改蓝及不变的对比度字号。"
     },
     {
       "id": "append-06",
-      "expected": "append",
+      "expected": "merge",
       "target": "研究选题",
       "rubric": "当前判断转向居家办公，保留变化来源。"
     },
     {
       "id": "append-07",
-      "expected": "append",
+      "expected": "merge",
       "target": "读书会",
       "rubric": "已确认改为两个月一次，不再写每月为当前安排。"
     },
     {
       "id": "append-08",
-      "expected": "append",
+      "expected": "merge",
       "target": "散步观察",
       "rubric": "质疑散步因果，不把睡眠解释当成新定论。"
     },
     {
       "id": "append-09",
-      "expected": "append",
+      "expected": "merge",
       "target": "项目收费",
       "rubric": "订阅只是犹豫，不能替换原收费决定。"
     },
     {
       "id": "append-10",
-      "expected": "append",
+      "expected": "merge",
       "target": "摄影笔记",
       "rubric": "仅为今天逆光观察，不扩大为普遍摄影规则。"
     },
     {
       "id": "append-11",
-      "expected": "append",
+      "expected": "merge",
       "target": "早餐偏好",
       "rubric": "保留不喜欢太甜的否定。"
     },
     {
       "id": "append-12",
-      "expected": "append",
+      "expected": "merge",
       "target": "资料整理",
       "rubric": "不确定主题先单放，不将其定为长期分类。"
     },
     {
       "id": "append-13",
-      "expected": "append",
+      "expected": "merge",
       "target": "原型验证",
       "rubric": "精确保留三人中两人及小样本，不声称多数用户。"
     },
     {
       "id": "append-14",
-      "expected": "append",
+      "expected": "merge",
       "target": "雨天通勤",
       "rubric": "保留今天、大约七分钟，不将估计改为精确值。"
     },
     {
       "id": "append-15",
-      "expected": "append",
+      "expected": "merge",
       "target": "晚间阅读",
       "rubric": "纸书是尚未试过的计划。"
     },
     {
       "id": "append-16",
-      "expected": "append",
+      "expected": "merge",
       "target": "木桥实验",
       "rubric": "14号字体是下一轮实验，不能生成实验结果。"
     },

@@ -9,18 +9,21 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64' ||
   throw new Error('Memivy development beta requires an Apple Silicon Mac.');
 }
 const debug = process.argv.includes('--debug') || process.env.TAURI_ENV_DEBUG === 'true';
-const args = ['build', '-p', 'memivy-mcp', '--bin', 'memivy-mcp', '--locked', '--offline', '--message-format=json-render-diagnostics'];
+for (const name of ['memivy-mcp', 'memivy-embedding']) {
+const args = ['build', '-p', name, '--bin', name, '--locked', '--offline', '--message-format=json-render-diagnostics'];
 if (!debug) args.push('--release');
 const result = spawnSync('cargo', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, MACOSX_DEPLOYMENT_TARGET: '26.0' } });
 if (result.status !== 0) process.exit(result.status ?? 1);
 const artifacts = result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line));
 const executable = artifacts.findLast(message => message.reason === 'compiler-artifact' &&
-  message.target?.name === 'memivy-mcp' && message.target.kind.includes('bin') && message.executable)?.executable;
+  message.target?.name === name && message.target.kind.includes('bin') && message.executable)?.executable;
 if (!executable) throw new Error('Cargo did not report a memivy-mcp executable; refusing to package an old file.');
 const arch = spawnSync('lipo', [executable, '-verify_arch', 'arm64'], { stdio: 'inherit' });
 if (arch.status !== 0) throw new Error('The MCP artifact is not an Apple Silicon executable.');
 const folder = path.join(root, 'src-tauri/binaries');
 mkdirSync(folder, { recursive: true });
-const binary = path.join(folder, 'memivy-mcp-aarch64-apple-darwin');
+const binary = path.join(folder, `${name}-aarch64-apple-darwin`);
 copyFileSync(executable, binary);
 chmodSync(binary, 0o755);
+
+}

@@ -944,6 +944,41 @@ fn workspace_close(window: tauri::WebviewWindow) -> HostResult<()> {
     }
     window.hide().map_err(|_| "主窗口无法隐藏".into())
 }
+#[tauri::command]
+async fn embedding_status(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+) -> HostResult<EmbeddingStatus> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.embedding_status()).await
+}
+#[tauri::command]
+async fn embedding_control(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    action: String,
+) -> HostResult<()> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.embedding_control(&action)).await
+}
+fn start_embedding(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let state = app.state::<Workspace>();
+            if state.exiting.load(Ordering::SeqCst) {
+                break;
+            }
+            // Interactive requests take precedence over starting another batch.
+            if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
+                continue;
+            }
+            state.store.embedding_tick().await;
+        }
+    });
+}
 pub fn run(context: tauri::Context<tauri::Wry>) {
     let result = tauri::Builder::default()
         .plugin(tauri_nspanel::init())
@@ -988,6 +1023,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             });
             crate::desktop::setup(app)?;
             start_organizer(app.handle().clone());
+            start_embedding(app.handle().clone());
             crate::mcp::watch_library(app.handle().clone());
             Ok(())
         })
@@ -1002,6 +1038,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         })
         .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
+            embedding_status,
+            embedding_control,
             crate::cleanup::cleanup_prepare,
             crate::cleanup::cleanup_generate,
             crate::cleanup::cleanup_cancel,

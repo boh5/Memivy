@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 9;
+pub(super) const SCHEMA: i64 = 10;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -82,6 +82,20 @@ pub(super) fn connect(path: &Path, create: bool) -> Result<Connection> {
             Err(e) => return Err(e.into()),
         }
     }
+    static VEC: std::sync::Once = std::sync::Once::new();
+    VEC.call_once(|| unsafe {
+        // Statically linked extension, registered before any connection opens.
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
+            *const (),
+            unsafe extern "C" fn(
+                *mut rusqlite::ffi::sqlite3,
+                *mut *mut std::ffi::c_char,
+                *const rusqlite::ffi::sqlite3_api_routines,
+            ) -> std::ffi::c_int,
+        >(
+            sqlite_vec::sqlite3_vec_init as *const ()
+        )));
+    });
     let db = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -214,6 +228,11 @@ impl MemoryStore {
             super::records::promote_unassigned_captures(&tx)?;
             tx.execute_batch(include_str!(
                 "../../../../migrations/memory/current_fts.sql"
+            ))?;
+        }
+        if version < 10 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/010_embedding.sql"
             ))?;
         }
         if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {

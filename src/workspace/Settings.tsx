@@ -3,6 +3,7 @@ import { call, errorText, type Settings } from "./api";
 import { ErrorNotice, Modal } from "./components";
 import DesktopSettings from "./DesktopSettings";
 import BackupSettings from "./BackupSettings";
+import EmbeddingSettings from "./EmbeddingSettings";
 import McpSettings from "./McpSettings";
 export default function SettingsPanel({
   onClose,
@@ -81,6 +82,7 @@ export default function SettingsPanel({
       }}
     >
       <DesktopSettings />
+      <EmbeddingSettings />
       <BackupSettings disabled={busy || mcpBusy} onBusyChange={setBackupBusy} onRestore={onRestore} />
       <section className="settings-section">
         <h3>本地数据</h3>

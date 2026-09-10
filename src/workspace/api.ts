@@ -33,7 +33,7 @@ export type Row = {
   updated_at: number;
   origin: Origin | null;
 };
-export type Page = { items: Row[]; next_offset: number | null };
+export type Page = { items: Row[]; next_offset: number | null; degraded_reason?: string | null };
 export type Query = {
   query: string;
   trash: boolean;

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/memivy-core", "crates/memivy-mcp", "src-tauri"]
+members = ["crates/memivy-core", "crates/memivy-mcp", "crates/memivy-embedding", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -17,3 +17,7 @@ tempfile = "3"
 
 [profile.dev]
 debug = 1
+
+# Keep full-scan vector arithmetic representative in native development QA.
+[profile.dev.package.sqlite-vec]
+opt-level = 3

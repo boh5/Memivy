@@ -44,6 +44,7 @@ pub struct LibraryRow {
 }
 #[derive(Debug, Serialize)]
 pub struct LibraryPage {
+    pub degraded_reason: Option<String>,
     pub items: Vec<LibraryRow>,
     pub next_offset: Option<usize>,
 }
@@ -152,7 +153,7 @@ impl MemoryStore {
         }
     }
     /// Paged library reads. Filter against fact tables before ranking/limiting.
-    /// Each term may match the current version or one of its available originals.
+    /// Search terms match only the active current Memory.
     pub fn library(&self, q: &LibraryQuery) -> Result<LibraryPage> {
         if !q.trash && !q.query.trim().is_empty() {
             let result = self.search(&SearchRequest {
@@ -173,6 +174,7 @@ impl MemoryStore {
                 ..Default::default()
             })?;
             return Ok(LibraryPage {
+                degraded_reason: result.degraded_reason,
                 items: result
                     .items
                     .into_iter()
@@ -281,6 +283,7 @@ impl MemoryStore {
             });
         }
         Ok(LibraryPage {
+            degraded_reason: None,
             items,
             next_offset: has_more.then_some(q.offset + limit),
         })

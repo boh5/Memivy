@@ -8,6 +8,9 @@ publish = false
 [dependencies]
 rusqlite = { version = "=0.40.2", features = ["bundled", "backup", "hooks"] }
 sha2 = "0.10"
+sqlite-vec = "=0.1.9"
+pulldown-cmark = { version = "=0.13.0", default-features = false }
+unicode-normalization = "0.1"
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

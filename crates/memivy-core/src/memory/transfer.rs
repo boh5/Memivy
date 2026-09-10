@@ -138,6 +138,7 @@ impl MemoryStore {
         private_dir(root)?;
         publish_database(&db, &root.join("memivy.db"))?;
         let store = Self::open(root)?;
+        store.reset_embedding_index()?;
         store.check_integrity()?;
         Ok(store)
     }
@@ -537,6 +538,14 @@ impl MemoryStore {
             },
         )?;
         fs::rename(staged, root.join("memivy.db"))?;
+        // A restored snapshot never reuses an in-flight encoder's generation.
+        let mut restored = connect(&root.join("memivy.db"), false)?;
+        if identity(&restored)? >= 10 {
+            let tx = restored.transaction()?;
+            super::embedding::reset(&tx)?;
+            tx.commit()?;
+        }
+        drop(restored);
         fs::File::open(root)?.sync_all()?;
         write_state(
             root,

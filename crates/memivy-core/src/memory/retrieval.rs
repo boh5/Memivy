@@ -131,54 +131,119 @@ impl MemoryStore {
         pinned: &[SourceRef],
         collection: Option<&str>,
     ) -> Result<Vec<SourceRef>> {
-        if pinned.len() > 4 || queries.len() > 4 {
+        let request = SearchRequest {
+            query: queries.first().cloned().unwrap_or_default(),
+            variants: queries.iter().skip(1).cloned().collect(),
+            scope: SearchScope {
+                collection_id: collection.map(str::to_owned),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        Ok(self
+            .scoped_discussion_evidence(&request, pinned)?
+            .into_iter()
+            .map(|e| e.source)
+            .collect())
+    }
+    pub(super) fn scoped_discussion_evidence(
+        &self,
+        request: &SearchRequest,
+        pinned: &[SourceRef],
+    ) -> Result<Vec<Evidence>> {
+        if pinned.len() > 4 {
             return Err(DataError::Invalid);
         }
-        let result = if let Some(first) = queries.first() {
-            self.search(&SearchRequest {
-                query: first.clone(),
-                variants: queries[1..].to_vec(),
-                scope: SearchScope {
-                    collection_id: collection.map(str::to_owned),
-                    ..Default::default()
-                },
-                limit: 8,
-                ..Default::default()
-            })?
-            .items
-        } else {
+        let result = if request.query.is_empty() {
             vec![]
+        } else {
+            self.search(request)?.items
         };
         let mut db = self.connection()?;
         let tx = db.transaction()?;
-        let mut sources = vec![];
-        for source in pinned
-            .iter()
-            .cloned()
-            .chain(result.into_iter().map(|r| r.evidence.source))
-        {
-            if !super::search::current_source(&tx, &source)? {
+        let mut evidence = vec![];
+        for source in pinned {
+            if super::search::current_source(&tx, source)? {
+                evidence.push(
+                    if let Some(hit) = result.iter().find(|hit| &hit.evidence.source == source) {
+                        hit.evidence.clone()
+                    } else {
+                        super::records::resolve_excerpt(&tx, source, 1500, &request.variants, None)?
+                    },
+                );
+            }
+        }
+        evidence.extend(result.into_iter().map(|r| r.evidence));
+        let mut selected = vec![];
+        for e in evidence {
+            if !super::search::current_source(&tx, &e.source)? {
                 continue;
             }
-            if let Some(collection) = collection
-                && !super::navigation::source_in_collection(&tx, collection, &source)?
+            if let Some(collection) = &request.scope.collection_id
+                && !super::navigation::source_in_collection(&tx, collection, &e.source)?
             {
                 return Err(DataError::Unavailable);
             }
-            if !sources.contains(&source) {
-                sources.push(source);
+            if !selected.iter().any(|v: &Evidence| v.source == e.source) {
+                selected.push(e);
             }
-            if sources.len() == 8 {
+            if selected.len() == 8 {
                 break;
             }
         }
-        Ok(sources)
+        Ok(selected)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::db::id;
+    #[test]
+    fn pinned_memory_keeps_search_window_and_long_questions_use_variants() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let capture = store
+            .capture(&CaptureRequest {
+                request_id: id(),
+                text: format!("{} END4792", "background ".repeat(600)),
+                origin: Origin::User {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        let source = SourceRef::Version(capture.version_id);
+        let evidence = store
+            .scoped_discussion_evidence(
+                &SearchRequest::text("END4792", 8),
+                std::slice::from_ref(&source),
+            )
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(evidence[0].text.contains("END4792"));
+        let request = SearchRequest {
+            query: "question ".repeat(129),
+            variants: vec!["END4792".into()],
+            ..Default::default()
+        };
+        let evidence = store
+            .scoped_discussion_evidence(&request, std::slice::from_ref(&source))
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(evidence[0].text.contains("END4792"));
+        let request = SearchRequest {
+            query: "问".repeat(6000),
+            variants: vec!["END4792".into()],
+            ..Default::default()
+        };
+        let evidence = store
+            .scoped_discussion_evidence(&request, &[source])
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert!(evidence[0].text.contains("END4792"));
+    }
     #[test]
     fn focused_fact_beats_distant_heading_and_offsets_survive_lowercase_expansion() {
         let body = format!("İ木桥项目\n{}收费是每年99元。", "普通背景。".repeat(500));

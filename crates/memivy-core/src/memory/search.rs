@@ -81,6 +81,8 @@ impl SearchHit {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct SearchResult {
+    pub mode: String,
+    pub degraded_reason: Option<String>,
     pub items: Vec<SearchHit>,
     pub has_more: bool,
     pub truncated: bool,
@@ -89,6 +91,10 @@ pub struct SearchResult {
 
 impl MemoryStore {
     pub fn search(&self, request: &SearchRequest) -> Result<SearchResult> {
+        let (vector, reason) = match self.query_vector(request) {
+            Ok(v) => (v, None),
+            Err(e) => (None, Some(e)),
+        };
         let mut db = self.connection()?;
         let started = Instant::now();
         db.progress_handler(
@@ -96,7 +102,7 @@ impl MemoryStore {
             Some(move || started.elapsed() > Duration::from_millis(500)),
         )?;
         let tx = db.transaction()?;
-        search_in(&tx, request)
+        search_in(&tx, request, vector.as_ref(), reason)
     }
 }
 
@@ -116,7 +122,12 @@ fn bind(values: &mut Vec<Value>, value: impl Into<Value>) -> String {
     format!("?{}", values.len())
 }
 
-pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<SearchResult> {
+fn search_in(
+    db: &Connection,
+    request: &SearchRequest,
+    vector: Option<&(String, Vec<u8>)>,
+    mut degraded_reason: Option<String>,
+) -> Result<SearchResult> {
     let scope = &request.scope;
     if request.limit == 0
         || request.limit > 100
@@ -124,8 +135,7 @@ pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<Sear
         || request.excerpt_chars == 0
         || request.excerpt_chars > 3000
         || request.variants.len() > 4
-        || request.query.len() > 16 * 1024
-        || request.query.split_whitespace().count() > 128
+        || request.query.len() > 32 * 1024
         || request
             .variants
             .iter()
@@ -155,7 +165,7 @@ pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<Sear
                 .into_iter()
                 .take(4),
         );
-    } else {
+    } else if request.query.len() <= 16 * 1024 && request.query.split_whitespace().count() <= 128 {
         queries.insert(0, request.query.trim().to_owned());
     }
     queries.retain(|q| !q.trim().is_empty());
@@ -243,6 +253,80 @@ pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<Sear
                 .or_insert((version, updated, score));
         }
     }
+    let mut windows = HashMap::new();
+    let mut hybrid = false;
+    if let Some((revision, vector)) = vector {
+        // Several lexical reformulations are one retrieval channel.
+        let mut lexical: Vec<_> = scores
+            .iter()
+            .map(|(id, row)| (id.clone(), row.clone()))
+            .collect();
+        lexical.sort_by(|a, b| {
+            b.1.2
+                .total_cmp(&a.1.2)
+                .then(b.1.1.cmp(&a.1.1))
+                .then(a.0.cmp(&b.0))
+        });
+        let lexical_scores = scores.clone();
+        for (rank, (id, _)) in lexical.into_iter().enumerate() {
+            scores.get_mut(&id).unwrap().2 = 1.0 / (61.0 + rank as f64);
+        }
+        let index = super::embedding::meta(db)?;
+        if index.is_some_and(|i| i.revision == *revision && i.state == "ready") {
+            let mut args = values.clone();
+            let p = bind(&mut args, vector.clone());
+            // SQLite takes the bare source range from the row providing min().
+            // Group before LIMIT so many chunks cannot crowd out other memories.
+            // Materialize scalar distances first: grouping raw BLOB rows would
+            // spill hundreds of MB into SQLite's temporary sorter.
+            let sql = format!(
+                "WITH distances AS MATERIALIZED (SELECT m.id memory_id,v.id version_id,m.updated_at,c.start_char,vec_distance_cosine(c.vector,{p}) distance FROM embedding_chunks c JOIN memories m ON m.id=c.memory_id AND m.current_version_id=c.version_id JOIN memory_versions v ON v.id=c.version_id WHERE {}) SELECT memory_id,version_id,updated_at,start_char,min(distance) distance FROM distances GROUP BY memory_id ORDER BY distance,updated_at DESC,memory_id LIMIT {}",
+                filters.join(" AND "),
+                candidate_limit + 1
+            );
+            let result = (|| -> Result<Vec<(String, String, i64, usize)>> {
+                Ok(db
+                    .prepare(&sql)?
+                    .query_map(rusqlite::params_from_iter(args), |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get::<_, i64>(3)? as usize,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<_>>()?)
+            })();
+            match result {
+                Ok(rows) => {
+                    candidate_truncated |= rows.len() > candidate_limit;
+                    for (rank, (memory, version, updated, start)) in
+                        rows.into_iter().take(candidate_limit).enumerate()
+                    {
+                        let score = 1.0 / (61.0 + rank as f64);
+                        if !lexical_scores.contains_key(&memory) {
+                            windows.insert(memory.clone(), start);
+                        }
+                        scores
+                            .entry(memory)
+                            .and_modify(|r| r.2 += score)
+                            .or_insert((version, updated, score));
+                    }
+                    hybrid = true;
+                }
+                Err(_) => {
+                    scores = lexical_scores;
+                    degraded_reason = Some("向量检索超过预算或不可用，本次使用字面结果".into());
+                    // An interrupted vector scan must not cancel bounded reads
+                    // of lexical evidence already selected successfully.
+                    db.progress_handler(0, None::<fn() -> bool>)?;
+                }
+            }
+        } else {
+            scores = lexical_scores;
+            degraded_reason = Some("索引配置已变化，本次使用字面结果".into());
+        }
+    }
     let mut ranked: Vec<_> = scores.into_iter().collect();
     ranked.sort_by(|a, b| {
         b.1.2
@@ -268,7 +352,7 @@ pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<Sear
             &SourceRef::Version(version_id.clone()),
             request.excerpt_chars.min(chars_left),
             &queries,
-            None,
+            windows.get(&memory_id).copied(),
         )?;
         chars_left -= evidence.text.chars().count();
         let mut origins: Vec<Origin> = db.prepare("SELECT DISTINCT c.source FROM version_captures vc JOIN captures c ON c.id=vc.capture_id WHERE vc.version_id=? AND c.source IS NOT NULL ORDER BY c.source LIMIT 5")?
@@ -298,9 +382,100 @@ pub(super) fn search_in(db: &Connection, request: &SearchRequest) -> Result<Sear
         items.push(hit);
     }
     Ok(SearchResult {
+        mode: if hybrid { "hybrid" } else { "lexical" }.into(),
+        degraded_reason,
         next_offset: has_more.then_some(request.offset + items.len()),
         items,
         has_more,
         truncated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
+    #[test]
+    fn hybrid_keeps_exact_window_filters_before_topk_and_rejects_stale_vectors() {
+        let d = tempfile::tempdir().unwrap();
+        let s = MemoryStore::open(d.path()).unwrap();
+        let mut db = s.connection().unwrap();
+        let mut v = vec![0.0; 1024];
+        v[0] = 1.0;
+        let bytes = crate::embedding::vector_bytes(&v).unwrap();
+        let mut target = None;
+        for n in 0..30 {
+            let capture = s
+                .capture(&CaptureRequest {
+                    request_id: id(),
+                    text: format!(
+                        "{} precise-entity-{n} costs 79 euros.",
+                        "background ".repeat(200)
+                    ),
+                    origin: Origin::User {
+                        app: "QA".into(),
+                        project: Some(if n == 0 { "inside" } else { "outside" }.into()),
+                        uri: None,
+                    },
+                })
+                .unwrap();
+            db.execute(
+                "INSERT INTO embedding_chunks VALUES(?1,?2,0,0,50,'synthetic',?3)",
+                params![capture.memory_id, capture.version_id, bytes],
+            )
+            .unwrap();
+            if n == 0 {
+                target = Some(capture);
+            }
+        }
+        super::super::embedding::reset(&db).unwrap(); // reset before seeding the final vectors
+        for (memory, version) in db
+            .prepare("SELECT id,current_version_id FROM memories")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        {
+            db.execute(
+                "INSERT INTO embedding_chunks VALUES(?1,?2,0,0,50,'synthetic',?3)",
+                params![memory, version, bytes],
+            )
+            .unwrap();
+        }
+        db.execute("UPDATE embedding_index_meta SET state='ready'", [])
+            .unwrap();
+        let meta = super::super::embedding::meta(&db).unwrap().unwrap();
+        let request = SearchRequest {
+            query: "precise-entity-0".into(),
+            scope: SearchScope {
+                project: Some("inside".into()),
+                ..Default::default()
+            },
+            excerpt_chars: 160,
+            ..Default::default()
+        };
+        let tx = db.transaction().unwrap();
+        let found = search_in(
+            &tx,
+            &request,
+            Some(&(meta.revision.clone(), bytes.clone())),
+            None,
+        )
+        .unwrap();
+        assert_eq!(found.items.len(), 1);
+        assert!(found.items[0].evidence.text.contains("precise-entity-0"));
+        drop(tx);
+        let target = target.unwrap();
+        s.edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: target.memory_id,
+            expected_version: target.version_id,
+            title: "changed".into(),
+            body: "new content".into(),
+        })
+        .unwrap();
+        let found = search_in(&db, &request, Some(&(meta.revision, bytes)), None).unwrap();
+        assert!(found.items.is_empty());
+    }
 }

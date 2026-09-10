@@ -30,13 +30,14 @@ impl MemoryStore {
         request: &str,
         sources: &[SourceRef],
     ) -> Result<Vec<Evidence>> {
-        self.bind_excerpts(request, sources, &[])
+        self.bind_excerpts(request, sources, &[], None)
     }
     fn bind_excerpts(
         &self,
         request: &str,
         sources: &[SourceRef],
         queries: &[String],
+        selected: Option<&[Evidence]>,
     ) -> Result<Vec<Evidence>> {
         if sources.len() > 8 {
             return Err(DataError::Invalid);
@@ -63,7 +64,14 @@ impl MemoryStore {
                 if !super::search::current_source(&tx, s)? {
                     return Err(DataError::Unavailable);
                 }
-                resolve_excerpt(&tx, s, 1500, queries, None)
+                let preferred = selected.and_then(|items| items.iter().find(|e| &e.source == s));
+                resolve_excerpt(
+                    &tx,
+                    s,
+                    preferred.map_or(1500, |e| e.text.chars().count()),
+                    queries,
+                    preferred.map(|e| e.start),
+                )
             })
             .collect::<Result<Vec<_>>>()?;
         tx.execute(
@@ -106,7 +114,7 @@ impl MemoryStore {
         turn: &Turn,
         pinned: &[SourceRef],
     ) -> std::result::Result<(), Failure> {
-        if pinned.len() > 4 || turn.user.text.len() > 16_000 {
+        if pinned.len() > 4 || turn.user.text.len() > 32 * 1024 {
             return Err(Failure::InvalidAnswer);
         }
         let scope = self
@@ -148,14 +156,27 @@ impl MemoryStore {
         let store = self.clone();
         let queries = plan.queries.clone();
         let selected = pinned.to_vec();
-        let sources = tokio::task::spawn_blocking(move || {
-            store.scoped_discussion_sources(&queries, &selected, scope.as_deref())
+        let question = turn.user.text.clone();
+        let found = tokio::task::spawn_blocking(move || {
+            store.scoped_discussion_evidence(
+                &SearchRequest {
+                    query: question,
+                    variants: queries,
+                    scope: SearchScope {
+                        collection_id: scope,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                &selected,
+            )
         })
         .await
         .map_err(|_| Failure::InvalidAnswer)?
         .map_err(|_| Failure::SourceUnavailable)?;
+        let sources: Vec<_> = found.iter().map(|e| e.source.clone()).collect();
         let evidence = self
-            .bind_excerpts(&turn.id, &sources, &plan.queries)
+            .bind_excerpts(&turn.id, &sources, &plan.queries, Some(&found))
             .map_err(|_| Failure::SourceUnavailable)?;
         let supplied:Vec<_>=evidence.iter().enumerate().map(|(i,e)|json!({"id":format!("M{}",i+1),"title":e.title,"text":e.text,"truncated":e.truncated,"recorded_at_ms":e.recorded_at,"is_current_version":e.current,"source_kind":e.source.parts().0})).collect();
         let value=model::complete(config,json!([

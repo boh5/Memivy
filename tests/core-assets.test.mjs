@@ -14,7 +14,7 @@ test('organization review accounts for every fixed case and fault without relabe
   assert.equal(faults.length, 8);
   assert.deepEqual(review.map(r => [r.id, r.expected, r.target]), cases.map(r => [r.id, r.expected, r.target]));
   assert.ok(review.every(r => r.rubric.trim()));
-  for (const c of cases.filter(c => c.expected === 'append')) assert.ok(c.seeds.some(([title]) => title === c.target));
+  for (const c of cases.filter(c => c.expected === 'merge')) assert.ok(c.seeds.some(([title]) => title === c.target));
 });
 
 test('search and discussion references resolve; a continuing topic retains one seed set', () => {
