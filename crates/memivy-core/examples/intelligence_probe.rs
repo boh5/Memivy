@@ -32,8 +32,8 @@ fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
 async fn main() {
     let args: Vec<_> = std::env::args().collect();
     assert!(
-        args.len() == 3,
-        "intelligence_probe PRIVATE_CONFIG OUTPUT_DIR"
+        args.len() == 3 || (args.len() == 4 && args[3] == "--agent"),
+        "intelligence_probe PRIVATE_CONFIG OUTPUT_DIR [--agent]"
     );
     let config =
         ModelConfig::read(std::path::Path::new(&args[1])).expect("private model configuration");
@@ -48,12 +48,16 @@ async fn main() {
         include_str!("../src/memory/organization.rs"),
         include_str!("../src/memory/retrieval.rs"),
         include_str!("../src/memory/library.rs"),
-        include_str!("../src/model.rs")
+        include_str!("../src/model.rs"),
+        include_str!("../src/model/tools.rs"),
+        include_str!("../src/memory/agent.rs"),
+        include_str!("../src/memory/search.rs")
     );
     fs::write(
         output.join("manifest.json"),
         serde_json::to_vec_pretty(&json!({
-            "model": config.model, "disable_reasoning": config.disable_reasoning,
+            "agent": args.len() == 4, "model": config.model, "disable_reasoning": config.disable_reasoning,
+            "agent_fixture_sha256": format!("{:x}", Sha256::digest(include_str!("../tests/fixtures/agent_organization.json").as_bytes())),
             "fixture_sha256": format!("{:x}", Sha256::digest(fixture.as_bytes())),
             "implementation_sha256": format!("{:x}", Sha256::digest(code.as_bytes())),
             "endpoint_sha256": format!("{:x}", Sha256::digest(config.base_url.as_bytes()))
@@ -61,7 +65,23 @@ async fn main() {
         .unwrap(),
     )
     .unwrap();
-    let cases: Vec<Case> = serde_json::from_str(fixture).unwrap();
+    let mut cases: Vec<Case> = serde_json::from_str(fixture).unwrap();
+    let capability_root = tempfile::tempdir().unwrap();
+    let agent = args.len() == 4;
+    if agent {
+        let capabilities = MemoryStore::open(capability_root.path())
+            .unwrap()
+            .test_model_capabilities(&config)
+            .await
+            .expect("capability probe");
+        assert!(
+            capabilities.multi_turn,
+            "multi-turn capability required for Agent evaluation"
+        );
+        let extra = include_str!("../tests/fixtures/agent_organization.json");
+        fs::write(output.join("agent-cases.json"), extra).unwrap();
+        cases.extend(serde_json::from_str::<Vec<Case>>(extra).unwrap());
+    }
     let rubric = include_str!("../tests/fixtures/organization_review.json");
     fs::write(output.join("rubric.json"), rubric).unwrap();
     let mut review = vec![];
@@ -70,6 +90,13 @@ async fn main() {
         let path = output.join(format!("{}.json", case.id));
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();
+        if agent {
+            fs::copy(
+                capability_root.path().join("model-capabilities.json"),
+                dir.path().join("model-capabilities.json"),
+            )
+            .unwrap();
+        }
         for (title, body) in &case.seeds {
             let c = capture(&store, body);
             store
@@ -87,7 +114,12 @@ async fn main() {
         assert_eq!(task.capture_id, raw.capture_id);
         store.prepare_organization(&mut task).unwrap();
         let started = std::time::Instant::now();
-        let result = match store.propose_organization(&config, &task).await {
+        let proposed = if agent {
+            store.propose_organization_flow(&config, &mut task).await
+        } else {
+            store.propose_organization(&config, &task).await
+        };
+        let result = match proposed {
             Ok(proposal) => {
                 let target = proposal
                     .target

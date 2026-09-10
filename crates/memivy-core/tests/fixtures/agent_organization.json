@@ -1,0 +1,210 @@
+[
+  {
+    "id": "agent-01",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "Project Cedar: I might switch to SQLite; this is a hypothesis, not an approved decision."
+  },
+  {
+    "id": "agent-02",
+    "expected": "keep",
+    "target": "",
+    "seeds": [
+      [
+        "Atlas",
+        "Project Atlas ships Friday."
+      ]
+    ],
+    "capture": "Project Birch is unrelated to Atlas. Its trial deadline is Tuesday, not Friday."
+  },
+  {
+    "id": "agent-03",
+    "expected": "merge",
+    "target": "Cedar",
+    "seeds": [
+      [
+        "Cedar",
+        "Project Cedar API budget is $800. Offline support remains undecided."
+      ]
+    ],
+    "capture": "Add to Project Cedar: the API trial used $120; this does not change the $800 budget or decide offline support."
+  },
+  {
+    "id": "agent-04",
+    "expected": "merge",
+    "target": "Birch",
+    "seeds": [
+      [
+        "Birch",
+        "Project Birch review is Tuesday. Keep the current UI."
+      ]
+    ],
+    "capture": "Project Birch: add a note that Lee will attend the Tuesday review. Keep the existing UI unchanged."
+  },
+  {
+    "id": "agent-05",
+    "expected": "defer",
+    "target": "",
+    "seeds": [
+      [
+        "Cedar",
+        "Project Cedar uses SQLite."
+      ],
+      [
+        "Birch",
+        "Project Birch uses SQLite."
+      ]
+    ],
+    "capture": "Update the second one to use PostgreSQL. I did not specify which project."
+  },
+  {
+    "id": "agent-06",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "先记一个想法：Offline-first sync 也许适合小团队，但尚未验证，不能当成结论。"
+  },
+  {
+    "id": "agent-07",
+    "expected": "merge",
+    "target": "木桥",
+    "seeds": [
+      [
+        "木桥",
+        "木桥项目预算800元，周三复核；暂不支持云同步。"
+      ]
+    ],
+    "capture": "木桥项目补充：离线搜索试验花费120元。预算仍为800元，暂不支持云同步的决定不变。"
+  },
+  {
+    "id": "agent-08",
+    "expected": "keep",
+    "target": "",
+    "seeds": [
+      [
+        "北辰",
+        "北辰项目在周一评审。"
+      ]
+    ],
+    "capture": "南风项目和北辰项目无关，南风评审在周四；这条单独保存。"
+  },
+  {
+    "id": "agent-09",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "Projet Érable : le budget prévu est de 800 euros, mais il reste à valider. Aucune décision finale."
+  },
+  {
+    "id": "agent-10",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "Projekt Fichte: Das Experiment kostet 120 Euro. Ein Rollout wurde noch nicht beschlossen."
+  },
+  {
+    "id": "agent-11",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "Proyecto Olmo: quizá adoptemos SQLite, pero aún no se ha validado. El presupuesto tentativo es de 800 euros."
+  },
+  {
+    "id": "agent-12",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "楓プロジェクト：予算は仮に800円。承認済みではない。同期方式は未定。"
+  },
+  {
+    "id": "agent-13",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "느티나무 프로젝트: 예산 800원은 잠정안이며 아직 승인되지 않았다. 동기화 방식은 미정이다."
+  },
+  {
+    "id": "agent-14",
+    "expected": "merge",
+    "target": "Atlas",
+    "seeds": [
+      [
+        "Atlas",
+        "Atlas launch remains unapproved. Owner Lee. Budget $900."
+      ]
+    ],
+    "capture": "For Atlas, append the test result: 12 out of 20 checks passed. This is not launch approval."
+  },
+  {
+    "id": "agent-15",
+    "expected": "merge",
+    "target": "Cedar",
+    "seeds": [
+      [
+        "Cedar",
+        "Cedar uses local storage. Test owner: Lee. No cloud upload allowed."
+      ]
+    ],
+    "capture": "Cedar test report: latency p95 was 180 ms on one M4 Pro. Do not generalize to all devices."
+  },
+  {
+    "id": "agent-16",
+    "expected": "defer",
+    "target": "",
+    "seeds": [
+      [
+        "Atlas",
+        "Atlas reviewer is Lee."
+      ],
+      [
+        "Cedar",
+        "Cedar reviewer is Lee."
+      ]
+    ],
+    "capture": "把李负责的那个项目延期一周；我没说明是 Atlas 还是 Cedar。"
+  },
+  {
+    "id": "agent-17",
+    "expected": "keep",
+    "target": "",
+    "seeds": [
+      [
+        "订单API",
+        "订单API的错误率为1%。"
+      ]
+    ],
+    "capture": "本条说的是搜索API，不是订单API。搜索API错误率暂估2%，待复测。"
+  },
+  {
+    "id": "agent-18",
+    "expected": "merge",
+    "target": "木桥",
+    "seeds": [
+      [
+        "木桥",
+        "木桥项目周三复核，预算800元，不做云同步。"
+      ]
+    ],
+    "capture": "木桥项目更正：复核从周三改为周四；预算800元和不做云同步保持不变。"
+  },
+  {
+    "id": "agent-19",
+    "expected": "keep",
+    "target": "",
+    "seeds": [],
+    "capture": "Error text: TOKEN_LIMIT_EXCEEDED. I suspect an input-size issue, but this is not confirmed. Preserve this exact error code."
+  },
+  {
+    "id": "agent-20",
+    "expected": "keep",
+    "target": "",
+    "seeds": [
+      [
+        "旧实验",
+        "旧实验建议采用 Redis。"
+      ]
+    ],
+    "capture": "新实验记录：Redis may help, but we have not measured it. 不能继承旧实验的结论，也不要合并过去。"
+  }
+]

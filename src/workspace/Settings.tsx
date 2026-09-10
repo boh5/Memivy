@@ -187,7 +187,7 @@ export default function SettingsPanel({
         </details>
         <p className="field-help">
           Key 单独保存在本机配置文件中。更换 API 地址时需要重新填写
-          Key。连接测试只发送一段固定测试文字。
+          Key。连接测试只发送合成测试内容，不读取记忆。
         </p>
         <div className="action-row">
           <button
@@ -218,14 +218,20 @@ export default function SettingsPanel({
             onClick={() =>
               void run(async () => {
                 await save();
-                await call("workspace_test_model");
-                return "连接测试通过";
+                const capabilities=await call<NonNullable<Settings["model_capabilities"]>>("workspace_test_model");
+                const current=await call<Settings>("workspace_settings");
+                setSettings(current);
+                if(!current.model_capabilities) return "配置已变化，请对当前配置重新测试连接。";
+                if(!capabilities?.single_tool) return "连接测试完成：不支持工具调用，自动整理已暂停；已保存记忆仍可使用。";
+                if(!capabilities.multi_turn) return "连接测试完成：支持单次工具，问答和整理使用基本流程。";
+                return capabilities.structured_json?"连接测试通过：支持多轮检索与阅读，已启用增强问答和整理。":"支持多轮检索与阅读；结构化 JSON 未通过，正文整理等固定生成能力可能不可用。";
               })
             }
           >
             {busy ? "处理中…" : "保存并测试连接"}
           </button>
         </div>
+        {settings.configured&&<p className="field-help">{settings.model_capabilities?.multi_turn?"问答和录入整理可按需补查、补读当前记忆。":settings.model_capabilities?.single_tool===false?"当前模型不支持工具调用，自动整理暂停。":settings.model_capabilities?"当前使用基本问答和单次整理流程。":"尚未验证工具能力，暂用基本流程；测试连接后可启用多轮检索。"}</p>}
       </section>
       <McpSettings onBusyChange={setMcpBusy} />
       <ErrorNotice text={error} />

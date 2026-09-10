@@ -157,6 +157,14 @@ pub struct Evidence {
     pub recorded_at: i64,
     pub current: bool,
     pub start: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_spans: Vec<EvidenceSpan>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EvidenceSpan {
+    pub start: usize,
+    pub text: String,
+    pub truncated: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

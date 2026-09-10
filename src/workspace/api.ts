@@ -9,6 +9,7 @@ export type SourceEvidence = {
   recorded_at: number;
   current: boolean;
   start: number;
+  additional_spans?: {start:number;text:string;truncated:boolean}[];
 };
 export type Key = { kind: "memory" | "capture"; id: string };
 export type Origin = {
@@ -104,6 +105,7 @@ export type Message = {
   citations: { source: Source; available: boolean }[];
 };
 export type Settings = {
+  model_capabilities?: {structured_json:boolean;single_tool:boolean;multi_turn:boolean}|null;
   configured: boolean;
   base_url: string;
   model: string;

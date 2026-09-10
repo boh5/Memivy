@@ -459,7 +459,7 @@ pub(super) fn resolve_excerpt(
             [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?,r.get(3)?))
         )?,
     };
-    let max_chars = max_chars.clamp(1, 4096);
+    let max_chars = max_chars.clamp(1, 12_000);
     let total = text.chars().count();
     let (start, text) = if let Some(start) = start {
         (start, text.chars().skip(start).take(max_chars).collect())
@@ -474,6 +474,7 @@ pub(super) fn resolve_excerpt(
         recorded_at,
         current,
         start,
+        additional_spans: vec![],
     })
 }
 impl MemoryStore {

@@ -2,6 +2,7 @@
 //! All writes, including future UI/MCP writes, must pass through this module.
 //! Model requests are bounded and run outside database transactions.
 mod access;
+mod agent;
 mod cleanup;
 mod collection_recommendations;
 mod conversations;

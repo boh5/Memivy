@@ -307,7 +307,7 @@ fn start_organizer(app: tauri::AppHandle) {
             .await;
             let failure = match prepared {
                 Err(_) => Some("invalid"),
-                Ok(task) => match store.propose_organization(&config, &task).await {
+                Ok(mut task) => match store.propose_organization_flow(&config, &mut task).await {
                     Ok(proposal) => {
                         let writer = store.clone();
                         match tauri::async_runtime::spawn_blocking(move || {
@@ -346,6 +346,9 @@ fn start_organizer(app: tauri::AppHandle) {
                         }
                     }
                     Err(memivy_core::model::ProbeError::Status(429)) => Some("rate_limit"),
+                    Err(memivy_core::model::ProbeError::ToolsUnsupported) => {
+                        Some("tools_unsupported")
+                    }
                     Err(
                         memivy_core::model::ProbeError::InvalidResponse
                         | memivy_core::model::ProbeError::TooLarge,
@@ -851,6 +854,7 @@ struct Settings {
     model: String,
     has_key: bool,
     configured: bool,
+    model_capabilities: Option<memivy_core::model::tools::Capabilities>,
     disable_reasoning: bool,
     max_output_tokens: Option<u32>,
     output_token_parameter: memivy_core::model::OutputTokenParameter,
@@ -867,6 +871,7 @@ fn workspace_settings(
     }
     let c = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
     Ok(Settings {
+        model_capabilities: state.store.model_capabilities(&c),
         configured: true,
         base_url: c.base_url,
         model: c.model,
@@ -929,11 +934,13 @@ fn workspace_configure(
 async fn workspace_test_model(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-) -> HostResult<memivy_core::model::ProbeReport> {
+) -> HostResult<memivy_core::model::tools::Capabilities> {
     require_main(&window)?;
     validate_config(&state.config)?;
     let c = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
-    memivy_core::model::probe(c, std::time::Duration::from_secs(45))
+    state
+        .store
+        .test_model_capabilities(&c)
         .await
         .map_err(|e| e.to_string())
 }

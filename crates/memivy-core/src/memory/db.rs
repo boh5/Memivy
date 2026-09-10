@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 10;
+pub(super) const SCHEMA: i64 = 11;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -233,6 +233,11 @@ impl MemoryStore {
         if version < 10 {
             tx.execute_batch(include_str!(
                 "../../../../migrations/memory/010_embedding.sql"
+            ))?;
+        }
+        if version < 11 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/011_agent_evidence.sql"
             ))?;
         }
         if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {

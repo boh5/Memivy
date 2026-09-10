@@ -245,7 +245,7 @@ impl MemoryStore {
                 }
             }
         }
-        for source in citations {
+        for source in &allowed {
             if !super::search::current_source(&tx, source)? {
                 tx.execute("UPDATE messages SET status='failed',error_code='source_unavailable' WHERE id=?",[&current.assistant.id])?;
                 tx.commit()?;

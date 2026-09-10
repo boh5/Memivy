@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub mod tools;
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelConfig {
@@ -66,6 +68,8 @@ pub enum ProbeError {
     InvalidResponse,
     #[error("模型输出被截断，尚未保存；请提高模型输出上限或使用支持更长输出的模型")]
     Truncated,
+    #[error("模型不支持所需工具能力，请测试连接或更换模型")]
+    ToolsUnsupported,
 }
 
 #[derive(Serialize, Debug)]
@@ -105,22 +109,8 @@ impl ModelConfig {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), ProbeError> {
-        use std::io::Write;
         self.endpoint()?;
-        let parent = path.parent().ok_or(ProbeError::Configuration)?;
-        fs::create_dir_all(parent).map_err(|_| ProbeError::Configuration)?;
-        let mut file =
-            tempfile::NamedTempFile::new_in(parent).map_err(|_| ProbeError::Configuration)?;
-        file.as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|_| ProbeError::Configuration)?;
-        file.write_all(&serde_json::to_vec(self).map_err(|_| ProbeError::Configuration)?)
-            .map_err(|_| ProbeError::Configuration)?;
-        file.as_file()
-            .sync_all()
-            .map_err(|_| ProbeError::Configuration)?;
-        file.persist(path).map_err(|_| ProbeError::Configuration)?;
-        Ok(())
+        save_private_json(path, self)
     }
     pub fn read(path: &Path) -> Result<Self, ProbeError> {
         let metadata = fs::symlink_metadata(path).map_err(|_| ProbeError::Configuration)?;
@@ -133,6 +123,24 @@ impl ModelConfig {
         serde_json::from_slice(&fs::read(path).map_err(|_| ProbeError::Configuration)?)
             .map_err(|_| ProbeError::Configuration)
     }
+}
+
+fn save_private_json(path: &Path, value: &impl Serialize) -> Result<(), ProbeError> {
+    use std::io::Write;
+    let parent = path.parent().ok_or(ProbeError::Configuration)?;
+    fs::create_dir_all(parent).map_err(|_| ProbeError::Configuration)?;
+    let mut file =
+        tempfile::NamedTempFile::new_in(parent).map_err(|_| ProbeError::Configuration)?;
+    file.as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| ProbeError::Configuration)?;
+    file.write_all(&serde_json::to_vec(value).map_err(|_| ProbeError::Configuration)?)
+        .map_err(|_| ProbeError::Configuration)?;
+    file.as_file()
+        .sync_all()
+        .map_err(|_| ProbeError::Configuration)?;
+    file.persist(path).map_err(|_| ProbeError::Configuration)?;
+    Ok(())
 }
 
 /// Two bounded calls per question: query planning, then a structured answer.
@@ -226,15 +234,7 @@ async fn request(
         })
         .as_ref()
         .map_err(|_| ProbeError::Network)?;
-    let mut body = json!({"model":config.model,"messages":messages,"stream":false,
-        "temperature":0.2});
-    body.as_object_mut()
-        .unwrap()
-        .extend(options.as_object().unwrap().clone());
-    if config.disable_reasoning {
-        body["reasoning_effort"] = json!("none");
-    }
-    apply_output_limit(config, &mut body);
+    let body = request_body(config, messages, options);
     let mut request = client.post(url).timeout(policy.timeout()).json(&body);
     if let Some(key) = config.api_key.as_ref().filter(|s| !s.is_empty()) {
         request = request.bearer_auth(key);
@@ -269,6 +269,23 @@ async fn request(
         return Err(ProbeError::InvalidResponse);
     }
     Ok(choice)
+}
+
+fn request_body(
+    config: &ModelConfig,
+    messages: serde_json::Value,
+    options: serde_json::Value,
+) -> serde_json::Value {
+    let mut body =
+        json!({"model":config.model,"messages":messages,"stream":false,"temperature":0.2});
+    body.as_object_mut()
+        .unwrap()
+        .extend(options.as_object().unwrap().clone());
+    if config.disable_reasoning {
+        body["reasoning_effort"] = json!("none");
+    }
+    apply_output_limit(config, &mut body);
+    body
 }
 
 #[derive(Deserialize)]

@@ -55,6 +55,7 @@ function SourcePreview({
               : "本次讨论使用的原话"} · {fullDate(value.recorded_at)}
           </p>
           <p className="readable-text">{value.text}</p>
+          {value.additional_spans?.map(span=><div key={span.start}><p className="field-help">同一来源的另一处引用片段</p><p className="readable-text">{span.text}</p></div>)}
           {value.truncated && (
             <p className="field-help">这里只展示来源节选。</p>
           )}

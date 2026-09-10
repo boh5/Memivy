@@ -57,7 +57,14 @@ fn retrieved_evidence(
     mapping: &HashMap<String, String>,
 ) -> Vec<serde_json::Value> {
     let db = rusqlite::Connection::open(s.database_path()).unwrap();
-    db.prepare("SELECT c.kind,c.source_id,c.cited,c.excerpt_start,c.excerpt_length,CASE c.kind WHEN 'capture' THEN r.text ELSE v.body END FROM message_citations c LEFT JOIN captures r ON c.kind='capture' AND r.id=c.source_id LEFT JOIN memory_versions v ON c.kind='version' AND v.id=c.source_id WHERE c.message_id=? ORDER BY c.kind,c.source_id")
+    retrieved_rows(&db, message, mapping)
+}
+fn retrieved_rows(
+    db: &rusqlite::Connection,
+    message: &str,
+    mapping: &HashMap<String, String>,
+) -> Vec<serde_json::Value> {
+    db.prepare("SELECT c.kind,c.source_id,c.cited,COALESCE(e.start_char,c.excerpt_start),COALESCE(e.length_chars,c.excerpt_length),CASE c.kind WHEN 'capture' THEN r.text ELSE v.body END FROM message_citations c LEFT JOIN message_evidence_spans e ON e.message_id=c.message_id AND e.kind=c.kind AND e.source_id=c.source_id LEFT JOIN captures r ON c.kind='capture' AND r.id=c.source_id LEFT JOIN memory_versions v ON c.kind='version' AND v.id=c.source_id WHERE c.message_id=? ORDER BY c.kind,c.source_id,COALESCE(e.start_char,c.excerpt_start)")
         .unwrap().query_map([message], |r| {
             let kind: String = r.get(0)?;
             let source: String = r.get(1)?;
@@ -71,10 +78,9 @@ fn retrieved_evidence(
 #[tokio::main]
 async fn main() {
     let args: Vec<_> = std::env::args().collect();
-    assert_eq!(
-        args.len(),
-        3,
-        "discussion_probe PRIVATE_CONFIG FRESH_OUTPUT_DIR"
+    assert!(
+        args.len() == 3 || (args.len() == 4 && args[3] == "--agent"),
+        "discussion_probe PRIVATE_CONFIG FRESH_OUTPUT_DIR [--agent]"
     );
     let config =
         ModelConfig::read(std::path::Path::new(&args[1])).expect("private model configuration");
@@ -86,12 +92,27 @@ async fn main() {
         include_str!("../src/memory/retrieval.rs"),
         include_str!("../src/memory/library.rs"),
         include_str!("../src/memory/conversations.rs"),
-        include_str!("../src/model.rs")
+        include_str!("../src/model.rs"),
+        include_str!("../src/model/tools.rs"),
+        include_str!("../src/memory/agent.rs"),
+        include_str!("../src/memory/search.rs")
     );
-    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"disable_reasoning":config.disable_reasoning,"endpoint_sha256":format!("{:x}",Sha256::digest(config.base_url.as_bytes())),"fixture_sha256":format!("{:x}",Sha256::digest(FIXTURE.as_bytes())),"implementation_sha256":format!("{:x}",Sha256::digest(code.as_bytes())),"semantic_review":"pending"})).unwrap()).unwrap();
+    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"agent":args.len()==4,"model":config.model,"disable_reasoning":config.disable_reasoning,"endpoint_sha256":format!("{:x}",Sha256::digest(config.base_url.as_bytes())),"fixture_sha256":format!("{:x}",Sha256::digest(FIXTURE.as_bytes())),"implementation_sha256":format!("{:x}",Sha256::digest(code.as_bytes())),"semantic_review":"pending"})).unwrap()).unwrap();
     let fixture: Fixture = serde_json::from_str(FIXTURE).unwrap();
     assert_eq!(fixture.version, 1);
     let root = tempfile::tempdir().unwrap();
+    let capability_root = tempfile::tempdir().unwrap();
+    if args.len() == 4 {
+        let capabilities = MemoryStore::open(capability_root.path())
+            .unwrap()
+            .test_model_capabilities(&config)
+            .await
+            .expect("capability probe");
+        assert!(
+            capabilities.multi_turn,
+            "multi-turn capability required for Agent evaluation"
+        );
+    }
     let mut topics: HashMap<String, (String, HashMap<String, String>)> = HashMap::new();
     let mut complete = 0;
     let mut structural = 0;
@@ -99,6 +120,13 @@ async fn main() {
     for case in &fixture.cases {
         let data = root.path().join(&case.topic);
         let mut s = MemoryStore::open(&data).unwrap();
+        if args.len() == 4 {
+            fs::copy(
+                capability_root.path().join("model-capabilities.json"),
+                data.join("model-capabilities.json"),
+            )
+            .unwrap();
+        }
         let (topic, mapping) = topics.entry(case.topic.clone()).or_insert_with(|| {
             let mut mapping = HashMap::new();
             for key in &case.seeds {
@@ -230,14 +258,14 @@ mod tests {
             .unwrap();
         let topic = id();
         store.create_conversation(&topic, "trace").unwrap();
-        let source = SourceRef::Capture(raw.id.clone());
+        let source = SourceRef::Version(raw.version_id.clone());
         let turn = store
             .start_turn(&id(), &topic, "问题", std::slice::from_ref(&source))
             .unwrap();
         store
             .bind_discussion_evidence(&turn.id, std::slice::from_ref(&source))
             .unwrap();
-        let mapping = HashMap::from([(raw.id, "seed".into())]);
+        let mapping = HashMap::from([(raw.version_id, "seed".into())]);
         let bound = retrieved_evidence(&store, &turn.assistant.id, &mapping);
         assert_eq!(bound.len(), 1);
         assert_eq!(bound[0]["cited"], false);
@@ -247,5 +275,20 @@ mod tests {
             retrieved_evidence(&store, &turn.assistant.id, &mapping)[0]["cited"],
             true
         );
+    }
+    #[test]
+    fn evidence_export_keeps_uncited_disjoint_reads() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE message_citations(message_id,kind,source_id,cited,excerpt_start,excerpt_length);
+            CREATE TABLE message_evidence_spans(message_id,kind,source_id,start_char,length_chars);
+            CREATE TABLE captures(id,text); CREATE TABLE memory_versions(id,body);
+            INSERT INTO memory_versions VALUES('v','first-----last');
+            INSERT INTO message_citations VALUES('m','version','v',0,0,5);
+            INSERT INTO message_evidence_spans VALUES('m','version','v',0,5),('m','version','v',10,4);").unwrap();
+        let rows = retrieved_rows(&db, "m", &HashMap::new());
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["text"], "first");
+        assert_eq!(rows[1]["text"], "last");
+        assert_eq!(rows[1]["cited"], false);
     }
 }

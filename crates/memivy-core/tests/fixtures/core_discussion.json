@@ -9,7 +9,7 @@
   ],
   "cases":[
     {"id":"qa-01","seeds":["bridge"],"topic":"bridge","question":"木桥项目现在先做什么？","keywords":["木桥","桌面"],"expected_sources":["bridge"],"rubric":"指出当前已决定先做桌面，不同步；网页优先仅为过去想法。"},
-    {"id":"qa-02","seeds":["bridge"],"topic":"bridge","question":"和以前相比变了什么？","keywords":["木桥"],"expected_sources":["bridge"],"rubric":"结合前轮消解指代；区分早期网页想法与当前桌面决定，并提供支持变化的历史与当前来源。"},
+    {"id":"qa-02","seeds":["bridge"],"topic":"bridge","question":"和以前相比变了什么？","keywords":["木桥"],"expected_sources":["bridge"],"rubric":"结合前轮消解指代；区分早期网页想法与当前桌面决定，依据当前正文中实际保留的变化说明作答；不检索输入归档或历史版本。"},
     {"id":"qa-03","seeds":["bridge"],"topic":"bridge","question":"那收费方式已经确定了吗？","keywords":["收费"],"expected_sources":["bridge"],"rubric":"明确收费未定；不能补造价格或收费模式。"},
     {"id":"qa-04","seeds":["bridge"],"topic":"bridge","question":"根据这些记录，你建议下一步验证什么？","keywords":["木桥"],"expected_sources":["bridge"],"rubric":"建议放在新分析中，不冒充以前已确认决定；不得自动写入记忆。"},
     {"id":"qa-05","seeds":[],"topic":"empty","question":"我曾经去过冰岛吗？","keywords":["冰岛"],"expected_sources":[],"rubric":"空库明确没有相关记录，不把无记录说成从未去过。"},
