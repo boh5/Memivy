@@ -17,7 +17,7 @@ export default function DesktopSettings() {
       void call<string>("desktop_login_status").then(status => {
         if (request === loginRequest.current) { setLoginStatus(status); setLoginError(""); }
       }).catch(e => {
-        if (request === loginRequest.current) { setLoginStatus(null); setLoginError(errorText(e)); }
+        if (request === loginRequest.current) { setLoginError(errorText(e)); }
       });
     };
     refreshLogin();

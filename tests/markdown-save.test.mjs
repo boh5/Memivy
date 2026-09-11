@@ -32,3 +32,13 @@ test('rich-editor shortcut cannot bypass a version conflict',async t=>{
   assert.equal(f.calls.filter(c=>c.name==='library_edit').length,0);
   assert.equal(f.db.get('memory:a').body,'保留我的草稿');
 });
+
+test('title and body edits do not replace the editor helper while persistence is pending',async t=>{
+ const {f,editor}=await editMemory(t);let finish;
+ f.overrides.draft_write=()=>new Promise(resolve=>{finish=resolve;});
+ const heading=()=>f.text(f.find(editor,n=>n.props.className==='section-heading'));
+ const before=heading();
+ for(const change of [()=>f.find(editor,n=>n.props['aria-label']==='编辑记忆标题').props.onChange({target:{value:'新标题'}}),()=>f.find(editor,n=>n.type==='MarkdownEditor').props.onChange('新正文')]){
+  change();await f.settle();assert.equal(heading(),before);finish();await f.settle();assert.equal(heading(),before);
+ }
+});

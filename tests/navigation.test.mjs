@@ -19,7 +19,7 @@ test('recall Return submits, Shift Return and IME confirmation do not',()=>{
 test('typing never starts RAG; Return starts one discussion and never captures the query',async t=>{
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   const app=f.mount(App);await f.settle();
-  const form=f.mount(Form,f.find(app,n=>n.type===Form).props);await f.settle();
+  const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
   input(f,form).props.onChange({target:{value:'我为什么决定先做桌面版？'}});await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='discussion_ask').length,0);
   assert.equal(f.db.get('question').body,'我为什么决定先做桌面版？');
@@ -56,7 +56,7 @@ test('capture dialog preserves the selected record and recall draft when saving'
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,List=f.load('src/workspace/MemoryList.tsx').default,Dialog=f.load('src/workspace/CaptureDialog.tsx').default,Detail=f.load('src/workspace/MemoryDetail.tsx').default;
   const app=f.mount(App);await f.settle();f.find(app,n=>n.type===List).props.onSelect(f.keyA);await f.settle();
   const question={key:'question',request_id:'q',title:'',body:'还没提问的草稿',expected_version:null};f.db.set('question',question);
-  f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
+  f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
   assert.equal(f.find(app,n=>n.type===Detail).props.record.id,'a');
   f.find(app,n=>n.type===Dialog).props.onSaved({kind:'capture',id:'new'});await f.settle();
   assert.equal(f.find(app,n=>n.type===Detail).props.record.id,'a');
@@ -99,7 +99,7 @@ test('query handoff reads the existing quick-question draft before acknowledging
   const app=f.mount(App);await f.settle();
   f.emit('desktop-route',{generation:42,quick:true,mode:'ask',topic:null,record:null,settings:false});await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='desktop_handoff_ready').length,0);
-  const form=f.mount(Form,f.find(app,n=>n.type===Form).props);await f.settle();
+  const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
   assert.equal(input(f,form).props.value,'小窗里没问完的问题');
   assert.equal(f.calls.filter(c=>c.name==='desktop_handoff_ready').length,1);
   assert.equal(f.calls.find(c=>c.name==='desktop_handoff_ready').args.generation,42);
@@ -112,9 +112,9 @@ test('new desktop questions do not inherit the collection open in the main windo
   f.overrides.navigation_collections=async()=>[{id:'scope',name:'产品',revision:1}];
   const app=f.mount(App);await f.settle();
   f.find(app,n=>n.type===Sidebar).props.onCollection('scope');await f.settle();
-  assert(f.text(f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
+  assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
   f.emit('desktop-route',{generation:43,quick:true,mode:'ask',topic:null,record:null,settings:false});await f.settle();
-  assert(!f.text(f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
-  await f.find(app,n=>n.type===Form).props.onAsk('全库问题','desktop-question');await f.settle();
+  assert(!f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
+  await f.find(f.query(app),n=>n.type===Form).props.onAsk('全库问题','desktop-question');await f.settle();
   assert.equal(f.calls.find(c=>c.name==='discussion_ask').args.collectionId,null);
 });

@@ -9,7 +9,7 @@ function fixture(t) {
   const root=mkdtempSync(path.join(tmpdir(),'memivy-build-review-'));
   t.after(()=>rmSync(root,{recursive:true,force:true}));
   const put=(name,text)=>{const file=path.join(root,name);mkdirSync(path.dirname(file),{recursive:true});writeFileSync(file,text);return file;};
-  for(const name of ['prepare-mcp.mjs','build-beta.mjs']) {
+  for(const name of ['prepare-mcp.mjs','build-beta.mjs','rust-env.mjs']) {
     mkdirSync(path.join(root,'scripts'),{recursive:true});copyFileSync(`scripts/${name}`,path.join(root,'scripts',name));
   }
   put('src-tauri/tauri.conf.json',JSON.stringify({version:'0.1.0'}));

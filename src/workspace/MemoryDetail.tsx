@@ -1,3 +1,5 @@
+import { unavailable } from "./api";
+import { useResourceVersion } from "./resources";
 import "./cleanup.css";
 import MemoryCleanup from "./MemoryCleanup";
 import IconButton from "./IconButton";
@@ -74,9 +76,7 @@ function Editor({
         <span>
           {!draft.ready
             ? "载入草稿…"
-            : draft.saved
-              ? "草稿已保存在本机"
-              : "保存草稿中…"}
+            : "草稿自动保存在本机"}
         </span>
       </div>
       <ErrorNotice text={draft.error || error} />
@@ -159,7 +159,7 @@ function Editor({
 
 export default function MemoryDetail({
   record,
-  revision,
+  revision: requestedRevision = 0,
   query,
   initialReceipt,
   onChanged,
@@ -170,12 +170,13 @@ export default function MemoryDetail({
   collectionId?: string;
   record: Key;
   initialReceipt: Receipt | null;
-  revision: number;
+  revision?: number;
   query: string;
   onChanged: (key?: Key, receipt?: Receipt) => void;
   onBack: () => void;
   onDiscuss: (detail: Detail, related?: Source[]) => Promise<void>;
 }) {
+  const revision = useResourceVersion([{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision;
   const [cleaning, setCleaning] = useState(false);
   const [cleanupToolbar, setCleanupToolbar] = useState<HTMLDivElement | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null),
@@ -202,6 +203,10 @@ export default function MemoryDetail({
     );
   useEffect(() => { if (notice) notify(notice); }, [notice, receipt?.request_id]);
   useEffect(() => { if (exportNotice) notify(exportNotice); }, [exportNotice]);
+  const loadedRecord = useRef<string | null>(null);
+  const [pendingDetail, setPendingDetail] = useState<Detail | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const currentDetail = useRef(detail); currentDetail.current = detail;
   const hasUnsavedReview = useRef(false);
   hasUnsavedReview.current = cleaning || editing;
   const actionId = useRef(uid()),
@@ -209,27 +214,35 @@ export default function MemoryDetail({
     actionLock = useRef(false);
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError("");
-    void call<Detail>("library_detail", { key: record })
+    setLoading(loadedRecord.current !== keyOf(record));
+    setError(""); setArchiveLoading(tab !== "current");
+    void call<Detail>("library_detail", { key: record, archives: tab !== "current" })
       .then((d) => {
-        if (alive) setDetail(d);
+        if (alive) {
+          const previous = currentDetail.current;
+          const backgroundHead = loadedRecord.current === keyOf(record) && previous?.state === "active" && d.state === "active" &&
+            previous.current?.id !== d.current?.id && tab === "current" && !hasUnsavedReview.current && !actionLock.current;
+          loadedRecord.current = keyOf(record);
+          if (backgroundHead) setPendingDetail(d);
+          else { setDetail(d); setPendingDetail(null); }
+        }
       })
       .catch((e) => {
         if (alive) {
           // A failed background refresh must not unmount an editor or its review.
           // The core still validates the head/draft before any write.
-          setDetail(current => hasUnsavedReview.current ? current : null);
+          setDetail(current => loadedRecord.current === keyOf(record) && (!unavailable(e) || hasUnsavedReview.current) ? current : null);
+          if (unavailable(e)) setPendingDetail(null);
           setError(errorText(e));
         }
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (alive) { setLoading(false); setArchiveLoading(false); }
       });
     return () => {
       alive = false;
     };
-  }, [record.id, record.kind, revision]);
+  }, [record.id, record.kind, revision, tab]);
   async function action(
     kind: "trash" | "purge" | "restore" | "restore_version" | "restore_archive" | "undo",
   ) {
@@ -284,7 +297,7 @@ export default function MemoryDetail({
         );
         setVersion(null);
         setTab("current");
-        onChanged(record);
+        onChanged(record, r || undefined);
       }
     } catch (e) {
       setError(errorText(e));
@@ -315,7 +328,7 @@ export default function MemoryDetail({
   if (detail?.state === "merged") return <section className="memory-detail-pane" aria-label="归并回执">
     <div className="memory-detail-toolbar"><button className="detail-back" onClick={onBack}><Icon name="chevron" size={15} />返回列表</button><span>已归并</span></div>
     <div className="memory-detail-scroll"><header className="memory-title-block"><h1>{detail.title}</h1><p>这条内容已归入另一篇记忆。可以查看目标，或通过回执撤销这次整理。</p></header>
-      <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
+      <OrganizationReceipt record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
       <ErrorNotice text={error} />
     </div>
   </section>;
@@ -330,6 +343,7 @@ export default function MemoryDetail({
         <span>
           {trashed ? "回收站" : detail?.current ? "当前记忆" : "原始记录"}
         </span>
+        {pendingDetail && <button className="quiet" onClick={() => { setDetail(pendingDetail); setPendingDetail(null); }}>有新版本，查看</button>}
         <div className="toolbar-actions" hidden={cleaning}>
           {detail &&
             (trashed ? (
@@ -366,7 +380,7 @@ export default function MemoryDetail({
                   }}
                 />
                 <span className="toolbar-divider" aria-hidden="true" />
-                <RecordNavigation record={record} revision={revision} onChanged={() => onChanged()} />
+                <RecordNavigation record={record} onChanged={() => onChanged()} />
                 <MoreMenu>
                   <button
                     disabled={busy || loading || editing}
@@ -415,9 +429,9 @@ export default function MemoryDetail({
                   ? `${detail.current.capture_ids.length} 份输入归档`
                   : "输入归档，仅供核对与恢复，不参与检索。"}
               </p>
-              {!trashed && <OrganizationReceipt presentation="status" record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
+              {!trashed && <OrganizationReceipt presentation="status" record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
-            {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} revision={revision} onRefresh={() => onChanged()} />}
+            {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} onRefresh={() => onChanged()} />}
             {detail.reviewed_conclusion && !cleaning && !editing && <div className="workspace-warning">
               <p>目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。</p>
               <details><summary>查看保留的完整审核稿</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
@@ -436,21 +450,22 @@ export default function MemoryDetail({
                 aria-selected={tab === "sources"}
                 onClick={() => setTab("sources")}
               >
-                输入归档与来源 <span>{detail.sources.length}</span>
+                输入归档与来源 <span>{detail.source_count ?? detail.sources.length}</span>
               </button>
               <button
                 role="tab"
                 aria-selected={tab === "history"}
                 onClick={() => setTab("history")}
               >
-                版本历史 <span>{detail.history.length}</span>
+                版本历史 <span>{detail.history_count ?? detail.history.length}</span>
               </button>
             </div>
             <div role="tabpanel">
+              {archiveLoading && <p role="status" className="field-help">正在读取归档…</p>}
               {!cleaning && !editing && !trashed && receipt && detail.current?.reason === "cleanup" && receipt.after_version === detail.current.id && <div className="cleanup-receipt" role="status">整理已保存为新版本<button className="quiet" disabled={busy} onClick={() => void action("undo")}>撤销这次整理</button></div>}
               {tab === "history" && !trashed && <>
                 {receipt && <button className="toolbar-button" disabled={busy} onClick={() => void action("undo")}>撤销这次修改</button>}
-                <OrganizationReceipt record={record} revision={revision} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
+                <OrganizationReceipt record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
               </>}
               {cleaning && cleanupToolbar && <MemoryCleanup key={detail.key.id} detail={detail} toolbar={cleanupToolbar}
                 onClose={() => setCleaning(false)}
@@ -477,9 +492,9 @@ export default function MemoryDetail({
                   <>
                     <div>{detail.current ? <Markdown text={detail.body} query={query} /> : <div className="readable-text"><Highlight text={detail.body} query={query} /></div>}</div>
                     {!trashed && detail.current && <RelatedMemories
-                      collectionId={collectionId}
+                      collectionId={collectionId} paused={!!pendingDetail}
                       key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
-                      revision={revision} onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
+                      onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
                   </>
                 ))}
               {!cleaning && tab === "sources" && (

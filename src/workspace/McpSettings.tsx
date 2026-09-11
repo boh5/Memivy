@@ -15,9 +15,9 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
       if (locked.current) return;
       const request = ++reads.current;
       void call<McpState>("mcp_settings").then(value => {
-        if (active && request === reads.current) { setState(value); setError(""); setNotice(""); setDiagnostic(null); }
+        if (active && request === reads.current) { setState(value); setError(""); }
       }).catch(e => {
-        if (active && request === reads.current) { setState(null); setError(errorText(e)); }
+        if (active && request === reads.current) { setError(errorText(e)); }
       });
     };
     if (native) { refresh(); window.addEventListener("focus", refresh); }

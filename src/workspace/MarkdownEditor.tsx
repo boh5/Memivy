@@ -15,6 +15,7 @@ export default function MarkdownEditor(props: Props) {
   const { value, label, disabled = false, autoFocus = false } = props;
   const root = useRef<HTMLDivElement>(null), instance = useRef<CrepeBuilder | null>(null);
   const applied = useRef(value), sync = useRef<((value: string) => void) | null>(null), replacing = useRef(false);
+  const composing = useRef(false);
   const latest = useRef(props); latest.current = props;
   const [ready, setReady] = useState(false), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
   // Typing must never recreate the editor or replace its selection.
@@ -108,9 +109,13 @@ export default function MarkdownEditor(props: Props) {
     });
     return () => { cancelled = true; instance.current = null; sync.current = null; if (created && editor) void editor.destroy(); };
   }, [attempt, label, autoFocus]);
-  useEffect(() => { if (ready && value !== applied.current) sync.current?.(value); }, [value, ready]);
+  useEffect(() => { if (ready && !composing.current && value !== applied.current) sync.current?.(value); }, [value, ready]);
   useEffect(() => { instance.current?.setReadonly(disabled); }, [disabled, ready]);
-  return <div className="markdown-editor" onKeyDown={e => {
+  return <div className="markdown-editor" onCompositionStart={() => { composing.current=true; }} onCompositionEnd={() => {
+    composing.current=false;
+    // ProseMirror publishes the final composition transaction through onChange.
+    // Do not replay an older controlled value before that transaction settles.
+  }} onKeyDown={e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && !e.nativeEvent.isComposing) {
       e.preventDefault(); if (!disabled && ready) latest.current.onSave?.();
     }

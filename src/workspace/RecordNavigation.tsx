@@ -1,3 +1,4 @@
+import { useResourceVersion } from "./resources";
 import IconButton from "./IconButton";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
@@ -5,7 +6,8 @@ import { call, errorText, type Collection, type Key, type RecordNavigation as Na
 import { ErrorNotice, Modal } from "./components";
 import CollectionEditor from "./CollectionEditor";
 
-export default function RecordNavigation({ record, revision, onChanged }: { record: Key; revision: number; onChanged: () => void }) {
+export default function RecordNavigation({ record, revision: requestedRevision = 0, onChanged }: { record: Key; revision?: number; onChanged: () => void }) {
+  const revision = useResourceVersion([{domain:"navigation",entity:`${record.kind}:${record.id}`},{domain:"collection"},{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision;
   const [value, setValue] = useState<Navigation | null>(null), [error, setError] = useState("");
   const [open, setOpen] = useState(false), [creating, setCreating] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]), [busy, setBusy] = useState(false);

@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { expireQueries, useResourceVersion } from "./resources";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import { call, date, errorText, keyOf, sourceName, native, type Key, type Page, type Query } from "./api";
 import { Empty, ErrorNotice } from "./components";
 
-export default function MemoryList({ trash, active, selected, revision, onSelect, onCapture, onRefresh, review = false, collectionId }: {
+export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, review = false, collectionId }: {
   review?: boolean; collectionId?: string;
-  trash: boolean; active: boolean; selected: Key | null; revision: number;
+  trash: boolean; active: boolean; selected: Key | null; revision?: number;
   onSelect: (key: Key) => void; onCapture: () => void; onRefresh: () => void;
 }) {
+  const [reload, setReload] = useState(0);
+  const revision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]) + requestedRevision + reload;
+  const statusRevision = useResourceVersion([{domain:"organization"}]);
   const [states, setStates] = useState<Record<string,{status:string;recommendations:number}>>({});
   const [reviewOffset, setReviewOffset] = useState(0);
   const [origin, setOrigin] = useState(""), [project, setProject] = useState("");
@@ -17,6 +21,18 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
   const [result, setResult] = useState<Page>({ items: [], next_offset: null });
   const [loading, setLoading] = useState(true), [listError, setListError] = useState("");
   const sequence = useRef(0), loadingMore = useRef(false);
+  const visibleCount = useRef(40);
+  const viewport = useRef<HTMLDivElement>(null);
+  const anchor = useRef<{key:string; top:number} | null>(null);
+  useLayoutEffect(() => {
+    const saved = anchor.current, list = viewport.current;
+    if (saved && list) {
+      const row = [...list.querySelectorAll<HTMLElement>("[data-record]")].find(row => row.dataset.record === saved.key);
+      if (row) list.scrollTop += row.getBoundingClientRect().top - saved.top;
+    }
+    anchor.current = null;
+  }, [result]);
+  const loadedSignature = useRef<string | null>(null);
   const options: Query = {
     query: "", trash, collection_id: collectionId, oldest: review, offset: review ? reviewOffset : undefined, origin: origin || undefined, project: project || undefined,
     since: since ? new Date(`${since}T00:00:00`).getTime() : undefined,
@@ -33,9 +49,25 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
   useEffect(() => {
     const seq = ++sequence.current;
     setLoading(true); setListError(""); loadingMore.current = false;
-    void call<Page>("library_query", { query: { ...options, limit: review ? 3 : 40 } })
-      .then(r => { if (sequence.current === seq) { setResult(r); if (review && reviewOffset > 0 && !r.items.length) setReviewOffset(0); } })
-      .catch(e => { if (sequence.current === seq) { setListError(errorText(e)); setResult({ items: [], next_offset: null }); } })
+    const readWindow = async (): Promise<Page> => {
+      const count = review ? 3 : loadedSignature.current === signature ? visibleCount.current : 40;
+      let page = await call<Page>("library_query", { query: { ...options, limit: review ? 3 : 40 } });
+      const items = [...page.items];
+      while (!review && items.length < count && page.next_offset !== null && sequence.current === seq) {
+        page = await call<Page>("library_query", { query: { ...options, offset: page.next_offset, limit: 40 } });
+        items.push(...page.items);
+      }
+      return { ...page, items: [...new Map(items.map(row => [keyOf(row.key), row])).values()] };
+    };
+    void readWindow()
+      .then(r => { if (sequence.current === seq) { const list = viewport.current;
+        if (loadedSignature.current === signature && list && list.scrollTop > 0) {
+          const top = list.getBoundingClientRect().top;
+          const row = [...list.querySelectorAll<HTMLElement>("[data-record]")].find(row => row.getBoundingClientRect().bottom > top);
+          if (row) anchor.current = {key:row.dataset.record!,top:row.getBoundingClientRect().top};
+        }
+        loadedSignature.current = signature; visibleCount.current = Math.max(40, r.items.length); setResult(r); if (review && reviewOffset > 0 && !r.items.length) setReviewOffset(0); } })
+      .catch(e => { if (sequence.current === seq) { setListError(errorText(e)); if (loadedSignature.current !== signature) setResult({ items: [], next_offset: null }); } })
       .finally(() => { if (sequence.current === seq) setLoading(false); });
     return () => { ++sequence.current; };
   }, [signature, revision]);
@@ -45,9 +77,9 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
     const keys = result.items.map(r=>r.key);
     const batches = [];
     for(let i=0;i<keys.length;i+=100)batches.push(call<Array<{key:Key;status:string;recommendations:number}>>("organization_states",{keys:keys.slice(i,i+100)}));
-    void Promise.all(batches).then(groups => {if(active)setStates(Object.fromEntries(groups.flat().map(s=>[keyOf(s.key),s])));}).catch(()=>{if(active)setStates({});});
+    void Promise.all(batches).then(groups => {if(active)setStates(Object.fromEntries(groups.flat().map(s=>[keyOf(s.key),s])));}).catch(()=>{ /* Retain known statuses on a transient read failure. */ });
     return () => {active=false;};
-  },[result,revision,trash]);
+  },[result,statusRevision,trash]);
   async function more() {
     if (loading || loadingMore.current || result.next_offset === null) return;
     loadingMore.current = true; setLoading(true);
@@ -56,7 +88,9 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
       const r = await call<Page>("library_query", { query: { ...options, offset: result.next_offset, limit: 40 } });
       if (seq === sequence.current) setResult(old => {
         const seen = new Set(old.items.map(r => keyOf(r.key)));
-        return { items: [...old.items, ...r.items.filter(r => !seen.has(keyOf(r.key)))], next_offset: r.next_offset };
+        const items = [...old.items, ...r.items.filter(r => !seen.has(keyOf(r.key)))];
+        visibleCount.current = items.length;
+        return { items, next_offset: r.next_offset };
       });
     } catch (e) { if (seq === sequence.current) setListError(errorText(e)); }
     finally { if (seq === sequence.current) { loadingMore.current = false; setLoading(false); } }
@@ -80,7 +114,7 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
         <button
           className="icon-button"
           aria-label="刷新记忆列表"
-          onClick={onRefresh}
+          onClick={() => { void expireQueries(["library_query","library_projects","organization_states"]).then(() => { setReload(v => v + 1); onRefresh(); }).catch(e => setListError(errorText(e))); }}
         >
           <Icon name="refresh" />
         </button>
@@ -149,14 +183,16 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
       )}
       <ErrorNotice text={listError} />
       <div
-        className={`library-rows ${loading ? "is-loading" : ""}`}
+        className={`library-rows ${loading && loadedSignature.current !== signature ? "is-loading" : ""}`}
         aria-busy={loading}
+        ref={viewport}
       >
         {result.items.map((r) => (
           <button
             aria-current={active && selected && keyOf(r.key) === keyOf(selected) ? "true" : undefined}
             className={`library-row ${active && selected && keyOf(r.key) === keyOf(selected) ? "selected" : ""}`}
             key={keyOf(r.key)}
+            data-record={keyOf(r.key)}
             onClick={() => onSelect(r.key)}
           >
             <div className="row-title">
@@ -206,7 +242,7 @@ export default function MemoryList({ trash, active, selected, revision, onSelect
             )}
           </Empty>
         )}
-        {loading && (
+        {loading && loadedSignature.current !== signature && (
           <p className="list-progress" role="status">
             正在读取本地记忆…
           </p>

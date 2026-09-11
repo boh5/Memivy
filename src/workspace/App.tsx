@@ -1,3 +1,4 @@
+import { useResourceBridge, useResourceVersion } from "./resources";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Icon } from "../ui";
@@ -7,7 +8,7 @@ import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
 import MemoryDetail from "./MemoryDetail";
 import MemoryList from "./MemoryList";
-import WorkspaceTopBar from "./WorkspaceTopBar";
+import WorkspaceQuery from "./WorkspaceQuery";
 import WorkspaceSidebar, { type WorkspacePage } from "./WorkspaceSidebar";
 import SettingsPanel from "./Settings";
 import Discussion from "./Discussion";
@@ -37,10 +38,14 @@ export default function App() {
   const [selected, setSelected] = useState<Key | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null), [topics, setTopics] = useState<Topic[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false), [configured, setConfigured] = useState(false);
-  const [revision, setRevision] = useState(0), [windowError, setWindowError] = useState("");
+  const [windowError, setWindowError] = useState("");
+  const navigationRevision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]);
+  const topicsRevision = useResourceVersion([{domain:"discussion"},{domain:"collection"}]);
+  const settingsRevision = useResourceVersion([{domain:"settings"}]);
+  useResourceBridge(error => setWindowError(errorText(error)));
   const [captureOpen, setCaptureOpen] = useState(false), [captureQuick, setCaptureQuick] = useState(false);
   const [recallQuick, setRecallQuick] = useState(false), [recallFocus, setRecallFocus] = useState(0);
-  const [recallOpen, setRecallOpen] = useState(false), [recallPreview, setRecallPreview] = useState("");
+  const [recallOpen, setRecallOpen] = useState(false);
   const recallTrigger = useRef<HTMLButtonElement>(null);
   const closeRecall = useCallback(() => setRecallOpen(false), []);
   const openRecall = useCallback(() => { setRecallOpen(true); setRecallFocus(v => v + 1); }, []);
@@ -53,9 +58,8 @@ export default function App() {
   const desktop = useDesktop();
   useWindowLifecycle(setWindowError);
   const refresh = useCallback((key?: Key, receipt?: Receipt) => {
-    setRevision(v => v + 1);
     if (key) setSelected(key);
-    setPendingReceipt(key && receipt ? { key: keyOf(key), receipt } : null);
+    if (key && receipt) setPendingReceipt(receipt.action === "undo" ? null : { key: keyOf(key), receipt });
   }, []);
   const handoffReady = useCallback(() => {
     const pending = handoffRef.current;
@@ -84,16 +88,23 @@ export default function App() {
     let alive = true;
     void call<Collection[]>("navigation_collections").then(c => { if (alive) setCollections(c); }).catch(e => { if (alive) setWindowError(errorText(e)); });
     void call<Page>("library_query", { query: { query: "", trash: false, pinned: true, limit: 100 } }).then(p => { if (alive) setPins(p.items); }).catch(e => { if (alive) setWindowError(errorText(e)); });
+    return () => { alive = false; };
+  }, [navigationRevision]);
+  useEffect(() => {
+    let alive = true;
     void call<Topic[]>("library_topics").then(t => { if (alive) setTopics(t); })
       .catch(e => { if (alive) setWindowError(errorText(e)); });
-    void call<Settings>("workspace_settings").then(s => { if (alive) setConfigured(s.configured); })
-      .catch(() => { if (alive) setConfigured(false); });
     return () => { alive = false; };
-  }, [revision]);
+  }, [topicsRevision]);
+  useEffect(() => {
+    let alive = true;
+    void call<Settings>("workspace_settings").then(s => { if (alive) setConfigured(s.configured); })
+      .catch(e => { if (alive) setWindowError(errorText(e)); });
+    return () => { alive = false; };
+  }, [settingsRevision]);
   useEffect(() => {
     if (!native) return;
     const events = [
-      listen("library-refresh", () => refresh()),
       listen<Receipt>("organization-complete", e => {
         const receipt = e.payload;
         if (receipt.status === "applied" && receipt.action === "merge" && receipt.memory_id) {
@@ -107,7 +118,7 @@ export default function App() {
         void flushDrafts().then(() => call("workspace_close")).catch(e => setWindowError(errorText(e)));
       }),
       listen<MainRoute>("desktop-route", e => {
-        void flushDrafts().then(refreshDrafts).then(() => {
+        void flushDrafts().then(() => refreshDrafts()).then(() => {
           if (document.querySelector("dialog[open]")) throw "请先完成或关闭主窗口中的对话框，再展开快捷窗口。";
           const r = e.payload;
           let target: Handoff["target"];
@@ -204,13 +215,13 @@ export default function App() {
   const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
   const reading = page === "topic" || !!selected;
   return <div className="app-shell formal-app recall-workspace">
-    <WorkspaceTopBar triggerRef={recallTrigger} open={recallOpen} preview={recallPreview} scopeLabel={queryScope ? scopeName : undefined} onOpen={openRecall} onClose={closeRecall} onCapture={newCapture}
-      scope={queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>仅在 {scopeName} 中提问</span><button aria-label="改为从全部记忆提问" onClick={showLibrary}>全部记忆</button></div>}>
-      <CaptureForm key={`query:${recallQuick}`} quick={recallQuick} mode="ask" presentation="query"
-        focus={recallOpen ? recallFocus : 0} onDraftChange={setRecallPreview}
-        onReady={handoff?.target === "query" ? handoffReady : undefined}
-        onMode={() => {}} onEdit={() => {}} onSaved={() => {}} onAsk={ask} />
-    </WorkspaceTopBar>
+    <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
+      scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onCapture:newCapture,
+      scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>仅在 {scopeName} 中提问</span><button aria-label="改为从全部记忆提问" onClick={showLibrary}>全部记忆</button></div>,
+    }} form={{ quick:recallQuick, mode:"ask", presentation:"query", focus:recallOpen ? recallFocus : 0,
+      onReady:handoff?.target === "query" ? handoffReady : undefined,
+      onMode:() => {}, onEdit:() => {}, onSaved:() => {}, onAsk:ask,
+    }} />
     <WorkspaceSidebar page={page} topic={topic} topics={topics} configured={configured}
       selected={selected} pins={pins} collections={collections} collectionId={collectionId}
       onReview={() => { setSelected(null); setPage("review"); setCollectionId(null); }} onPin={openRecord}
@@ -234,16 +245,16 @@ export default function App() {
       <div className={`library-layout ${reading ? "has-selection" : ""}`}>
         <MemoryList key={page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library"}
           review={page === "review"} collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
-          selected={selected} revision={revision} onSelect={key => { setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
+          selected={selected}  onSelect={key => { setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
           onCapture={newCapture} onRefresh={refresh} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
           <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />返回记忆</button><span>{topic.collection_id ? `专题 · ${collections.find(c => c.id === topic.collection_id)?.name || "已移除"}` : "从记忆中查找 · 有来源的回答"}</span></div>
           <Discussion key={topic.id} topic={topic} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
-            revision={revision} configured={configured} onSettings={() => setSettingsOpen(true)} onRefresh={refresh} onOpenRecord={openRecord} />
+             configured={configured} onSettings={() => setSettingsOpen(true)} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}
           collectionId={page === "collection" ? collectionId || undefined : undefined}
           initialReceipt={pendingReceipt?.key === keyOf(selected) ? pendingReceipt.receipt : null}
-          revision={revision} query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onBack={() => setSelected(null)} />
+           query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onBack={() => setSelected(null)} />
           : <section className="memory-detail-pane unselected">
             <Empty title={page === "trash" ? "留一份余地" : page === "review" ? "和过去的自己，再聊一聊" : page === "collection" ? "让相关的想法，慢慢连起来" : "让留下的想法，再次用得上"}
               text={page === "trash" ? "选一条已删除的记忆，查看内容或恢复。" : "选一条记忆慢慢读，或在上方问问过去的自己。"} />

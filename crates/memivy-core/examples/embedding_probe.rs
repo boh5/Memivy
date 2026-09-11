@@ -15,16 +15,11 @@ async fn main() {
     }
     .save(&root)
     .unwrap();
-    println!("Downloading fixed Qwen Q8 manifest into isolated HF cache");
-    HfModelCache::new(&root).download(|| true).await.unwrap();
-    println!("Model hash verified");
-    let cache = HfModelCache::new(&root);
-    std::fs::remove_file(cache.model_path()).unwrap();
-    // Simulate interruption between publishing the verified blob and snapshot.
-    // Network transfer is disallowed here: recovery must reuse that blob.
-    cache.download(|| false).await.unwrap();
+    println!("Using the shared Memivy model cache; only the test library is isolated");
+    let cache = HfModelCache::for_user().unwrap();
+    cache.download(|| true).await.unwrap();
     cache.verify().unwrap();
-    println!("Interrupted snapshot publication recovered without download");
+    println!("Model hash verified: {}", cache.model_path().display());
     for text in [
         "京都旅行：周五看展，预算 800 元，尚未订票。",
         "I prefer unsweetened coffee in the morning.",

@@ -1,23 +1,32 @@
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkUnderline } from "./remarkUnderline";
 import { Highlight } from "./components";
-import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import { Children, cloneElement, createContext, isValidElement, memo, useContext, type ReactNode } from "react";
 import "./markdown.css";
 
-export default function Markdown({ text, query = "" }: { text: string; query?: string }) {
-  function highlight(children: ReactNode): ReactNode {
-    return Children.map(children, child => typeof child === "string" ? <Highlight text={child} query={query} /> :
+// ReactMarkdown uses these functions as component types. Their identities must
+// stay stable across parent renders, including changes to the highlight query.
+const QueryContext = createContext("");
+function Highlighted({ children }: { children: ReactNode }) {
+  const query = useContext(QueryContext);
+  function highlight(nodes: ReactNode): ReactNode {
+    return Children.map(nodes, child => typeof child === "string" ? <Highlight text={child} query={query} /> :
       isValidElement<{ children?: ReactNode }>(child) ? cloneElement(child, {}, highlight(child.props.children)) : child);
   }
-  return <div className="markdown-prose"><ReactMarkdown remarkPlugins={[remarkGfm, remarkUnderline]} skipHtml components={{
-    p: ({ children }) => <p>{highlight(children)}</p>,
-    li: ({ children, className }) => <li className={className}>{highlight(children)}</li>,
-    h1: ({ children }) => <h1>{highlight(children)}</h1>,
-    h2: ({ children }) => <h2>{highlight(children)}</h2>,
-    h3: ({ children }) => <h3>{highlight(children)}</h3>,
-    a: ({ children, href }) => href && /^https?:\/\//i.test(href) ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span>,
-    img: ({ alt }) => <span className="markdown-image">[图片：{alt || "图片链接"}]</span>,
-    table: ({ children }) => <div className="markdown-table-scroll"><table>{children}</table></div>,
-  }}>{text}</ReactMarkdown></div>;
+  return <>{highlight(children)}</>;
 }
+const components: Components = {
+  p: ({ children }) => <p><Highlighted>{children}</Highlighted></p>,
+  li: ({ children, className }) => <li className={className}><Highlighted>{children}</Highlighted></li>,
+  h1: ({ children }) => <h1><Highlighted>{children}</Highlighted></h1>,
+  h2: ({ children }) => <h2><Highlighted>{children}</Highlighted></h2>,
+  h3: ({ children }) => <h3><Highlighted>{children}</Highlighted></h3>,
+  a: ({ children, href }) => href && /^https?:\/\//i.test(href) ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span>,
+  img: ({ alt }) => <span className="markdown-image">[图片：{alt || "图片链接"}]</span>,
+  table: ({ children }) => <div className="markdown-table-scroll"><table>{children}</table></div>,
+};
+const plugins = [remarkGfm, remarkUnderline];
+export default memo(function Markdown({ text, query = "" }: { text: string; query?: string }) {
+  return <QueryContext value={query}><div className="markdown-prose"><ReactMarkdown remarkPlugins={plugins} skipHtml components={components}>{text}</ReactMarkdown></div></QueryContext>;
+});

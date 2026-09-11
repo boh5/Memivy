@@ -76,6 +76,9 @@ pub struct Desktop {
     inner: Mutex<State>,
 }
 struct State {
+    sequence: u64,
+    topic: Option<Conversation>,
+    configured: bool,
     prefs: Preferences,
     expanded: bool,
     generation: u64,
@@ -95,6 +98,7 @@ struct State {
 }
 #[derive(Serialize, Clone)]
 pub struct Snapshot {
+    pub sequence: u64,
     pub expanded: bool,
     pub generation: u64,
     pub pinned: bool,
@@ -130,6 +134,9 @@ impl Desktop {
         Self {
             path,
             inner: Mutex::new(State {
+                sequence: 0,
+                topic: None,
+                configured: false,
                 prefs,
                 expanded: false,
                 generation: 0,
@@ -228,9 +235,11 @@ pub fn launched_at_login() -> bool {
 fn snapshot(app: &tauri::AppHandle) -> Snapshot {
     let started = Instant::now();
     let desktop = app.state::<Desktop>();
-    let s = desktop.inner.lock().unwrap();
+    let mut s = desktop.inner.lock().unwrap();
+    s.sequence += 1;
     let p = &s.prefs;
     let result = Snapshot {
+        sequence: s.sequence,
         expanded: s.expanded,
         generation: s.generation,
         pinned: p.pinned,
@@ -238,11 +247,8 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
         paused: p.paused,
         shortcut: p.shortcut.clone(),
         mode: p.mode.clone(),
-        configured: crate::workspace::model_available(&app.state::<Workspace>()),
-        topic: p
-            .topic_id
-            .as_ref()
-            .and_then(|id| app.state::<Workspace>().store.conversation(id).ok()),
+        configured: s.configured,
+        topic: s.topic.clone(),
         source_app: p.source_app.clone(),
         last_memory: p.last_memory.clone(),
         error: s.error.clone(),
@@ -252,6 +258,25 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
     };
     diagnostic("snapshot_ms", started.elapsed().as_millis());
     result
+}
+// Context IO is separate from geometry/focus snapshots. A failed read must not
+// convert a live discussion into a new capture surface.
+fn refresh_context(app: &tauri::AppHandle) {
+    let desktop = app.state::<Desktop>();
+    let topic_id = desktop.inner.lock().unwrap().prefs.topic_id.clone();
+    let topic = topic_id
+        .as_ref()
+        .map(|id| app.state::<Workspace>().store.conversation(id));
+    let configured = crate::workspace::model_available(&app.state::<Workspace>());
+    let mut state = desktop.inner.lock().unwrap();
+    state.configured = configured;
+    if state.prefs.topic_id == topic_id {
+        match topic {
+            Some(Ok(value)) => state.topic = Some(value),
+            None => state.topic = None,
+            Some(Err(error)) => state.error = Some(error.to_string()),
+        }
+    }
 }
 fn publish(app: &tauri::AppHandle) {
     let _ = app.emit("desktop-state", snapshot(app));
@@ -586,6 +611,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .database_path()
         .with_file_name("desktop.json");
     app.manage(Desktop::new(path));
+    refresh_context(app.handle());
     termination::install(app.handle())?;
     capture_panel::configure(app.handle())?;
     panel_events::install(app.handle());
@@ -678,6 +704,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     }
     let old = desktop.inner.lock().unwrap().prefs.clone();
     let mut p = old.clone();
+    let mut next_topic = None;
     if let Some(v) = patch.shortcut {
         parse_shortcut(&v)?;
         p.shortcut = v;
@@ -698,14 +725,17 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
         p.mode = v;
     }
     if let Some(id) = patch.topic_id {
-        app.state::<Workspace>()
+        let topic = app
+            .state::<Workspace>()
             .store
             .conversation(&id)
             .map_err(|e| e.to_string())?;
+        next_topic = Some(Some(topic));
         p.topic_id = Some(id);
         p.mode = "ask".into();
     }
     if patch.clear_topic == Some(true) {
+        next_topic = Some(None);
         p.topic_id = None;
     }
     let changed = old.shortcut != p.shortcut || old.paused != p.paused;
@@ -728,6 +758,9 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     {
         let mut s = desktop.inner.lock().unwrap();
         s.prefs = p.clone();
+        if let Some(topic) = next_topic {
+            s.topic = topic;
+        }
         s.error = None;
     }
     if p.paused && snapshot(app).expanded {
@@ -784,6 +817,10 @@ pub async fn desktop_state(
     window: tauri::WebviewWindow,
 ) -> HostResult<Snapshot> {
     require(&window)?;
+    let context_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || refresh_context(&context_app))
+        .await
+        .map_err(|_| "快捷入口状态未能读取")?;
     on_main(&app, |h| Ok(snapshot(&h))).await
 }
 #[tauri::command]
@@ -966,7 +1003,7 @@ pub async fn desktop_capture(
         })
         .await;
     });
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     on_main(&app, |h| {
         publish(&h);
         Ok(())

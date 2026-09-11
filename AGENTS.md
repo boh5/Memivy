@@ -31,6 +31,8 @@ On 2026-09-09 the user authorized the reviewed single-memory cleanup feature and
 
 On 2026-09-10, after reviewing [`research/retrieval-2026-09-09/three-phase-plan.md`](research/retrieval-2026-09-09/three-phase-plan.md), the user authorized completing that plan. Its three stages are: (1) make Memory immediately usable while downgrading raw input/history to archive and recovery material, and expose one canonical search interface; (2) add opt-in local HF-managed Qwen3-Embedding-0.6B Q8_0 with sqlite-vec hybrid retrieval; and (3) add bounded Agent tool loops for Q&A and ingestion organization. This authorization supersedes, within this plan's scope, the older restrictions against embedding/vector retrieval, restricting retrieval to raw/history, and tool loops; raw input/history still follow the plan's archive-only search rule. Preserve the current UI and visual language. Each stage requires its scoped tests, an independent agent Review-Fix loop, and one commit after review; never auto-push. Authorization is not acceptance, and historical verification records remain unchanged.
 
+2026-09-10 后续用户明确选择 Memivy 自有统一模型缓存：使用 `~/Library/Caches/com.memivy.app/models/`，开发版、安装版和测试资料库共用。模型权重不放应用数据目录或临时资料库，不使用全局 HF 缓存；数据库、设置和向量索引仍归各资料库所有。测试不得删除共用模型来模拟故障，只对小型隔离夹具做破坏性缓存测试。此决定替代三阶段计划中旧的按资料库保存模型路径。
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

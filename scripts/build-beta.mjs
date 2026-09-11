@@ -4,6 +4,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, rea
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { withRustPath } from './rust-env.mjs';
+process.env.PATH = withRustPath().PATH;
 const root = fileURLToPath(new URL('..', import.meta.url));
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('Use an Apple Silicon Mac to build this beta.');
 // Ad-hoc development package: no submission to Apple or use of a host identity.

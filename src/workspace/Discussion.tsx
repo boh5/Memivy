@@ -1,3 +1,4 @@
+import { useResourceVersion } from "./resources";
 import Markdown from "./Markdown";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
@@ -75,14 +76,14 @@ const failures: Record<string, string> = {
 };
 export default function Discussion({
   topic,
-  revision,
+  revision: requestedRevision = 0,
   configured,
   onSettings,
   onRefresh,
   onOpenRecord, compact = false, onReady, onBusy, focus = 0,
 }: {
   topic: Topic;
-  revision: number;
+  revision?: number;
   configured: boolean;
   onSettings: () => void;
   onRefresh: () => void;
@@ -92,6 +93,7 @@ export default function Discussion({
   onReady?: () => void;
   onBusy?: (busy: boolean) => void;
 }) {
+  const revision = useResourceVersion([{domain:"discussion",entity:topic.id}]) + requestedRevision;
   const draft = useDraft(`discussion:${topic.id}`, {
     title: "",
     body: "",
@@ -140,6 +142,8 @@ export default function Discussion({
   useEffect(() => {
     if (draft.ready && !sending) { input.current?.focus(); onReady?.(); }
   }, [draft.ready, focus, sending]);
+  const following = useRef(true);
+  const [unreadReply, setUnreadReply] = useState(false);
   const latest = messages.at(-1);
   useLayoutEffect(() => {
     const anchor = historyAnchor.current;
@@ -150,7 +154,8 @@ export default function Discussion({
     }
   }, [messages]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "nearest" });
+    if (following.current) bottom.current?.scrollIntoView({ block: "nearest" });
+    else setUnreadReply(true);
   }, [latest?.id, latest?.status]);
   async function send() {
     if (lock.current || pending || !draft.ready || !draft.value.body.trim())
@@ -161,6 +166,7 @@ export default function Discussion({
       return;
     }
     lock.current = true;
+    following.current = true; setUnreadReply(false);
     setSending(true);
     onBusy?.(true);
     setError("");
@@ -251,7 +257,12 @@ export default function Discussion({
         <h1>{topic.title}</h1>
         <p>结合自己的记忆，继续想一想。</p>
       </div>
-      <div className="discussion-messages" ref={messageList}>
+      {unreadReply && <button className="quiet" onClick={() => { following.current=true; setUnreadReply(false); bottom.current?.scrollIntoView({block:"nearest"}); }}>有新回复，跳到最新</button>}
+      <div className="discussion-messages" ref={messageList} onScroll={event => {
+        const list = event.currentTarget;
+        following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+        if (following.current) setUnreadReply(false);
+      }}>
         {more && (
           <button
             className="outline-button"
@@ -405,7 +416,7 @@ export default function Discussion({
         />
         <div className="composer-bottom">
           <span>
-            {draft.saved ? "确认后才存为记忆 · ⌘ Enter 发送" : "保存草稿中…"}
+            确认后才存为记忆 · ⌘ Enter 发送
           </span>
           {pending ? (
             <button className="outline-button" onClick={() => void cancel()}>

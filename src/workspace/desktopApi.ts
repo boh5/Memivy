@@ -4,7 +4,7 @@ import { call, errorText, native, type Key, type Topic } from "./api";
 import { flushDrafts, refreshDrafts } from "./useDraft";
 
 export type DesktopState = {
-  expanded: boolean; generation: number; pinned: boolean; visible: boolean;
+  expanded: boolean; generation: number; sequence?: number; pinned: boolean; visible: boolean;
   paused: boolean; shortcut: string; mode: "capture" | "ask"; topic: Topic | null;
   source_app: string; last_memory: string | null; error: string | null;
   configured: boolean; ready_ms: number | null; save_ms: number | null;
@@ -18,18 +18,29 @@ export const previewDesktop: DesktopState = { expanded: true, generation: 1, pin
 export function useDesktop() {
   const [state, setState] = useState<DesktopState | null>(native ? null : previewDesktop);
   const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    if (native) try { setState(await call<DesktopState>("desktop_state")); } catch (e) { setError(errorText(e)); }
+  const newest = useRef(-1), requests = useRef(0);
+  const accept = useCallback((next: DesktopState) => {
+    if (!next) { setError("快捷入口状态未能读取，已保留当前窗口。"); return; }
+    const sequence = next.sequence ?? next.generation;
+    if (sequence < newest.current) return;
+    newest.current = sequence;
+    setState(previous => previous && JSON.stringify({ ...previous, sequence: next.sequence }) === JSON.stringify(next) ? previous : next);
+    setError("");
   }, []);
+  const refresh = useCallback(async () => {
+    const request = ++requests.current;
+    if (native) try { const next = await call<DesktopState>("desktop_state"); if (request === requests.current) accept(next); }
+    catch (e) { if (request === requests.current) setError(errorText(e)); }
+  }, [accept]);
   useEffect(() => {
     if (!native) return;
-    const events = [listen<DesktopState>("desktop-state", e => setState(e.payload)), listen("library-refresh", () => void refresh())];
-    void refresh();
-    return () => { events.forEach(x => void x.then(stop => stop())); };
-  }, [refresh]);
+    const events = [listen<DesktopState>("desktop-state", e => { requests.current++; accept(e.payload); }), listen("settings-changed", () => void refresh())];
+    void Promise.all(events).then(() => refresh());
+    return () => { requests.current++; events.forEach(x => void x.then(stop => stop())); };
+  }, [refresh, accept]);
   async function update(patch: DesktopPatch) {
     if (!native) { setState(s => s && { ...s, ...patch, ...(patch.clear_topic ? { topic: null } : {}) }); return; }
-    setState(await call<DesktopState>("desktop_update", { patch }));
+    accept(await call<DesktopState>("desktop_update", { patch }));
   }
   return { state, error, refresh, update };
 }
@@ -39,7 +50,7 @@ export function useWindowLifecycle(onError: (error: string) => void) {
   useEffect(() => {
     if (!native) return;
     const events = [
-      listen("draft-changed", () => void refreshDrafts().catch(e => errorRef.current(errorText(e)))),
+      listen<string>("draft-changed", e => void refreshDrafts(e.payload).catch(e => errorRef.current(errorText(e)))),
       listen<number>("desktop-exit-request", e => {
         // An unconfirmed conclusion or settings form must remain reviewable.
         if (document.querySelector("dialog[open]")) {

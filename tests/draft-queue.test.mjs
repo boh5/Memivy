@@ -136,3 +136,28 @@ test('conflict resolution only replaces the version actually reviewed', async ()
   await assert.rejects(b.resolve('quick_question',true,'first'),e=>e===DRAFT_CONFLICT);
   assert.equal(disk.get('quick_question').body,'刚又改了');
 });
+
+test('cross-window draft changes only read the affected mounted draft', async () => {
+  const f=fixture(), reads=[];
+  const stop=f.queue.subscribe('capture',()=>{});
+  f.queue.subscribe('question',()=>{});
+  await f.queue.read('old-editor');
+  f.intercept(async(name,args)=>{if(name==='draft_read')reads.push(args.key);});
+  await f.queue.refresh('capture');
+  assert.deepEqual(reads,['capture']);
+  stop();await f.queue.refresh('capture');await f.queue.refresh('unknown');
+  assert.deepEqual(reads,['capture']);
+});
+
+test('typing after a failed save keeps the warning until successful persistence', async () => {
+  const f=fixture(), seen=[];let fail=true;
+  f.queue.subscribe('capture',s=>seen.push(s));
+  f.intercept(async name=>{if(name==='draft_write'&&fail)throw 'disk unavailable';});
+  await assert.rejects(f.queue.write(draft('capture','1','a')));
+  const retry=f.queue.write(draft('capture','2','ab'));
+  assert.equal(seen.at(-1).error,'disk unavailable');
+  await assert.rejects(retry);
+  fail=false;await f.queue.flush('capture');
+  assert.equal(seen.at(-1).error,null);
+  assert.equal(f.disk.get('capture').body,'ab');
+});

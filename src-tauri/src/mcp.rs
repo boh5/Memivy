@@ -156,7 +156,7 @@ pub(crate) fn watch_library(app: tauri::AppHandle) {
             if let Some(watch) = watcher.as_mut() {
                 match watch.changed() {
                     Ok(true) => {
-                        let _ = app.emit("library-refresh", ());
+                        let _ = app.emit("resources-changed", ());
                     }
                     Ok(false) => (),
                     Err(_) => watcher = None,

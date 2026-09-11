@@ -178,6 +178,82 @@ fn watcher_detects_external_commits_without_a_model() {
     assert!(!watcher.changed().unwrap());
 }
 #[test]
+fn draft_autosave_and_index_work_do_not_refresh_the_library() {
+    let (dir, s) = setup();
+    let conversation = id();
+    s.create_conversation(&conversation, "草稿测试").unwrap();
+    let memory = s.capture(&request("编辑草稿的原始内容")).unwrap();
+    let mut watcher = s.change_watcher().unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("memivy.db")).unwrap();
+    for key in [
+        "capture".to_string(),
+        "question".into(),
+        "quick_capture".into(),
+        "quick_question".into(),
+        format!("discussion:{conversation}"),
+        format!("memory:{}", memory.memory_id),
+    ] {
+        let mut previous = None;
+        for i in 0..3 {
+            let draft = WorkspaceDraft {
+                key: key.clone(),
+                request_id: id(),
+                title: String::new(),
+                body: format!("中文草稿 {i}"),
+                expected_version: None,
+                origin: None,
+                context: vec![],
+                conclusion: None,
+            };
+            assert!(
+                s.compare_workspace_draft(&draft, previous.as_deref())
+                    .unwrap()
+            );
+            previous = Some(draft.request_id);
+            assert!(
+                !watcher.changed().unwrap(),
+                "autosave refreshed library: {key}"
+            );
+        }
+        assert!(
+            s.consume_workspace_draft(&key, previous.as_deref().unwrap())
+                .unwrap()
+        );
+        assert!(!watcher.changed().unwrap());
+    }
+    db.execute("DELETE FROM workspace_drafts", []).unwrap();
+    assert!(!watcher.changed().unwrap());
+    db.execute(
+        "INSERT INTO embedding_index_meta VALUES(1,'synthetic','test','building',0,0)",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE embedding_index_meta SET cursor=1,state='ready'", [])
+        .unwrap();
+    assert!(!watcher.changed().unwrap());
+    s.rebuild_search_index().unwrap();
+    assert!(!watcher.changed().unwrap());
+    let saved = s.capture(&request("真实保存仍须刷新")).unwrap();
+    assert!(watcher.changed().unwrap());
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    db.execute(
+        "UPDATE memories SET updated_at=updated_at+1 WHERE id=?",
+        [&saved.memory_id],
+    )
+    .unwrap();
+    assert!(!watcher.changed().unwrap(), "uncommitted changes leaked");
+    db.execute_batch("ROLLBACK").unwrap();
+    assert!(!watcher.changed().unwrap());
+    db.execute(
+        "INSERT INTO record_pins VALUES('memory',?1,1)",
+        [&saved.memory_id],
+    )
+    .unwrap();
+    assert!(watcher.changed().unwrap());
+    db.execute("DELETE FROM record_pins", []).unwrap();
+    assert!(watcher.changed().unwrap());
+}
+#[test]
 fn switch_is_serialized_with_inflight_readers_and_never_fakes_success() {
     let (dir, s) = setup();
     s.set_mcp_enabled(true).unwrap();

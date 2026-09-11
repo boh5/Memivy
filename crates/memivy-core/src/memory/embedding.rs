@@ -34,7 +34,7 @@ fn model_error(_: String) -> DataError {
 impl MemoryStore {
     pub fn embedding_status(&self) -> Result<EmbeddingStatus> {
         let prefs = Preferences::read(&self.root).map_err(model_error)?;
-        let cache = HfModelCache::new(&self.root);
+        let cache = HfModelCache::for_user().map_err(model_error)?;
         let db = self.connection()?;
         let index = meta(&db)?;
         let total: i64 = db.query_row(
@@ -104,7 +104,7 @@ impl MemoryStore {
                 prefs.error = None;
             }
             "retry" => {
-                let cache = HfModelCache::new(&self.root);
+                let cache = HfModelCache::for_user().map_err(model_error)?;
                 if cache.published() && cache.verify().is_err() {
                     cache.clear().map_err(model_error)?;
                 }
@@ -154,8 +154,8 @@ impl MemoryStore {
             return;
         };
         if prefs.clear_requested {
-            match HfModelCache::new(&self.root)
-                .clear()
+            match HfModelCache::for_user()
+                .and_then(|cache| cache.clear())
                 .map_err(model_error)
                 .and_then(|_| self.reset_embedding_index())
             {
@@ -195,7 +195,13 @@ impl MemoryStore {
                 return;
             }
         }
-        let cache = HfModelCache::new(&self.root);
+        let cache = match HfModelCache::for_user() {
+            Ok(cache) => cache,
+            Err(error) => {
+                self.embedding_failure(error);
+                return;
+            }
+        };
         if !cache.published()
             && let Err(e) = cache
                 .download(|| Preferences::read(&self.root).is_ok_and(|p| p.wanted()))
@@ -389,7 +395,7 @@ impl MemoryStore {
         if let Some(error) = prefs.error {
             return Err(error);
         }
-        if !HfModelCache::new(&self.root).published() {
+        if !HfModelCache::for_user()?.published() {
             return Err("本地模型文件缺失，请在设置中重试".into());
         }
 
@@ -466,7 +472,7 @@ mod tests {
         s.embedding_tick().await;
         let prefs = Preferences::read(&s.root).unwrap();
         assert!(prefs.enabled && !prefs.preparing && prefs.error.is_none());
-        assert!(!HfModelCache::new(&s.root).root.exists());
+        assert!(!s.root.join("models").exists());
         assert!(!client::ready(&s.root));
     }
     #[test]

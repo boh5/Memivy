@@ -37,7 +37,7 @@ fn run() -> emb::Result<()> {
     }
     let dir = socket_dir(&root)?;
     let _guard = lock(&dir, "worker.lock")?;
-    let path = cache::HfModelCache::new(&root).verify()?;
+    let path = cache::HfModelCache::for_user()?.verify()?;
     let mut backend = LlamaBackend::init().map_err(|_| "模型后端初始化失败")?;
     backend.void_logs();
     if !backend.supports_gpu_offload() {

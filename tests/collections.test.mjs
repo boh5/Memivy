@@ -7,12 +7,12 @@ test('collection scope follows top input into a discussion and remains visible',
  const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
  f.overrides.navigation_collections=async()=>[c];f.overrides.discussion_ask=async()=>({...f.topic,collection_id:c.id});
  const app=f.mount(App);await f.settle();f.find(app,n=>n.type===Sidebar).props.onCollection(c.id);await f.settle();
- assert(f.text(f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
- await f.find(app,n=>n.type===Form).props.onAsk('我还缺什么？','question-one');await f.settle();
+ assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
+ await f.find(f.query(app),n=>n.type===Form).props.onAsk('我还缺什么？','question-one');await f.settle();
  assert.equal(f.calls.find(v=>v.name==='discussion_ask').args.collectionId,c.id);
- assert(f.text(f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
- f.nodes(f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).find(n=>n.props['aria-label']==='改为从全部记忆提问').props.onClick();await f.settle();
- await f.find(app,n=>n.type===Form).props.onAsk('全库提问','question-two');await f.settle();
+ assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
+ f.nodes(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).find(n=>n.props['aria-label']==='改为从全部记忆提问').props.onClick();await f.settle();
+ await f.find(f.query(app),n=>n.type===Form).props.onAsk('全库提问','question-two');await f.settle();
  assert.equal(f.calls.filter(v=>v.name==='discussion_ask')[1].args.collectionId,null);
 });
 

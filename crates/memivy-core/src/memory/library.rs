@@ -67,6 +67,8 @@ pub struct LibraryDetail {
     pub reviewed_conclusion: Option<ReviewedConclusion>,
     pub current: Option<Version>,
     pub history: Vec<Version>,
+    pub history_count: usize,
+    pub source_count: usize,
     pub sources: Vec<LibrarySource>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -290,13 +292,34 @@ impl MemoryStore {
     }
 
     pub fn library_detail(&self, key: &RecordKey) -> Result<LibraryDetail> {
+        self.library_detail_view(key, true)
+    }
+    pub fn library_detail_view(&self, key: &RecordKey, archives: bool) -> Result<LibraryDetail> {
         key.validate()?;
         let mut db = self.connection()?;
         let tx = db.transaction()?;
+        let history_count: usize = if key.kind == "memory" {
+            tx.query_row(
+                "SELECT COUNT(*) FROM memory_versions WHERE memory_id=? AND body IS NOT NULL",
+                [&key.id],
+                |r| r.get::<_, i64>(0).map(|count| count as usize),
+            )?
+        } else {
+            0
+        };
+        let source_count: usize = if key.kind == "memory" {
+            tx.query_row("SELECT COUNT(DISTINCT vc.capture_id) FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=? AND v.body IS NOT NULL", [&key.id], |r| r.get::<_, i64>(0).map(|count| count as usize))?
+        } else {
+            1
+        };
         let (state, current, history, source_ids, title, body) = if key.kind == "memory" {
             let (state,head):(String,String)=tx.query_row("SELECT state,current_version_id FROM memories WHERE id=? AND state IN ('active','trashed','merged')",[&key.id],|r|Ok((r.get(0)?,r.get(1)?)))?;
             let current = records::version(&tx, &head)?;
-            let ids:Vec<String>=tx.prepare("SELECT id FROM memory_versions WHERE memory_id=? AND body IS NOT NULL ORDER BY rowid DESC")?.query_map([&key.id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            let ids: Vec<String> = if archives {
+                tx.prepare("SELECT id FROM memory_versions WHERE memory_id=? AND body IS NOT NULL ORDER BY rowid DESC")?.query_map([&key.id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?
+            } else {
+                vec![]
+            };
             let history = ids
                 .iter()
                 .map(|id| records::version(&tx, id))
@@ -319,7 +342,11 @@ impl MemoryStore {
                 state,
                 None,
                 vec![],
-                vec![key.id.clone()],
+                if archives {
+                    vec![key.id.clone()]
+                } else {
+                    vec![]
+                },
                 raw_title(&text),
                 text,
             )
@@ -356,6 +383,8 @@ impl MemoryStore {
             body,
             current,
             history,
+            history_count,
+            source_count,
             sources,
         })
     }

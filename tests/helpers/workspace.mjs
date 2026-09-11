@@ -42,7 +42,7 @@ const topic = {id:'topic-a',title:'测试讨论',updated_at:1};
 const keyA={kind:'memory',id:'a'}, keyB={kind:'memory',id:'b'};
 const row = key => ({key,title:key.id,snippet:'test',updated_at:1,origin:null});
 const api = {
-  native, uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:String,
+  native, unavailable:error=>error?.code==='unavailable', uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:String,
   date:()=>'',fullDate:()=>'',sourceName:()=>'',
   async call(name,args) {
     calls.push({name,args});
@@ -50,6 +50,7 @@ const api = {
     if(name==='draft_read') return structuredClone(db.get(args.key)||null);
     if(name==='draft_write') { if(Buffer.byteLength(args.draft.title)>200) throw 'invalid title'; db.set(args.draft.key,structuredClone(args.draft)); return; }
     if(name==='draft_clear') { db.delete(args.key); return; }
+    if(name==='discussion_source') return {source:args.source,text:'known source'};
     if(name==='discussion_messages') return messageResponse ? messageResponse(args) : [];
     if(name==='discussion_ask') return new Promise(resolve=>{askResolve=()=>resolve(topic)});
     if(name==='library_query') return {items:[row(keyA),row(keyB)],next_offset:null};
@@ -69,6 +70,7 @@ function load(file) {
   const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
   const req = name => {
     if (Object.hasOwn(modules, name)) return modules[name];
+    if(name==='./resources')return {useResourceVersion:()=>0,useResourceBridge:()=>{},expireQueries:async()=>{}};
     if(name==='react')return hooks;
     if(name==='react-dom')return {createPortal:children=>children};
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
@@ -113,9 +115,19 @@ function nodes(node) {
   return [node,...nodes(node.props?.children)];
 }
 function text(node) { if(Array.isArray(node))return node.map(text).join(''); if(typeof node==='string')return node; return node?.props?text(node.props.children):''; }
+const querySurfaces = new Map();
+function query(app) {
+  const component=load('src/workspace/WorkspaceQuery.tsx').default;
+  const node=nodes(app.tree).find(n=>n.type===component);
+  assert(node,'missing query surface');
+  let surface=querySurfaces.get(app);
+  if(!surface){surface=mount(component,node.props);querySurfaces.set(app,surface);}
+  else if(surface.props!==node.props){surface.props=node.props;render(surface);}
+  return surface;
+}
 function find(f,predicate){const node=nodes(f.tree).find(predicate);assert(node,'missing element');return node;}
   t.after(()=>{for(const f of fibers)if(f.alive)unmount(f);});
-  return {load,mount,unmount,settle,find,nodes,text,db,calls,overrides,topic,keyA,keyB,
+  return {load,mount,unmount,settle,find,query,nodes,text,db,calls,overrides,topic,keyA,keyB,
     focus(){windowEvents.get('focus')?.forEach(fn=>fn());},
     key(event){windowEvents.get('keydown')?.forEach(fn=>fn(event));},
     emit(name,payload){nativeEvents.get(name)?.forEach(fn=>fn({payload}));},

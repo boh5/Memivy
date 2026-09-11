@@ -46,6 +46,25 @@ fn run() -> Result<()> {
     }
     let store = MemoryStore::open(PathBuf::from(root))?;
     match command.as_str() {
+        "edit-current" => {
+            let memory_id = args.get(3).ok_or(DataError::Invalid)?.clone();
+            let detail = store.library_detail(&RecordKey {
+                kind: "memory".into(),
+                id: memory_id.clone(),
+            })?;
+            let current = detail.current.ok_or(DataError::Unavailable)?;
+            let receipt = store.edit_memory(&EditRequest {
+                request_id: Uuid::new_v4().to_string(),
+                memory_id,
+                expected_version: current.id,
+                title: current.title,
+                body: args.get(4).ok_or(DataError::Invalid)?.clone(),
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string(&receipt).map_err(|_| DataError::Invalid)?
+            );
+        }
         "hold-turn" => {
             let topic = Uuid::new_v4().to_string();
             store.create_conversation(&topic, "生成中退出的合成话题")?;

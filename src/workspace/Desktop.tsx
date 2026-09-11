@@ -1,3 +1,4 @@
+import { useResourceBridge } from "./resources";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import icon from "../../design-demo/brand/memivy-icon.svg";
@@ -15,7 +16,7 @@ import "./desktop.css";
 
 export default function Desktop() {
   const desktop = useDesktop(), state = desktop.state;
-  const [error, setError] = useState(""), [revision, setRevision] = useState(0), [saved, setSaved] = useState<Key | null>(null);
+  const [error, setError] = useState(""), [saved, setSaved] = useState<Key | null>(null);
   const busy = useRef(false), current = useRef(state), root = useRef<HTMLDivElement>(null), composing = useRef(false);
   const drag = useRef<{ x: number; y: number; moved: boolean; tail: Promise<unknown> } | null>(null);
   const dragEnd = useRef<Promise<unknown>>(Promise.resolve()), suppressLeafClick = useRef(false);
@@ -23,6 +24,7 @@ export default function Desktop() {
   const pendingDismiss = useRef<{ reason: string; generation: number } | null>(null);
   current.current = state;
   useWindowLifecycle(setError);
+  useResourceBridge(error => setError(errorText(error)));
   useEffect(() => { if (native && root.current) return installClickRecovery(root.current); }, []);
   useEffect(() => {
     if (!native || !root.current) return;
@@ -53,7 +55,6 @@ export default function Desktop() {
   useEffect(() => {
     if (!native) return;
     const events = [
-      listen("library-refresh", () => setRevision(v => v + 1)),
       listen("desktop-blur", () => { if (!composing.current) void dismiss("blur"); }),
       listen<number>("desktop-dismiss-request", e => void dismiss("explicit", e.payload)),
       listen("workspace-close-request", () => void dismiss("explicit")),
@@ -74,7 +75,6 @@ export default function Desktop() {
     if (!current.current?.configured) throw "先在主窗口连接一个模型，问题草稿会保留。";
     const topic = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [] });
     await desktop.update({ topic_id: topic.id });
-    setRevision(v => v + 1);
   }
   function reportReady() {
     if (native && current.current?.expanded) void call("desktop_ready", { generation: current.current.generation }).catch(() => {});
@@ -119,7 +119,7 @@ export default function Desktop() {
       <div className="desktop-content">
         {state.mode === "ask" && state.topic ? <>
           <div className="desktop-topic-nav"><button onClick={() => void change({ mode: "capture" })}>记一下</button><span>问一问</span><button onClick={() => void change({ clear_topic: true })}>新话题</button></div>
-          <Discussion key={state.topic.id} compact topic={state.topic} revision={revision} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => setRevision(v => v + 1)} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
+          <Discussion key={state.topic.id} compact topic={state.topic} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => {}} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
         </> : <CaptureForm key={state.mode} quick sourceApp={state.source_app} mode={state.mode} focus={state.generation} onMode={mode => void change({ mode })} onAsk={ask}
           onBusy={changeBusy} onReady={reportReady} onEdit={() => setSaved(null)}
           onSaved={key => { setSaved(key); setTimeout(() => void dismiss("saved"), 0); }} />}

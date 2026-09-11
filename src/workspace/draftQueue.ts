@@ -92,7 +92,8 @@ export class DraftQueue {
     const entry = this.entry(draft.key);
     entry.current = entry.pending = draft;
     entry.revision++;
-    entry.error = null;
+    // Keep a failed-save warning visible until a write actually succeeds.
+    // Typing is not evidence of recovery.
     this.notify(entry);
     return this.enqueue(entry, () => this.persist(entry, draft));
   }
@@ -145,8 +146,12 @@ export class DraftQueue {
       return true;
     });
   }
-  refresh() {
-    return Promise.all([...this.entries.keys()].map(key => this.read(key)));
+  refresh(changedKey?: string) {
+    // A keystroke in the other window must not reload every visited editor.
+    // Unmounted drafts are read afresh when subscribed again.
+    return Promise.all([...this.entries].filter(([key, entry]) =>
+      entry.listeners.size > 0 && (changedKey === undefined || key === changedKey)
+    ).map(([key]) => this.read(key)));
   }
   resolve(key: string, keepLocal: boolean, expected: string | null) {
     const entry = this.entry(key);

@@ -1,4 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { resourceCall } from "./resources";
+import { isTauri } from "@tauri-apps/api/core";
 export const native = isTauri();
 export type Source = { kind: "capture" | "version"; id: string };
 export type SourceEvidence = {
@@ -68,6 +69,8 @@ export type Detail = {
   body: string;
   current: Version | null;
   history: Version[];
+  history_count?: number;
+  source_count?: number;
   sources: { id: string; capture: Raw | null }[];
 };
 export type ConclusionDestination = { kind: "new" } | { kind: "existing"; memory_id: string; expected_version: string };
@@ -123,7 +126,8 @@ export const fullDate = (n: number) =>
 export const sourceName = (o: Origin | null) =>
   o?.kind === "conversation" ? "确认的讨论结论" : o?.app || "原始记录";
 export const errorText = (error: unknown) =>
-  typeof error === "string" ? error : "操作未完成，内容仍保留，请重试。";
+  typeof error === "string" ? error : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message : "操作未完成，内容仍保留，请重试。";
+export const unavailable = (error: unknown) => !!error && typeof error === "object" && "code" in error && error.code === "unavailable";
 const previewId = "00000000-0000-4000-8000-000000000001";
 const previewRaw: Raw = {
   id: previewId,
@@ -143,7 +147,7 @@ export async function call<T>(
   name: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  if (native) return invoke<T>(name, args);
+  if (native) return resourceCall<T>(name, args);
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "discussion_targets") return [] as T;

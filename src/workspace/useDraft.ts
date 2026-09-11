@@ -5,7 +5,7 @@ import { DraftQueue } from "./draftQueue";
 const drafts = new DraftQueue(call);
 export const flushDrafts = () => drafts.flushAll();
 export const flushDraft = (key: string) => drafts.flush(key);
-export const refreshDrafts = () => drafts.refresh();
+export const refreshDrafts = (key?: string) => drafts.refresh(key);
 
 export function useDraft(
   key: string,
@@ -17,7 +17,6 @@ export function useDraft(
   empty.current = { ...initial, key, request_id: empty.current.request_id };
   const [draft, setDraft] = useState<Draft | null>(null);
   const [ready, setReady] = useState(false),
-    [saved, setSaved] = useState(true),
     [error, setError] = useState("");
   const current = useRef<Draft | null>(null);
   useEffect(() => {
@@ -25,8 +24,9 @@ export function useDraft(
     setReady(false);
     const unsubscribe = drafts.subscribe(key, (snapshot) => {
       current.current = snapshot.draft;
+      // Persistence acknowledgements do not change the visible draft. React
+      // can bail out on the same object instead of repainting the input surface.
       setDraft(current.current);
-      setSaved(snapshot.saved);
       setError(snapshot.error ? errorText(snapshot.error) : "");
     });
     void drafts.read(key)
@@ -60,6 +60,6 @@ export function useDraft(
       : null;
     return drafts.consume(key, requestId, replacement);
   }
-  return { value: draft || empty.current, ready, saved, error, update, flush, clear,
+  return { value: draft || empty.current, ready, error, update, flush, clear,
     resolve: (keepLocal: boolean, expected: string | null) => drafts.resolve(key, keepLocal, expected) };
 }

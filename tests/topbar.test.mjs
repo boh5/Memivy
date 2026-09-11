@@ -6,22 +6,23 @@ const key={key:'Enter',metaKey:false,ctrlKey:false,altKey:false,shiftKey:false,r
 test('dismiss/reopen keeps the mounted question draft, and successful submission closes the panel',async t=>{
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Bar=f.load('src/workspace/WorkspaceTopBar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   const app=f.mount(App);await f.settle();
-  const bar=()=>f.find(app,n=>n.type===Bar).props;
-  const props=()=>f.find(app,n=>n.type===Form).props;
+  const bar=()=>f.find(f.query(app),n=>n.type===Bar).props;
+  const props=()=>f.find(f.query(app),n=>n.type===Form).props;
   assert.equal(bar().open,false);assert.equal(props().focus,0);
   bar().onOpen();await f.settle();
   const form=f.mount(Form,props());await f.settle();
   const input=()=>f.find(form,n=>n.type==='textarea');
   input().props.onChange({target:{value:'第一行问题\n第二行背景'}});await f.settle();
-  assert.equal(bar().preview,'第一行问题\n第二行背景');
+  assert.equal(bar().preview,'');
   bar().onClose();await f.settle();f.render(form,props());await f.settle();
   assert.equal(input().props.value,'第一行问题\n第二行背景');
+  assert.equal(bar().preview,'第一行问题\n第二行背景');
   assert.equal(f.calls.filter(c=>c.name==='discussion_ask').length,0);
   f.key({...key,key:'k',metaKey:true});await f.settle();f.render(form,props());await f.settle();
   assert.equal(bar().open,true);assert.equal(input().props.value,'第一行问题\n第二行背景');
   input().props.onKeyDown(key);await f.settle();
   // Dismissal while IPC is pending neither duplicates the request nor consumes the draft.
-  bar().onClose();await f.settle();assert(f.db.has('question'));
+  bar().onClose();await f.settle();f.render(form,props());await f.settle();assert(f.db.has('question'));
   f.completeAsk();await f.settle();
   assert.equal(bar().open,false);assert.equal(bar().preview,'');
   assert.equal(f.calls.filter(c=>c.name==='discussion_ask').length,1);assert.equal(f.db.has('question'),false);
@@ -53,7 +54,7 @@ test('Tab to the document dismisses without stealing focus; moving within the pa
 
 test('opening capture from recall gives the modal a visible return-focus target',async t=>{
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Bar=f.load('src/workspace/WorkspaceTopBar.tsx').default;
-  const app=f.mount(App);await f.settle();const bar=()=>f.find(app,n=>n.type===Bar).props;
+  const app=f.mount(App);await f.settle();const bar=()=>f.find(f.query(app),n=>n.type===Bar).props;
   let focused=0;bar().triggerRef.current={focus(){focused++;assert.equal(bar().open,true);}};
   bar().onOpen();await f.settle();
   f.key({...key,key:'n',metaKey:true});await f.settle();
@@ -64,10 +65,10 @@ test('opening capture from recall gives the modal a visible return-focus target'
 test('missing-model settings returns to the trigger and preserves the question draft',async t=>{
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Bar=f.load('src/workspace/WorkspaceTopBar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   f.overrides.workspace_settings=async()=>({configured:false});
-  const app=f.mount(App);await f.settle();const bar=()=>f.find(app,n=>n.type===Bar).props;
+  const app=f.mount(App);await f.settle();const bar=()=>f.find(f.query(app),n=>n.type===Bar).props;
   let focused=0;bar().triggerRef.current={focus(){focused++;}};
   bar().onOpen();await f.settle();
-  const form=f.mount(Form,f.find(app,n=>n.type===Form).props);await f.settle();
+  const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
   const input=()=>f.find(form,n=>n.type==='textarea');
   input().props.onChange({target:{value:'尚未配置模型的问题'}});await f.settle();
   input().props.onKeyDown(key);await f.settle();

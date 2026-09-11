@@ -102,6 +102,6 @@ pub(crate) async fn cleanup_save(
     require_main(&window)?;
     let store = state.store.clone();
     let receipt = blocking(move || store.save_cleanup(&request)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(receipt)
 }

@@ -136,7 +136,7 @@ async fn discussion_ask(
         .start_turn(&id, &topic_id, &question, &context)
         .map_err(|e| e.to_string())?;
     let task_id = id.clone();
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     let task = tokio::spawn(async move {
         if let Err(failure) = store
             .answer_discussion(&config, &topic_id, &turn, &context)
@@ -147,7 +147,7 @@ async fn discussion_ask(
         if let Ok(mut tasks) = app.state::<Workspace>().tasks.lock() {
             tasks.remove(&task_id);
         }
-        let _ = app.emit("library-refresh", ());
+        let _ = app.emit("resources-changed", ());
     });
     tasks.insert(id, task.abort_handle());
     Ok(topic)
@@ -169,7 +169,7 @@ fn discussion_cancel(
     {
         task.abort();
     }
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -178,14 +178,19 @@ async fn discussion_source(
     state: tauri::State<'_, Workspace>,
     source: SourceRef,
     message_id: Option<String>,
-) -> HostResult<Evidence> {
-    require(&window)?;
-    let s = state.store.clone();
-    blocking(move || match message_id {
-        Some(id) => s.discussion_excerpt(&id, &source),
-        None => s.resolve_source(&source, 4096),
+) -> std::result::Result<Evidence, ReadError> {
+    require(&window).map_err(|message| ReadError {
+        code: "denied",
+        message,
+    })?;
+    let store = state.store.clone();
+    tauri::async_runtime::spawn_blocking(move || match message_id {
+        Some(id) => store.discussion_excerpt(&id, &source),
+        None => store.resolve_source(&source, 4096),
     })
     .await
+    .map_err(|_| ReadError::from(DataError::Database))?
+    .map_err(ReadError::from)
 }
 #[tauri::command]
 async fn discussion_save(
@@ -244,7 +249,7 @@ async fn organization_retry(
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.retry_organization(&memory_id)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 async fn flush_organization_failure(
@@ -280,7 +285,7 @@ fn start_organizer(app: tauri::AppHandle) {
                     continue;
                 }
                 delay = 750;
-                let _ = app.emit("library-refresh", ());
+                let _ = app.emit("resources-changed", ());
             }
             // Interactive answers get priority before starting another background request.
             if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
@@ -297,7 +302,7 @@ fn start_organizer(app: tauri::AppHandle) {
             let Ok(Some(mut task)) = blocking(move || claimant.claim_organization()).await else {
                 continue;
             };
-            let _ = app.emit("library-refresh", ());
+            let _ = app.emit("resources-changed", ());
             let attempt = task.attempt_id.clone();
             let preparer = store.clone();
             let prepared = blocking(move || {
@@ -333,7 +338,7 @@ fn start_organizer(app: tauri::AppHandle) {
                                                 &receipt.request_id,
                                             )
                                             .await;
-                                        let _ = app.emit("library-refresh", ());
+                                        let _ = app.emit("resources-changed", ());
                                     });
                                 }
                                 None
@@ -360,7 +365,7 @@ fn start_organizer(app: tauri::AppHandle) {
                 pending_failure = Some((attempt, reason));
                 let _ = flush_organization_failure(store, &mut pending_failure).await;
             }
-            let _ = app.emit("library-refresh", ());
+            let _ = app.emit("resources-changed", ());
         }
     });
 }
@@ -394,7 +399,7 @@ async fn navigation_pin(
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.pin_record(&key, pinned)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -409,7 +414,7 @@ async fn navigation_collect(
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.collect_record(&collection, &key, included)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -425,7 +430,7 @@ async fn navigation_save_collection(
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.save_collection(&id, &name, &description, expected)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -440,7 +445,7 @@ async fn navigation_archive_collection(
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.archive_collection(&id, archived, expected)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -487,7 +492,7 @@ async fn organization_dismiss(
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.dismiss_organization_collections(&receipt)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -502,7 +507,7 @@ async fn organization_collect(
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.accept_organization_collection(&receipt, &collection, revision)).await?;
-    let _ = app.emit("library-refresh", ());
+    let _ = app.emit("resources-changed", ());
     Ok(())
 }
 #[tauri::command]
@@ -522,6 +527,16 @@ async fn navigation_suggest(
         .map_err(|_| "推荐未完成，请检查模型连接后重试".to_string())
 }
 #[tauri::command]
+async fn library_changes(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    cursor: Option<ChangeCursor>,
+) -> HostResult<LibraryChanges> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.library_changes(cursor.as_ref())).await
+}
+#[tauri::command]
 async fn library_query(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
@@ -531,15 +546,42 @@ async fn library_query(
     let s = state.store.clone();
     blocking(move || s.library(&query)).await
 }
+#[derive(Serialize)]
+struct ReadError {
+    code: &'static str,
+    message: String,
+}
+impl From<DataError> for ReadError {
+    fn from(error: DataError) -> Self {
+        Self {
+            code: match error {
+                DataError::Unavailable => "unavailable",
+                DataError::Busy => "busy",
+                DataError::Conflict => "conflict",
+                _ => "read_failed",
+            },
+            message: error.to_string(),
+        }
+    }
+}
 #[tauri::command]
 async fn library_detail(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     key: RecordKey,
-) -> HostResult<LibraryDetail> {
-    require(&window)?;
-    let s = state.store.clone();
-    blocking(move || s.library_detail(&key)).await
+    archives: Option<bool>,
+) -> std::result::Result<LibraryDetail, ReadError> {
+    require(&window).map_err(|message| ReadError {
+        code: "denied",
+        message,
+    })?;
+    let store = state.store.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.library_detail_view(&key, archives.unwrap_or(true))
+    })
+    .await
+    .map_err(|_| ReadError::from(DataError::Database))?
+    .map_err(ReadError::from)
 }
 #[tauri::command]
 async fn library_projects(
@@ -601,6 +643,7 @@ async fn draft_write(
 ) -> HostResult<bool> {
     require(&window)?;
     let s = state.store.clone();
+    let changed_key = draft.key.clone();
     let written =
         blocking(move || s.compare_workspace_draft(&draft, expected_request.as_deref())).await?;
     if written {
@@ -611,7 +654,7 @@ async fn draft_write(
                 "main"
             },
             "draft-changed",
-            (),
+            &changed_key,
         );
     }
     Ok(written)
@@ -626,6 +669,7 @@ async fn draft_clear(
 ) -> HostResult<bool> {
     require(&window)?;
     let s = state.store.clone();
+    let changed_key = key.clone();
     let cleared = blocking(move || s.consume_workspace_draft(&key, &request)).await?;
     if cleared {
         let _ = app.emit_to(
@@ -635,7 +679,7 @@ async fn draft_clear(
                 "main"
             },
             "draft-changed",
-            (),
+            &changed_key,
         );
     }
     Ok(cleared)
@@ -928,7 +972,9 @@ fn workspace_configure(
         output_token_parameter,
     }
     .save(path)
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    let _ = window.app_handle().emit("settings-changed", ());
+    Ok(())
 }
 #[tauri::command]
 async fn workspace_test_model(
@@ -1040,7 +1086,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 let _ = window.emit("workspace-close-request", ());
             }
             if let tauri::WindowEvent::Focused(true) = event {
-                let _ = window.emit("library-refresh", ());
+                let _ = window.emit("resources-changed", ());
             }
         })
         .manage(crate::cleanup::CleanupJobs::default())
@@ -1051,6 +1097,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::cleanup::cleanup_generate,
             crate::cleanup::cleanup_cancel,
             crate::cleanup::cleanup_save,
+            library_changes,
             library_query,
             navigation_collections,
             navigation_record,

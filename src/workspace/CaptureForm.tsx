@@ -138,18 +138,14 @@ export default function CaptureForm({
           }}
         />
         {presentation === "query" ? <div className="recall-panel-footer">
-          <span>{draft.saved ? "Enter 提问 · Shift+Enter 换行" : "保存草稿中…"}</span>
+          <span>Enter 提问 · Shift+Enter 换行</span>
           <button className="recall-submit" aria-label="从记忆中查找并回答" title="查找并回答"
             disabled={!draft.ready || busy || !draft.value.body.trim()} onClick={() => void save()}>
             <Icon name={busy ? "refresh" : "arrow"} size={16} />
           </button>
         </div> : <div className="composer-bottom">
           <span>
-            {draft.saved
-              ? mode === "capture"
-                ? "原话先保存在本机"
-                : "讨论不会自动存为记忆"
-              : "保存草稿中…"}{" "}
+            {mode === "capture" ? "原话先保存在本机" : "讨论不会自动存为记忆"}{" "}
             · ⌘ Enter 提交
           </span>
           <button

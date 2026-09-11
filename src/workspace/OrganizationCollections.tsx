@@ -1,3 +1,4 @@
+import { useResourceVersion } from "./resources";
 import { useEffect, useRef, useState } from "react";
 import { notify } from "./Toast";
 import { call, errorText, native, type Collection, type Key, type RecordNavigation } from "./api";
@@ -21,9 +22,10 @@ function load(receipt: string, retry: boolean) {
   return request;
 }
 
-export default function OrganizationCollections({ receipt, record, revision, disabled, onRefresh }: {
-  receipt: string; record: Key; revision: number; disabled: boolean; onRefresh: () => void;
+export default function OrganizationCollections({ receipt, record, revision: requestedRevision = 0, disabled, onRefresh }: {
+  receipt: string; record: Key; revision?: number; disabled: boolean; onRefresh: () => void;
 }) {
+  const revision = useResourceVersion([{domain:"navigation",entity:`${record.kind}:${record.id}`},{domain:"collection"}]) + requestedRevision;
   const [rows, setRows] = useState<Suggestion[] | null>(null), [error, setError] = useState("");
   const [hidden, setHidden] = useState(() => dismissed.has(receipt)), [attempt, setAttempt] = useState(0);
   const [members, setMembers] = useState<string[]>([]);
@@ -40,7 +42,7 @@ export default function OrganizationCollections({ receipt, record, revision, dis
   }, [receipt, attempt, hidden]);
   useEffect(() => {
     if (!native || hidden) return;
-    const request = ++sequence.current; setReady(false);
+    const request = ++sequence.current;
     void call<RecordNavigation>("navigation_record", { key: record }).then(value => {
       if (alive.current && sequence.current === request) { setMembers(value.collections); setReady(true); }
     }).catch(e => { if (alive.current && sequence.current === request) setError(errorText(e)); });

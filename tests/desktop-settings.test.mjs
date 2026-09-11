@@ -33,3 +33,12 @@ test('slow login status leaves other settings usable and stale responses cannot 
   assert.equal(reads.length,2);
   f.unmount(view);f.focus();assert.equal(reads.length,2);
 });
+
+test('background login-status failure keeps the last known controls visible',async t=>{
+ const f=workspaceFixture(t,{native:true});const {previewDesktop}=f.load('src/workspace/desktopApi.ts');
+ f.overrides.desktop_state=async()=>({...previewDesktop});f.overrides.desktop_login_status=async()=> 'enabled';
+ const view=f.mount(f.load('src/workspace/DesktopSettings.tsx').default);await f.settle();
+ f.overrides.desktop_login_status=async()=>{throw 'temporarily unavailable';};f.focus();await f.settle();
+ assert.equal(f.find(view,n=>n.type==='button'&&f.text(n)==='关闭').props.disabled,false);
+ assert(f.nodes(view.tree).some(n=>n.props.text==='temporarily unavailable'));
+});

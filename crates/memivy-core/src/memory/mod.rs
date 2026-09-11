@@ -1,6 +1,8 @@
 //! Formal local data model, independent of the Phase 1 database and UI.
 //! All writes, including future UI/MCP writes, must pass through this module.
 //! Model requests are bounded and run outside database transactions.
+mod changes;
+pub use changes::*;
 mod access;
 mod agent;
 mod cleanup;

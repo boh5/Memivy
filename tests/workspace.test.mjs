@@ -100,7 +100,7 @@ test('an invalid editor draft does not prevent submitting a valid quick capture'
   const a=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();
   a.tree.update({title:'中文'.repeat(40),body:'无效标题的草稿'});await f.settle();f.unmount(a);
   const App=f.load('src/workspace/App.tsx').default, app=f.mount(App);await f.settle();
-  f.find(app,n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
+  f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
   const Dialog=f.load('src/workspace/CaptureDialog.tsx').default;
   const dialog=f.mount(Dialog,f.find(app,n=>n.type===Dialog).props);await f.settle();
   const formNode=f.find(dialog,n=>typeof n.type==='function'&&n.props.mode==='capture');

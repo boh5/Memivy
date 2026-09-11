@@ -1,4 +1,4 @@
-//! Hugging Face blob/snapshot cache restricted to an explicit manifest.
+//! User-wide Memivy model cache, independent of library and HF environment paths.
 use super::*;
 use std::io::{Read, Seek, SeekFrom};
 #[derive(Clone)]
@@ -6,10 +6,17 @@ pub struct HfModelCache {
     pub root: PathBuf,
 }
 impl HfModelCache {
-    pub fn new(data: &Path) -> Self {
-        Self {
-            root: data.join("models/huggingface/hub"),
+    pub fn for_user() -> Result<Self> {
+        let home = std::env::var_os("HOME").ok_or("无法确定用户模型缓存目录")?;
+        Self::at_home(Path::new(&home))
+    }
+    fn at_home(home: &Path) -> Result<Self> {
+        if !home.is_absolute() {
+            return Err("用户模型缓存目录必须为绝对路径".into());
         }
+        Ok(Self {
+            root: home.join("Library/Caches/com.memivy.app/models"),
+        })
     }
     fn repo(&self) -> PathBuf {
         self.root
@@ -190,6 +197,40 @@ async fn download_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn model_cache_is_user_wide_and_requires_an_absolute_home() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = HfModelCache::at_home(home.path()).unwrap();
+        assert_eq!(
+            cache.root,
+            home.path().join("Library/Caches/com.memivy.app/models")
+        );
+        assert!(!cache.root.exists()); // Resolving status must not create directories.
+        assert!(HfModelCache::at_home(Path::new("relative")).is_err());
+    }
+
+    #[test]
+    fn clearing_the_fixed_model_preserves_other_cached_models() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = HfModelCache::at_home(home.path()).unwrap();
+        fs::create_dir_all(cache.blob().parent().unwrap()).unwrap();
+        fs::create_dir_all(cache.model_path().parent().unwrap()).unwrap();
+        fs::write(cache.blob(), b"synthetic fixed model").unwrap();
+        fs::write(cache.incomplete(), b"partial").unwrap();
+        std::os::unix::fs::symlink(
+            Path::new("../../blobs").join(MODEL.sha256),
+            cache.model_path(),
+        )
+        .unwrap();
+        let other = cache.root.join("other-model");
+        fs::write(&other, b"keep").unwrap();
+        cache.clear().unwrap();
+        assert!(!cache.blob().exists());
+        assert!(!cache.incomplete().exists());
+        assert!(cache.model_path().symlink_metadata().is_err());
+        assert_eq!(fs::read(other).unwrap(), b"keep");
+    }
+
     const SMALL: ModelDescriptor = ModelDescriptor {
         repo: "test/repo",
         revision: "fixed",

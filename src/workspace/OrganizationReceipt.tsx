@@ -1,3 +1,4 @@
+import { useResourceVersion } from "./resources";
 import { useEffect, useRef, useState } from "react";
 import { call, errorText, uid, type Detail, type Key, type Receipt } from "./api";
 import { ErrorNotice, Modal } from "./components";
@@ -5,10 +6,11 @@ import { ErrorNotice, Modal } from "./components";
 
 
 type Job = { can_retry: boolean; memory_id: string; capture_id: string; attempt_id: string; status: string; reason: string; receipt: Receipt | null };
-export default function OrganizationReceipt({ record, revision, onOpen, onRefresh, presentation = "history" }: {
+export default function OrganizationReceipt({ record, revision: requestedRevision = 0, onOpen, onRefresh, presentation = "history" }: {
   presentation?: "history" | "status";
-  record: Key; revision: number; onOpen: (key: Key) => void; onRefresh: () => void;
+  record: Key; revision?: number; onOpen: (key: Key) => void; onRefresh: () => void;
 }) {
+  const revision = useResourceVersion([{domain:"organization",entity:`${record.kind}:${record.id}`},{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision;
   const [dismissed, setDismissed] = useState("");
   const [expanded, setExpanded] = useState(false);
   const recordKey = `${record.kind}:${record.id}`;
@@ -32,7 +34,7 @@ export default function OrganizationReceipt({ record, revision, onOpen, onRefres
     void call<Job[]>("organization_jobs", { key: record }).then(rows => {
       if (active) { setResult({ owner, jobs: rows }); setError(""); }
     }).catch(e => {
-      if (active) { setResult(null); setChange(null); setError(errorText(e)); }
+      if (active) { setError(errorText(e)); }
     });
     return () => { active = false; };
   }, [record.id, record.kind, revision]);

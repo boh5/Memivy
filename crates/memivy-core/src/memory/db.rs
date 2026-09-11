@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 11;
+pub(super) const SCHEMA: i64 = 13;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -240,8 +240,18 @@ impl MemoryStore {
                 "../../../../migrations/memory/011_agent_evidence.sql"
             ))?;
         }
+        if version < 12 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/012_library_revision.sql"
+            ))?;
+        }
         if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
             return Err(DataError::Integrity);
+        }
+        if version < 13 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/013_ui_changes.sql"
+            ))?;
         }
         tx.commit()?;
         db.pragma_update(None, "foreign_keys", true)?;
