@@ -5,7 +5,7 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/memivy-mcp", "binaries/memivy-embedding"],
+    "externalBin": ["binaries/memivy-mcp", "binaries/memivy-embedding", "binaries/memivy-speech"],
     "macOS": {
       "minimumSystemVersion": "26.0",
       "signingIdentity": "-"

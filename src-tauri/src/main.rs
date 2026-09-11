@@ -5,6 +5,7 @@ mod desktop;
 mod mcp;
 mod prototype;
 mod storage;
+mod voice;
 mod workspace;
 fn main() {
     let mut context = tauri::generate_context!();

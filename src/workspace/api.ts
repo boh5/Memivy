@@ -148,6 +148,7 @@ export async function call<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return resourceCall<T>(name, args);
+  if (name === "voice_status") return {enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"模型目录由桌面应用按系统确定",session:null} as T;
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "discussion_targets") return [] as T;

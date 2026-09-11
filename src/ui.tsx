@@ -100,6 +100,9 @@ export async function call<T>(
 }
 const paths: Record<string, string> = {
   plus: "M12 5v14M5 12h14",
+  mic: "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8",
+  download: "M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4",
+  play: "m8 4 12 8-12 8z",
   arrow: "M12 19V5m-6 6 6-6 6 6",
   chevron: "m9 5 7 7-7 7",
   close: "m6 6 12 12M6 18 18 6",

@@ -398,3 +398,9 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 ## 12. 暂缓的平台
 
 Windows、iOS、Android 不进入当前架构验收和开发排期，也不为其预留平台适配层。未来若重新启动其中任一平台，先单独确认捕捉入口、MCP、同步和发布需求，再评估是否继续复用当前技术路线。Linux 不支持。
+
+## 本地语音输入（2026-09-11 授权）
+
+语音复用共享 CaptureForm 和既有草稿队列，不绕过 MemoryStore。Tauri host 使用 CPAL/CoreAudio 采集、Rubato 抗混叠重采样到 16 kHz 单声道；停顿分段、12 秒硬分段、单次 5 分钟上限。音频回调不做磁盘或推理操作。独立 `memivy-speech` 进程使用现有 llama-cpp-2 0.1.156 的 mtmd + Metal，音频编码器和解码模型都启用 GPU，失败可回退 CPU；闲置 60 秒释放进程。识别文字不经过额外润色模型。
+
+Qwen3-ASR-0.6B Q8_0 固定清单含语言模型和音频投影共 1,019,141,728 字节，在 Memivy 自有模型目录中使用 blobs/snapshots/locks、SHA-256 校验和断点下载。语音和 embedding 共用 dirs::cache_dir() 下固定 `com.memivy.app/models`：macOS 为 `~/Library/Caches/com.memivy.app/models/`，Windows 为 `%LOCALAPPDATA%\com.memivy.app\models\`；不受 HF 环境变量、资料库和测试应用标识影响。缓存被清理后可重新下载；语音设置与暂存录音仍归当前资料库。此处仅完成跨平台目录解析，不代表 Windows 应用已适配。模型进程不访问数据库；界面只从专门的语音状态读取结果，避免触发全局记忆刷新。转写完成且草稿持久化后解除语音写入，防止覆盖后续人工修改；提交与关闭等待录音末尾，失败禁止提交。

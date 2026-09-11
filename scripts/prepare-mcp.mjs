@@ -11,7 +11,7 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64' ||
   throw new Error('Memivy development beta requires an Apple Silicon Mac.');
 }
 const debug = process.argv.includes('--debug') || process.env.TAURI_ENV_DEBUG === 'true';
-for (const name of ['memivy-mcp', 'memivy-embedding']) {
+for (const name of ['memivy-mcp', 'memivy-embedding', 'memivy-speech']) {
 const args = ['build', '-p', name, '--bin', name, '--locked', '--offline', '--message-format=json-render-diagnostics'];
 if (!debug) args.push('--release');
 const result = spawnSync('cargo', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, MACOSX_DEPLOYMENT_TARGET: '26.0' } });

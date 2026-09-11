@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { call, errorText, native, type Key, type Topic } from "./api";
+import { finishVoiceInputs } from "./useVoice";
 import { flushDrafts, refreshDrafts } from "./useDraft";
 
 export type DesktopState = {
@@ -58,7 +59,7 @@ export function useWindowLifecycle(onError: (error: string) => void) {
           void call("desktop_exit_ready", { id: e.payload, error: true });
           return;
         }
-        void flushDrafts().then(() => call("desktop_exit_ready", { id: e.payload, error: false }))
+        void finishVoiceInputs().then(() => flushDrafts()).then(() => call("desktop_exit_ready", { id: e.payload, error: false }))
           .catch(error => { errorRef.current(`草稿尚未保存，已保留窗口。${errorText(error)}`); void call("desktop_exit_ready", { id: e.payload, error: true }); });
       }),
     ];

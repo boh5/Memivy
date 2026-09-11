@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { finishVoiceInputs } from "./useVoice";
 import CaptureForm from "./CaptureForm";
 import { ErrorNotice, Modal } from "./components";
 import { errorText, type Key } from "./api";
@@ -19,6 +20,7 @@ export default function CaptureDialog({ quick, sourceApp, focus, onReady, onSave
     closing.current = true;
     try {
       // Closing this input must not depend on an unrelated editor's draft.
+      await finishVoiceInputs();
       await flushDraft(quick ? "quick_capture" : "capture");
       onClose();
     } catch (e) { setError(errorText(e)); }

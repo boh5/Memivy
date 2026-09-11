@@ -1,3 +1,4 @@
+import { finishVoiceInputs } from "./useVoice";
 import { useResourceBridge, useResourceVersion } from "./resources";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -38,6 +39,7 @@ export default function App() {
   const [selected, setSelected] = useState<Key | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null), [topics, setTopics] = useState<Topic[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false), [configured, setConfigured] = useState(false);
+  useEffect(() => { const open = () => setSettingsOpen(true); window.addEventListener("voice-settings-request", open); return () => window.removeEventListener("voice-settings-request", open); }, []);
   const [windowError, setWindowError] = useState("");
   const navigationRevision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]);
   const topicsRevision = useResourceVersion([{domain:"discussion"},{domain:"collection"}]);
@@ -115,7 +117,7 @@ export default function App() {
       listen("desktop-settings", () => setSettingsOpen(true)),
       listen("workspace-close-request", () => {
         if (document.querySelector("dialog[open]")) { setWindowError("请先完成或关闭当前对话框，再关闭主窗口。"); return; }
-        void flushDrafts().then(() => call("workspace_close")).catch(e => setWindowError(errorText(e)));
+        void finishVoiceInputs().then(() => flushDrafts()).then(() => call("workspace_close")).catch(e => setWindowError(errorText(e)));
       }),
       listen<MainRoute>("desktop-route", e => {
         void flushDrafts().then(() => refreshDrafts()).then(() => {

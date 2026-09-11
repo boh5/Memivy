@@ -18,6 +18,6 @@ export default function WorkspaceQuery({ bar, form, session }: {
   }, []);
   useEffect(() => { if (!bar.open) setPreview(latestDraft.current); }, [bar.open]);
   return <WorkspaceTopBar {...bar} preview={preview}>
-    <CaptureForm key={session} {...form} onDraftChange={reportDraft} />
+    <CaptureForm key={session} {...form} visible={bar.open} onDraftChange={reportDraft} />
   </WorkspaceTopBar>;
 }

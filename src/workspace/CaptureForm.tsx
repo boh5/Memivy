@@ -4,6 +4,8 @@ import { call, errorText, type Key, type CaptureResult } from "./api";
 import { ErrorNotice } from "./components";
 import { useDraft } from "./useDraft";
 import { isRecallSubmitKey, isSubmitKey } from "./keyboard";
+import { useVoice } from "./useVoice";
+import { VoiceButton, VoiceFeedback } from "./VoiceInput";
 import DraftConflict from "./DraftConflict";
 export default function CaptureForm({
   onSaved,
@@ -11,7 +13,7 @@ export default function CaptureForm({
   mode,
   onMode,
   onEdit,
-  focus, quick = false, sourceApp = "Memivy", onBusy, onReady, presentation = "panel", onDraftChange,
+  focus, quick = false, sourceApp = "Memivy", onBusy, onReady, presentation = "panel", onDraftChange, visible = true,
 }: {
   onSaved: (key: Key) => void;
   onAsk: (question: string, id: string) => Promise<void>;
@@ -25,6 +27,7 @@ export default function CaptureForm({
   onReady?: () => void;
   presentation?: "panel" | "capture" | "query";
   onDraftChange?: (body: string) => void;
+  visible?: boolean;
 }) {
   const draft = useDraft(quick ? (mode === "capture" ? "quick_capture" : "quick_question") : (mode === "capture" ? "capture" : "question"), {
     title: "",
@@ -37,6 +40,9 @@ export default function CaptureForm({
   const input = useRef<HTMLTextAreaElement>(null),
     lock = useRef(false),
     composing = useRef(false);
+  const voice = useVoice(draft.value.key, draft.value.body, body => { draft.update({body}); onEdit(); }, () => draft.flush(), draft.ready,
+    () => [input.current?.selectionStart ?? draft.value.body.length, input.current?.selectionEnd ?? draft.value.body.length]);
+  useEffect(() => { if (!visible && voice.active) void voice.finish().catch(e => setError(errorText(e))); }, [visible, voice.active]);
   useEffect(() => {
     if (draft.ready) onDraftChange?.(draft.value.body);
   }, [draft.ready, draft.value.body, onDraftChange]);
@@ -49,17 +55,20 @@ export default function CaptureForm({
     if (presentation !== "query" && focus && draft.ready && !busy) input.current?.focus();
   }, [busy, presentation, focus, draft.ready]);
   async function save() {
-    if (lock.current || !draft.ready || !draft.value.body.trim()) return;
+    if (lock.current || !draft.ready || voice.busy) return;
     const submittedAt = Date.now();
     lock.current = true;
     setBusy(true);
     onBusy?.(true);
     setError("");
     try {
+      await voice.finish();
       const d = await draft.flush();
+      if (!d.body.trim()) return;
       if (mode === "ask") {
         await onAsk(d.body, d.request_id);
         await draft.clear(d.request_id);
+        await voice.consumed();
         return;
       }
       const raw = await call<CaptureResult>(quick ? "desktop_capture" : "library_capture", {
@@ -71,6 +80,7 @@ export default function CaptureForm({
         },
       });
       await draft.clear(d.request_id);
+      await voice.consumed();
       onSaved({ kind: "memory", id: raw.memory_id });
       input.current?.focus();
     } catch (e) {
@@ -89,7 +99,7 @@ export default function CaptureForm({
             <button
               aria-pressed={mode === "capture"}
               onClick={() => onMode("capture")}
-              disabled={busy}
+              disabled={busy || voice.active}
             >
               <Icon name="plus" size={14} />
               记一下
@@ -97,7 +107,7 @@ export default function CaptureForm({
             <button
               aria-pressed={mode === "ask"}
               onClick={() => onMode("ask")}
-              disabled={busy}
+              disabled={busy || voice.active}
             >
               <Icon name="spark" size={14} />
               问一问
@@ -119,6 +129,7 @@ export default function CaptureForm({
           }
           value={draft.value.body}
           disabled={!draft.ready || busy}
+          readOnly={voice.active}
           onChange={(e) => {
             draft.update({ body: e.target.value });
             onEdit();
@@ -137,20 +148,23 @@ export default function CaptureForm({
             }
           }}
         />
+        <VoiceFeedback voice={voice} />
         {presentation === "query" ? <div className="recall-panel-footer">
           <span>Enter 提问 · Shift+Enter 换行</span>
+          <div className="voice-submit-actions"><VoiceButton voice={voice} disabled={!draft.ready || busy} />
           <button className="recall-submit" aria-label="从记忆中查找并回答" title="查找并回答"
-            disabled={!draft.ready || busy || !draft.value.body.trim()} onClick={() => void save()}>
+            disabled={!draft.ready || busy || voice.busy || (!draft.value.body.trim() && !voice.active)} onClick={() => void save()}>
             <Icon name={busy ? "refresh" : "arrow"} size={16} />
-          </button>
+          </button></div>
         </div> : <div className="composer-bottom">
           <span>
             {mode === "capture" ? "原话先保存在本机" : "讨论不会自动存为记忆"}{" "}
             · ⌘ Enter 提交
           </span>
+          <div className="voice-submit-actions"><VoiceButton voice={voice} disabled={!draft.ready || busy} />
           <button
             className="send-button"
-            disabled={!draft.ready || busy || !draft.value.body.trim()}
+            disabled={!draft.ready || busy || voice.busy || (!draft.value.body.trim() && !voice.active)}
             onClick={() => void save()}
           >
             {busy
@@ -161,7 +175,7 @@ export default function CaptureForm({
                 ? "记下"
                 : "问一问"}
             <Icon name="arrow" size={16} />
-          </button>
+          </button></div>
         </div>}
       </div>
       {quick && mode === "capture" && <div className="quick-source">

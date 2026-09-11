@@ -487,7 +487,7 @@ pub fn show_main(app: &tauri::AppHandle) -> HostResult<()> {
         .and_then(|_| w.as_ref().set_focus())
         .map_err(|_| "无法打开主窗口".into())
 }
-fn parse_shortcut(text: &str) -> HostResult<Shortcut> {
+pub(crate) fn parse_shortcut(text: &str) -> HostResult<Shortcut> {
     if text.len() > 100 {
         return Err("快捷键格式无效".into());
     }
@@ -903,6 +903,30 @@ pub async fn desktop_dismiss(
             );
         }
         Ok(())
+    })
+    .await
+}
+#[tauri::command]
+pub async fn desktop_composer_resize(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    generation: u64,
+    height: f64,
+) -> HostResult<()> {
+    if window.label() != "capture" || !height.is_finite() {
+        return Err("无效的快捷窗口尺寸请求".into());
+    }
+    on_main(&app, move |h| {
+        let desktop = h.state::<Desktop>();
+        let s = desktop.inner.lock().unwrap();
+        if !s.expanded
+            || s.generation != generation
+            || (s.prefs.mode == "ask" && s.prefs.topic_id.is_some())
+        {
+            return Ok(());
+        }
+        drop(s);
+        layout(&h, 500.0, height.clamp(310.0, 620.0), Placement::KeepAnchor)
     })
     .await
 }

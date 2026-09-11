@@ -47,6 +47,9 @@ const api = {
   async call(name,args) {
     calls.push({name,args});
     if (overrides[name]) return overrides[name](args);
+    if(name==='voice_status') return {enabled:false,preload:false,shortcut:'',state:'unloaded',backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:'test',session:null};
+    if(name==='voice_applied') return;
+    if(name==='voice_take_shortcut') return false;
     if(name==='draft_read') return structuredClone(db.get(args.key)||null);
     if(name==='draft_write') { if(Buffer.byteLength(args.draft.title)>200) throw 'invalid title'; db.set(args.draft.key,structuredClone(args.draft)); return; }
     if(name==='draft_clear') { db.delete(args.key); return; }

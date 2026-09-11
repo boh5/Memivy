@@ -33,6 +33,8 @@ On 2026-09-10, after reviewing [`research/retrieval-2026-09-09/three-phase-plan.
 
 2026-09-10 后续用户明确选择 Memivy 自有统一模型缓存：使用 `~/Library/Caches/com.memivy.app/models/`，开发版、安装版和测试资料库共用。模型权重不放应用数据目录或临时资料库，不使用全局 HF 缓存；数据库、设置和向量索引仍归各资料库所有。测试不得删除共用模型来模拟故障，只对小型隔离夹具做破坏性缓存测试。此决定替代三阶段计划中旧的按资料库保存模型路径。
 
+2026-09-11 用户授权本地语音输入实现：Qwen3-ASR-0.6B Q8_0，复用 llama.cpp 的 Metal 音频编码和解码；覆盖主窗口记录/提问及桌面快捷入口，共享草稿和显式提交规则。设置提供启用、下载/续传、加载/释放、启动预加载与语音快捷键。语音验证时曾使用全局 HF 缓存；用户随后确认产品统一缓存，语音与 embedding 都使用系统缓存目录下固定 `com.memivy.app/models`，macOS 为 `~/Library/Caches/`，Windows 为 LocalAppData；通过系统路径 API 解析，不随测试应用 identifier 或资料库改变。录音分段转写，失败保留暂存，停止后完整收尾才允许提交。用户禁止创建研究报告文档，后续直接在聊天里简明汇报。此为实施授权，不代表原生验收。
+
 ## Reference documents
 
 - [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.

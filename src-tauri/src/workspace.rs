@@ -1028,6 +1028,9 @@ fn start_embedding(app: tauri::AppHandle) {
             if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
                 continue;
             }
+            if app.state::<crate::voice::Voice>().0.active() {
+                continue;
+            }
             state.store.embedding_tick().await;
         }
     });
@@ -1075,6 +1078,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 recommendation_lock: tokio::sync::Mutex::new(()),
             });
             crate::desktop::setup(app)?;
+            crate::voice::setup(app.handle())?;
             start_organizer(app.handle().clone());
             start_embedding(app.handle().clone());
             crate::mcp::watch_library(app.handle().clone());
@@ -1091,6 +1095,14 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         })
         .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
+            crate::voice::voice_status,
+            crate::voice::voice_control,
+            crate::voice::voice_start,
+            crate::voice::voice_stop,
+            crate::voice::voice_clear,
+            crate::voice::voice_applied,
+            crate::voice::voice_retry,
+            crate::voice::voice_take_shortcut,
             embedding_status,
             embedding_control,
             crate::cleanup::cleanup_prepare,
@@ -1151,6 +1163,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::desktop::desktop_open,
             crate::desktop::desktop_dismiss,
             crate::desktop::desktop_ready,
+            crate::desktop::desktop_composer_resize,
             crate::desktop::desktop_capture,
             crate::desktop::desktop_expand,
             crate::desktop::desktop_handoff_ready,

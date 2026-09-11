@@ -1,21 +1,24 @@
 //! User-wide Memivy model cache, independent of library and HF environment paths.
 use super::*;
 use std::io::{Read, Seek, SeekFrom};
+// A stable product namespace keeps dev, installed apps and libraries on one cache.
+pub fn model_cache_root() -> Result<PathBuf> {
+    cache_root_at(&dirs::cache_dir().ok_or("无法确定用户模型缓存目录")?)
+}
+fn cache_root_at(base: &Path) -> Result<PathBuf> {
+    if !base.is_absolute() {
+        return Err("用户模型缓存目录必须为绝对路径".into());
+    }
+    Ok(base.join("com.memivy.app/models"))
+}
 #[derive(Clone)]
 pub struct HfModelCache {
     pub root: PathBuf,
 }
 impl HfModelCache {
     pub fn for_user() -> Result<Self> {
-        let home = std::env::var_os("HOME").ok_or("无法确定用户模型缓存目录")?;
-        Self::at_home(Path::new(&home))
-    }
-    fn at_home(home: &Path) -> Result<Self> {
-        if !home.is_absolute() {
-            return Err("用户模型缓存目录必须为绝对路径".into());
-        }
         Ok(Self {
-            root: home.join("Library/Caches/com.memivy.app/models"),
+            root: model_cache_root()?,
         })
     }
     fn repo(&self) -> PathBuf {
@@ -92,7 +95,7 @@ impl HfModelCache {
             .map_err(io)
     }
 }
-fn verify(p: &Path, m: &ModelDescriptor) -> Result<()> {
+pub fn verify(p: &Path, m: &ModelDescriptor) -> Result<()> {
     let mut f = File::open(p).map_err(io)?;
     if f.metadata().map_err(io)?.len() != m.bytes {
         return Err("模型文件长度不符，请继续下载".into());
@@ -111,7 +114,7 @@ fn verify(p: &Path, m: &ModelDescriptor) -> Result<()> {
     }
     Ok(())
 }
-async fn download_file(
+pub async fn download_file(
     url: &str,
     p: &Path,
     m: &ModelDescriptor,
@@ -200,19 +203,20 @@ mod tests {
     #[test]
     fn model_cache_is_user_wide_and_requires_an_absolute_home() {
         let home = tempfile::tempdir().unwrap();
-        let cache = HfModelCache::at_home(home.path()).unwrap();
-        assert_eq!(
-            cache.root,
-            home.path().join("Library/Caches/com.memivy.app/models")
-        );
+        let cache = HfModelCache {
+            root: cache_root_at(home.path()).unwrap(),
+        };
+        assert_eq!(cache.root, home.path().join("com.memivy.app/models"));
         assert!(!cache.root.exists()); // Resolving status must not create directories.
-        assert!(HfModelCache::at_home(Path::new("relative")).is_err());
+        assert!(cache_root_at(Path::new("relative")).is_err());
     }
 
     #[test]
     fn clearing_the_fixed_model_preserves_other_cached_models() {
         let home = tempfile::tempdir().unwrap();
-        let cache = HfModelCache::at_home(home.path()).unwrap();
+        let cache = HfModelCache {
+            root: cache_root_at(home.path()).unwrap(),
+        };
         fs::create_dir_all(cache.blob().parent().unwrap()).unwrap();
         fs::create_dir_all(cache.model_path().parent().unwrap()).unwrap();
         fs::write(cache.blob(), b"synthetic fixed model").unwrap();

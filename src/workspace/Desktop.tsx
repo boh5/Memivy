@@ -6,6 +6,7 @@ import { Icon } from "../ui";
 import { call, errorText, native, type Key, type Topic } from "./api";
 import { ErrorNotice } from "./components";
 import { useDesktop, useWindowLifecycle } from "./desktopApi";
+import { finishVoiceInputs } from "./useVoice";
 import { flushDrafts } from "./useDraft";
 import CaptureForm from "./CaptureForm";
 import Discussion from "./Discussion";
@@ -21,6 +22,7 @@ export default function Desktop() {
   const drag = useRef<{ x: number; y: number; moved: boolean; tail: Promise<unknown> } | null>(null);
   const dragEnd = useRef<Promise<unknown>>(Promise.resolve()), suppressLeafClick = useRef(false);
   const dismissing = useRef(false);
+  const composerContent = useRef<HTMLDivElement>(null);
   const pendingDismiss = useRef<{ reason: string; generation: number } | null>(null);
   current.current = state;
   useWindowLifecycle(setError);
@@ -36,12 +38,30 @@ export default function Desktop() {
     observer.observe(root.current, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
     return () => { observer.disconnect(); void tail.then(() => call("desktop_modal", { open: false })); };
   }, []);
+  useEffect(() => {
+    const content = composerContent.current;
+    if (!native || !state?.expanded || (state.mode === "ask" && state.topic) || !content || typeof ResizeObserver === "undefined") return;
+    let disposed = false, previous = 0, tail = Promise.resolve();
+    const measure = () => {
+      // Measure intrinsic content; the outer panel adds toolbar, padding and borders.
+      const height = Math.max(310, Math.min(620, Math.ceil(content.getBoundingClientRect().height + 92)));
+      if (height === previous) return;
+      previous = height;
+      tail = tail.then(async () => {
+        if (!disposed) await call("desktop_composer_resize", { generation: state.generation, height });
+      }).catch(e => { if (!disposed) setError(errorText(e)); });
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    measure();
+    return () => { disposed = true; observer.disconnect(); };
+  }, [state?.expanded, state?.generation, state?.mode, state?.topic?.id, state?.pinned]);
   const dismiss = useCallback(async (reason: string, generation = current.current?.generation) => {
     const requestedAt = Date.now();
     if (generation === undefined || dismissing.current || document.querySelector("dialog[open]")) return;
     if (busy.current) { pendingDismiss.current = { reason, generation }; return; }
     dismissing.current = true;
-    try { await flushDrafts(); if (native) await call("desktop_dismiss", { generation, reason, requestedAt }); }
+    try { await finishVoiceInputs(); await flushDrafts(); if (native) await call("desktop_dismiss", { generation, reason, requestedAt }); }
     catch (e) { setError(errorText(e)); }
     finally { dismissing.current = false; }
   }, []);
@@ -63,12 +83,12 @@ export default function Desktop() {
   }, [dismiss]);
   async function change(patch: Parameters<typeof desktop.update>[0]) {
     if (busy.current) return;
-    try { await flushDrafts(); await desktop.update(patch); setError(""); }
+    try { await finishVoiceInputs(); await flushDrafts(); await desktop.update(patch); setError(""); }
     catch (e) { setError(errorText(e)); }
   }
   async function expand(record: Key | null = null, settings = false) {
     if (busy.current) return;
-    try { await flushDrafts(); await call("desktop_expand", { record, settings }); }
+    try { await finishVoiceInputs(); await flushDrafts(); await call("desktop_expand", { record, settings }); }
     catch (e) { setError(errorText(e)); }
   }
   async function ask(question: string, id: string) {
@@ -76,6 +96,7 @@ export default function Desktop() {
     const topic = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [] });
     await desktop.update({ topic_id: topic.id });
   }
+  useEffect(() => { const openSettings = () => void expand(null, true); window.addEventListener("voice-settings-request", openSettings); return () => window.removeEventListener("voice-settings-request", openSettings); }, []);
   function reportReady() {
     if (native && current.current?.expanded) void call("desktop_ready", { generation: current.current.generation }).catch(() => {});
   }
@@ -117,6 +138,7 @@ export default function Desktop() {
         <button className="icon-button" aria-label="收起快捷窗口" title="收起 · Esc" onClick={() => void dismiss("explicit")}><Icon name="close" size={16} /></button>
       </header>
       <div className="desktop-content">
+        <div ref={composerContent} className={state.mode === "ask" && state.topic ? "desktop-discussion-content" : "desktop-capture-content"}>
         {state.mode === "ask" && state.topic ? <>
           <div className="desktop-topic-nav"><button onClick={() => void change({ mode: "capture" })}>记一下</button><span>问一问</span><button onClick={() => void change({ clear_topic: true })}>新话题</button></div>
           <Discussion key={state.topic.id} compact topic={state.topic} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => {}} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
@@ -126,6 +148,7 @@ export default function Desktop() {
         {saved && <div className="desktop-saved" role="status"><Icon name="check" size={13} /><span>已存到本机</span><button onClick={() => void expand(saved)}>查看</button></div>}
         {state.mode === "ask" && !state.configured && !state.topic && <button className="connect-model-link" onClick={() => void expand(null, true)}>连接模型后即可提问</button>}
         <ErrorNotice text={error || desktop.error || state.error || ""} />
+        </div>
       </div>
     </section>}
   </div>;
