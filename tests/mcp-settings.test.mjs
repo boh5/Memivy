@@ -29,9 +29,10 @@ test('local diagnostic does not claim an Agent connection and switch changes inv
 });
 
 test('the settings modal cannot close while the MCP section has an unfinished request', async t => {
-  const f=workspaceFixture(t,{native:true});let closed=0;
+  const f=workspaceFixture(t,{native:true,timers:{setTimeout,clearTimeout,setInterval:()=>1,clearInterval:()=>{}}});let closed=0;
   f.overrides.workspace_settings=async()=>({configured:false,base_url:'',model:'',has_key:false,disable_reasoning:false});
   const view=f.mount(f.load('src/workspace/Settings.tsx').default,{onClose(){closed++;},onChanged(){}});await f.settle();
+  f.find(view,n=>n.type==='button'&&f.text(n)==='外部连接').props.onClick();await f.settle();
   const section=f.find(view,n=>n.type?.name==='McpSettings');
   assert.equal(typeof section.props.onBusyChange,'function');
   section.props.onBusyChange(true);await f.settle();

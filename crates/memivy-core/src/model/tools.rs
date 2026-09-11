@@ -264,7 +264,7 @@ fn supported<T>(result: Result<T, ProbeError>) -> Result<bool, ProbeError> {
         Err(e) => Err(e),
     }
 }
-pub async fn probe_and_save(root: &Path, config: &ModelConfig) -> Result<Capabilities, ProbeError> {
+pub async fn probe(config: &ModelConfig) -> Result<Capabilities, ProbeError> {
     let structured_json = supported(super::probe(config.clone(), Duration::from_secs(45)).await)?;
     let lookup = function(
         "probe_lookup",
@@ -334,13 +334,24 @@ pub async fn probe_and_save(root: &Path, config: &ModelConfig) -> Result<Capabil
         single_tool,
         multi_turn,
     };
+    Ok(capabilities)
+}
+pub fn save_capabilities(
+    root: &Path,
+    config: &ModelConfig,
+    capabilities: &Capabilities,
+) -> Result<(), ProbeError> {
     save_private_json(
         &root.join("model-capabilities.json"),
         &Cached {
             fingerprint: fingerprint(config)?,
             capabilities: capabilities.clone(),
         },
-    )?;
+    )
+}
+pub async fn probe_and_save(root: &Path, config: &ModelConfig) -> Result<Capabilities, ProbeError> {
+    let capabilities = probe(config).await?;
+    save_capabilities(root, config, &capabilities)?;
     Ok(capabilities)
 }
 
@@ -421,6 +432,34 @@ mod tests {
             terminals: vec!["finish".into()],
             evidence_rounds: 4,
         }
+    }
+    #[tokio::test]
+    async fn candidate_probe_preserves_active_capabilities_until_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let (candidate, _, server) = fixture(Duration::ZERO);
+        let mut active = candidate.clone();
+        active.model = "active-model".into();
+        save_capabilities(
+            dir.path(),
+            &active,
+            &Capabilities {
+                structured_json: true,
+                single_tool: true,
+                multi_turn: true,
+            },
+        )
+        .unwrap();
+        let before = std::fs::read(dir.path().join("model-capabilities.json")).unwrap();
+        let tested = probe(&candidate).await.unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            before,
+            std::fs::read(dir.path().join("model-capabilities.json")).unwrap()
+        );
+        assert!(cached(dir.path(), &active).unwrap().multi_turn);
+        assert!(cached(dir.path(), &candidate).is_none());
+        save_capabilities(dir.path(), &candidate, &tested).unwrap();
+        assert!(cached(dir.path(), &candidate).is_some());
     }
     #[tokio::test]
     async fn final_time_is_reserved_after_slow_evidence_request() {

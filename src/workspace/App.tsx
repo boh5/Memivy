@@ -39,7 +39,9 @@ export default function App() {
   const [selected, setSelected] = useState<Key | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null), [topics, setTopics] = useState<Topic[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false), [configured, setConfigured] = useState(false);
-  useEffect(() => { const open = () => setSettingsOpen(true); window.addEventListener("voice-settings-request", open); return () => window.removeEventListener("voice-settings-request", open); }, []);
+  const [settingsInitialPage, setSettingsInitialPage] = useState<"ai"|"voice">("ai");
+  useEffect(() => { if (!settingsOpen) setSettingsInitialPage("ai"); }, [settingsOpen]);
+  useEffect(() => { const open = () => {setSettingsInitialPage("voice"); setSettingsOpen(true);}; window.addEventListener("voice-settings-request", open); return () => window.removeEventListener("voice-settings-request", open); }, []);
   const [windowError, setWindowError] = useState("");
   const navigationRevision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]);
   const topicsRevision = useResourceVersion([{domain:"discussion"},{domain:"collection"}]);
@@ -269,7 +271,7 @@ export default function App() {
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor} onClose={() => setCollectionEditor(null)} onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} />}
     {suggestions && <CollectionSuggestions collection={suggestions} onClose={() => setSuggestions(null)} onChanged={refresh} />}
     {archiveConfirm && <Modal title="移除这个专题？" onClose={() => { if (!collectionLock.current) setArchiveConfirm(null); }}><p>“{archiveConfirm.name}”中的记忆和讨论都会保留。专题内的讨论仍限定原专题，不会转为全库问答。</p><ErrorNotice text={windowError} /><div className="action-row"><button className="outline-button" disabled={collectionBusy} onClick={() => setArchiveConfirm(null)}>取消</button><button className="send-button" disabled={collectionBusy} onClick={() => void archiveCollection(archiveConfirm)}>移除专题</button></div></Modal>}
-    {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={refresh}
+    {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
   </div>;
 }

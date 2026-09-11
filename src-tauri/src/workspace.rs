@@ -13,7 +13,7 @@ use tauri::{Emitter, Manager};
 pub(crate) type HostResult<T> = std::result::Result<T, String>;
 pub(crate) struct Workspace {
     pub(crate) store: MemoryStore,
-    config: PathBuf,
+    pub(crate) config: PathBuf,
     config_lock: Mutex<()>,
     pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
     pub(crate) exiting: AtomicBool,
@@ -21,7 +21,7 @@ pub(crate) struct Workspace {
     tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
 }
 pub(crate) fn model_available(state: &Workspace) -> bool {
-    validate_config(&state.config).is_ok() && ModelConfig::read(&state.config).is_ok()
+    validate_config(&state.config).is_ok() && crate::models::read_llm(state).is_ok()
 }
 fn require(window: &tauri::WebviewWindow) -> HostResult<()> {
     if matches!(window.label(), "main" | "capture") {
@@ -93,7 +93,7 @@ async fn discussion_ask(
 ) -> HostResult<Conversation> {
     require(&window)?;
     validate_config(&state.config)?;
-    let config = ModelConfig::read(&state.config)
+    let config = crate::models::read_llm(&state)
         .map_err(|_| "请先连接模型；问题草稿已保留，记录与搜索仍可使用".to_string())?;
     config.endpoint().map_err(|e| e.to_string())?;
     if context.len() > 4 {
@@ -212,7 +212,7 @@ async fn discussion_merge(
 ) -> HostResult<String> {
     require(&window)?;
     validate_config(&state.config)?;
-    let config = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
+    let config = crate::models::read_llm(&state).map_err(|e| e.to_string())?;
     state
         .store
         .preview_conclusion_merge(&config, &destination, &text)
@@ -294,7 +294,7 @@ fn start_organizer(app: tauri::AppHandle) {
             if validate_config(&state.config).is_err() {
                 continue;
             }
-            let Ok(config) = ModelConfig::read(&state.config) else {
+            let Ok(config) = crate::models::read_llm(&state) else {
                 continue;
             };
             let store = state.store.clone();
@@ -464,7 +464,7 @@ async fn organization_collections(
     }
     validate_config(&state.config)?;
     let config =
-        ModelConfig::read(&state.config).map_err(|_| "连接模型后可重试专题推荐".to_string())?;
+        crate::models::read_llm(&state).map_err(|_| "连接模型后可重试专题推荐".to_string())?;
     let _guard = state.recommendation_lock.lock().await;
     state
         .store
@@ -518,7 +518,7 @@ async fn navigation_suggest(
 ) -> HostResult<Vec<LibraryRow>> {
     require_main(&window)?;
     validate_config(&state.config)?;
-    let config = ModelConfig::read(&state.config)
+    let config = crate::models::read_llm(&state)
         .map_err(|_| "连接模型后即可推荐，专题和记忆保持原样".to_string())?;
     state
         .store
@@ -885,8 +885,7 @@ async fn memory_export(
 }
 pub(crate) fn read_model(state: &Workspace) -> HostResult<ModelConfig> {
     validate_config(&state.config)?;
-    ModelConfig::read(&state.config)
-        .map_err(|_| "请先在设置中连接模型；原文和草稿已保留".to_string())
+    crate::models::read_llm(state).map_err(|_| "请先在设置中连接模型；原文和草稿已保留".to_string())
 }
 fn validate_config(path: &std::path::Path) -> HostResult<()> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -910,10 +909,26 @@ fn workspace_settings(
 ) -> HostResult<Settings> {
     require_main(&window)?;
     validate_config(&state.config)?;
-    if !state.config.exists() {
+    if !state.config.exists()
+        && !memivy_core::models::Registry::exists(state.store.database_path().parent().unwrap())
+    {
         return Ok(Settings::default());
     }
-    let c = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
+    let c = match crate::models::read_llm(&state) {
+        Ok(c) => c,
+        Err(_)
+            if memivy_core::models::Registry::read(
+                state.store.database_path().parent().unwrap(),
+            )
+            .is_ok_and(|r| r.llm.is_none())
+                && memivy_core::models::Registry::exists(
+                    state.store.database_path().parent().unwrap(),
+                ) =>
+        {
+            return Ok(Settings::default());
+        }
+        Err(e) => return Err(e),
+    };
     Ok(Settings {
         model_capabilities: state.store.model_capabilities(&c),
         configured: true,
@@ -983,7 +998,7 @@ async fn workspace_test_model(
 ) -> HostResult<memivy_core::model::tools::Capabilities> {
     require_main(&window)?;
     validate_config(&state.config)?;
-    let c = ModelConfig::read(&state.config).map_err(|e| e.to_string())?;
+    let c = crate::models::read_llm(&state).map_err(|e| e.to_string())?;
     state
         .store
         .test_model_capabilities(&c)
@@ -1046,6 +1061,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             }
         }))
         .setup(|app| {
+            app.manage(crate::models::ModelTests::default());
             let store = MemoryStore::open_application(MemoryStore::environment_root()?)?;
             let config = std::env::var_os("MEMIVY_MODEL_CONFIG")
                 .map(PathBuf::from)
@@ -1154,6 +1170,11 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             workspace_configure,
             workspace_test_model,
             workspace_close,
+            crate::models::models_clear,
+            crate::models::models_load,
+            crate::models::models_test,
+            crate::models::models_apply,
+            crate::models::models_organize,
             crate::mcp::mcp_settings,
             crate::mcp::mcp_set_enabled,
             crate::mcp::mcp_diagnose,

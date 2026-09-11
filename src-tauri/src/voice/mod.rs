@@ -1,6 +1,7 @@
 mod audio;
 mod engine;
 use crate::workspace::HostResult;
+use memivy_core::models::{Binding, Registry, Source};
 use memivy_core::{
     embedding::{private_dir, write_json},
     speech::SpeechCache,
@@ -30,6 +31,12 @@ struct Part {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default)]
+    binding: Binding,
+    #[serde(default)]
+    endpoint: String,
+    #[serde(default)]
+    label: String,
     id: String,
     key: String,
     prefix: String,
@@ -64,6 +71,7 @@ impl Session {
 }
 #[derive(Serialize)]
 pub struct SessionView {
+    label: String,
     id: String,
     key: String,
     base: String,
@@ -81,6 +89,7 @@ pub struct SessionView {
 impl From<&Session> for SessionView {
     fn from(s: &Session) -> Self {
         Self {
+            label: s.label.clone(),
             id: s.id.clone(),
             key: s.key.clone(),
             base: s.base.clone(),
@@ -124,6 +133,9 @@ pub struct Service {
 pub struct Voice(pub Arc<Service>);
 #[derive(Serialize)]
 pub struct Status {
+    source: Source,
+    label: String,
+    local_available: bool,
     enabled: bool,
     preload: bool,
     shortcut: String,
@@ -145,22 +157,39 @@ impl Service {
     }
     fn status(&self) -> HostResult<Status> {
         let cache = SpeechCache::for_user()?;
+        let r = Registry::read(self.root.parent().ok_or("语音目录无效")?)?;
+        let remote = r.voice.source == Source::Service;
         let s = self.state.lock().unwrap();
         Ok(Status {
+            source: r.voice.source.clone(),
+            label: if remote {
+                r.connection(&r.voice.connection)?.name.clone()
+            } else {
+                "本机识别".into()
+            },
+            local_available: cache.ready(),
             enabled: s.prefs.enabled,
             preload: s.prefs.preload,
             shortcut: s.prefs.shortcut.clone(),
             state: if self.download.load(Ordering::SeqCst) {
                 "downloading".into()
             } else {
-                s.model.clone()
+                if remote {
+                    if s.error.is_some() {
+                        "failed".into()
+                    } else {
+                        "ready".into()
+                    }
+                } else {
+                    s.model.clone()
+                }
             },
             backend: s.backend.clone(),
             error: s.error.clone(),
             downloaded: cache.downloaded(),
             bytes: 1019141728,
             cache: cache.root.display().to_string(),
-            available: cache.ready(),
+            available: remote || cache.ready(),
             session: s.session.as_ref().map(SessionView::from),
         })
     }
@@ -187,6 +216,7 @@ impl Service {
         write_json(&self.root.join("session.json"), &Some(&session))?;
         *self.stop.lock().unwrap() = Some(stop);
         s.session = Some(session);
+        s.error = None;
         s.load_requested = true;
         Ok(())
     }
@@ -224,6 +254,39 @@ impl Service {
         self.state.lock().unwrap().last_used = Instant::now();
         Ok(())
     }
+    pub(crate) fn uses_connection(&self, id: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .is_some_and(|s| s.binding.source == Source::Service && s.binding.connection == id)
+    }
+    /// A corrected credential may retry the same retained model and endpoint.
+    /// Switching provider/model never retargets audio already recorded.
+    pub(crate) fn repair_retained_credentials(&self, registry: &mut Registry) -> HostResult<()> {
+        if registry.voice.source != Source::Service {
+            return Ok(());
+        }
+        let next = registry.resolve(&registry.voice)?;
+        let s = self.state.lock().unwrap();
+        if let Some(v) = &s.session
+            && v.error.is_some()
+            && !v.recording
+            && !v.starting
+            && !v.processing
+            && v.binding.source == Source::Service
+            && v.endpoint == next.base_url
+            && v.binding.model == next.model
+            && let Some(previous) = registry
+                .connections
+                .iter_mut()
+                .find(|c| c.id == v.binding.connection)
+        {
+            previous.api_key = next.api_key;
+        }
+        Ok(())
+    }
     fn pump(&self) {
         if !self.state.lock().unwrap().prefs.enabled {
             // Recheck under the locks: a new enable/start may arrive between ticks.
@@ -249,13 +312,19 @@ impl Service {
                 }
                 let index = v.parts.iter().position(|p| p.text.is_none())?;
                 v.processing = true;
-                Some((v.id.clone(), index, v.parts[index].file.clone()))
+                Some((
+                    v.id.clone(),
+                    index,
+                    v.parts[index].file.clone(),
+                    v.binding.clone(),
+                    v.endpoint.clone(),
+                ))
             });
             (load, job)
         };
         if load || job.is_some() {
-            let result = self.ensure_engine().and_then(|_| {
-                if let Some((_, _, file)) = &job {
+            let result = (|| {
+                if let Some((_, _, file, binding, endpoint)) = &job {
                     let bytes = fs::read(self.root.join(file)).map_err(|_| "暂存录音不可读取")?;
                     if bytes.len() > 16000 * 20 * 4 || bytes.len() % 4 != 0 {
                         return Err("暂存录音格式无效".into());
@@ -266,6 +335,15 @@ impl Service {
                         .iter()
                         .map(|b| f32::from_le_bytes(*b))
                         .collect();
+                    if binding.source == Source::Service {
+                        let r = Registry::read(self.root.parent().ok_or("语音目录无效")?)?;
+                        let m = r.resolve(binding)?;
+                        if m.base_url != *endpoint {
+                            return Err("录音使用的服务地址已变化，请恢复原连接后重试".into());
+                        }
+                        return memivy_core::models::transcribe(&m, &samples);
+                    }
+                    self.ensure_engine()?;
                     self.engine
                         .lock()
                         .unwrap()
@@ -273,9 +351,16 @@ impl Service {
                         .ok_or("语音模型未加载")?
                         .transcribe(&samples)
                 } else {
+                    if Registry::read(self.root.parent().ok_or("语音目录无效")?)?
+                        .voice
+                        .source
+                        == Source::Local
+                    {
+                        self.ensure_engine()?;
+                    }
                     Ok(String::new())
                 }
-            });
+            })();
             if result.is_err() {
                 self.engine.lock().unwrap().take();
             }
@@ -290,7 +375,7 @@ impl Service {
                 let _ = self.persist(&s);
             }
             s.last_used = Instant::now();
-            if let Some((id, index, _)) = job
+            if let Some((id, index, _, _, _)) = job
                 && let Some(v) = s.session.as_mut().filter(|v| v.id == id)
             {
                 v.processing = false;
@@ -468,14 +553,28 @@ pub fn voice_start(
     {
         return Err("语音输入目标无效".into());
     }
-    if !SpeechCache::for_user()?.ready() {
-        return Err("请先在设置中下载语音模型".into());
-    }
+    let registry = Registry::read(voice.0.root.parent().ok_or("语音目录无效")?)?;
+    let binding = registry.voice.clone();
+    let (endpoint, label) = if binding.source == Source::Service {
+        let m = registry.resolve(&binding)?;
+        (
+            m.base_url,
+            registry.connection(&binding.connection)?.name.clone(),
+        )
+    } else {
+        if !SpeechCache::for_user()?.ready() {
+            return Err("请先在设置中下载语音模型".into());
+        }
+        (String::new(), "本机识别".into())
+    };
     let service = voice.0.clone();
     let id = uuid::Uuid::new_v4().to_string();
     let stop = Arc::new(AtomicBool::new(false));
     service.begin(
         Session {
+            binding,
+            endpoint,
+            label,
             id: id.clone(),
             key,
             base,
@@ -738,6 +837,9 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, Service) {
         let dir = tempfile::tempdir().unwrap();
         let session = Session {
+            binding: Binding::default(),
+            endpoint: String::new(),
+            label: "本机识别".into(),
             id: "fixture".into(),
             key: "capture".into(),
             base: "existing text".into(),
@@ -773,6 +875,45 @@ mod tests {
         (dir, service)
     }
     #[test]
+    fn retained_recording_keeps_original_model_without_copying_credentials() {
+        let (dir, mut service) = fixture();
+        service.root = dir.path().join("voice");
+        fs::create_dir(&service.root).unwrap();
+        let mut registry = Registry::default();
+        registry.connections.push(memivy_core::models::Connection {
+            id: "original".into(),
+            name: "QA".into(),
+            base_url: "http://127.0.0.1:1234/v1".into(),
+            api_key: Some("fixture-private-key".into()),
+        });
+        registry.voice = Binding {
+            source: Source::Service,
+            connection: "original".into(),
+            model: "first-model".into(),
+            ..Binding::default()
+        };
+        registry.save(dir.path(), "initial").unwrap();
+        {
+            let mut state = service.state.lock().unwrap();
+            let session = state.session.as_mut().unwrap();
+            session.binding = registry.voice.clone();
+            session.endpoint = registry.connections[0].base_url.clone();
+            service.persist(&state).unwrap();
+        }
+        let revision = registry.revision.clone();
+        registry.voice.model = "next-recording-model".into();
+        registry.save(dir.path(), &revision).unwrap();
+        let bytes = fs::read(service.root.join("session.json")).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("fixture-private-key"));
+        let retained: Session = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(retained.binding.model, "first-model");
+        assert_eq!(
+            registry.resolve(&retained.binding).unwrap().model,
+            "first-model"
+        );
+        assert!(service.uses_connection("original"));
+    }
+    #[test]
     fn failed_session_writes_leave_recording_and_recovery_state_unchanged() {
         let (dir, service) = fixture();
         let session = service.state.lock().unwrap().session.take().unwrap();
@@ -791,6 +932,74 @@ mod tests {
         service.state.lock().unwrap().session = Some(session);
         assert!(service.clear("fixture").is_err());
         assert!(service.state.lock().unwrap().session.is_some());
+    }
+    #[test]
+    fn corrected_key_repairs_only_the_same_failed_recording_endpoint_and_model() {
+        let (_dir, service) = fixture();
+        let old = memivy_core::models::Connection {
+            id: "old".into(),
+            name: "QA".into(),
+            base_url: "http://127.0.0.1:1234/v1".into(),
+            api_key: Some("old-key".into()),
+        };
+        let mut next = old.clone();
+        next.id = "new".into();
+        next.api_key = Some("fixed-key".into());
+        let binding = Binding {
+            source: Source::Service,
+            connection: "old".into(),
+            model: "qa-asr".into(),
+            ..Binding::default()
+        };
+        {
+            let mut state = service.state.lock().unwrap();
+            let session = state.session.as_mut().unwrap();
+            session.binding = binding.clone();
+            session.endpoint = old.base_url.clone();
+            session.recording = false;
+            session.error = Some("authentication failed".into());
+        }
+        let mut r = Registry {
+            connections: vec![old, next],
+            voice: Binding {
+                connection: "new".into(),
+                ..binding.clone()
+            },
+            ..Registry::default()
+        };
+        r.voice.model = "different".into();
+        service.repair_retained_credentials(&mut r).unwrap();
+        assert_eq!(
+            r.resolve(&binding).unwrap().api_key.as_deref(),
+            Some("old-key")
+        );
+        r.voice.model = binding.model.clone();
+        r.connections[1].base_url = "http://127.0.0.1:9999/v1".into();
+        service.repair_retained_credentials(&mut r).unwrap();
+        assert_eq!(
+            r.resolve(&binding).unwrap().api_key.as_deref(),
+            Some("old-key")
+        );
+        r.connections[1].base_url = r.connections[0].base_url.clone();
+        service.repair_retained_credentials(&mut r).unwrap();
+        assert_eq!(
+            r.resolve(&binding).unwrap().api_key.as_deref(),
+            Some("fixed-key")
+        );
+    }
+    #[test]
+    fn new_recording_clears_stale_error_after_session_is_persisted() {
+        let (_dir, service) = fixture();
+        let session = {
+            let mut state = service.state.lock().unwrap();
+            state.prefs.enabled = true;
+            state.error = Some("old failure".into());
+            state.session.take().unwrap()
+        };
+        service
+            .begin(session, Arc::new(AtomicBool::new(false)))
+            .unwrap();
+        assert!(service.state.lock().unwrap().error.is_none());
     }
     #[test]
     fn recording_and_failed_tail_cannot_be_mistaken_for_complete() {
@@ -887,4 +1096,37 @@ fn read_preferences(root: &std::path::Path) -> HostResult<Preferences> {
     }
     serde_json::from_slice(&fs::read(p).map_err(|_| "语音设置不可读取")?)
         .map_err(|_| "语音设置损坏，文字输入仍可使用".into())
+}
+
+pub(crate) async fn set_enabled(app: &tauri::AppHandle, enabled: bool) -> HostResult<()> {
+    let service = app.state::<Voice>().0.clone();
+    crate::desktop::on_main(app, move |app| {
+        configure(
+            &app,
+            &service,
+            if enabled { "enable" } else { "disable" },
+            None,
+        )
+    })
+    .await
+}
+
+pub(crate) async fn clear_model(app: &tauri::AppHandle) -> HostResult<()> {
+    let service = app.state::<Voice>().0.clone();
+    if service.active() || service.download.load(Ordering::SeqCst) {
+        return Err("请先结束录音、转写或下载".into());
+    }
+    if Registry::read(service.root.parent().ok_or("语音目录无效")?)?
+        .voice
+        .source
+        == Source::Local
+    {
+        set_enabled(app, false).await?;
+    }
+    service.engine.lock().unwrap().take();
+    SpeechCache::for_user()?.clear()?;
+    let mut s = service.state.lock().unwrap();
+    s.model = "unloaded".into();
+    s.backend = None;
+    Ok(())
 }

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { call, errorText, native } from "./api";
 import { voiceBody } from "./voiceSession";
-export type VoiceSession = {id:string;key:string;base:string;body:string;text:string;applied:boolean;recording:boolean;starting:boolean;processing:boolean;complete:boolean;error:string|null;seconds:number;level:number};
-export type VoiceStatus = {enabled:boolean;preload:boolean;shortcut:string;state:string;backend:string|null;error:string|null;downloaded:number;bytes:number;cache:string;available:boolean;session:VoiceSession|null};
+export type VoiceSession = {label?:string;id:string;key:string;base:string;body:string;text:string;applied:boolean;recording:boolean;starting:boolean;processing:boolean;complete:boolean;error:string|null;seconds:number;level:number};
+export type VoiceStatus = {source?:"local"|"service";label?:string;local_available?:boolean;enabled:boolean;preload:boolean;shortcut:string;state:string;backend:string|null;error:string|null;downloaded:number;bytes:number;cache:string;available:boolean;session:VoiceSession|null};
 const finishers = new Set<() => Promise<void>>();
 export async function finishVoiceInputs() { for (const finish of finishers) await finish(); }
 export function useVoice(key:string, body:string, update:(body:string)=>void, flush:()=>Promise<unknown>, ready:boolean, selection:()=>[number,number]) {
@@ -97,7 +97,7 @@ export function useVoice(key:string, body:string, update:(body:string)=>void, fl
     if(!native)throw new Error("请在 Memivy 桌面应用中使用麦克风。");
     const s=await refresh(),v=s.session;
     if(v?.key===key&&(v.recording||v.starting||v.processing)){await finish();return;}
-    if(!s.enabled||!s.available){window.dispatchEvent(new Event("voice-settings-request"));throw new Error("在设置中启用并下载语音模型后，即可开始。");}
+    if(!s.enabled||!s.available){window.dispatchEvent(new Event("voice-settings-request"));throw new Error("请先在设置中启用语音输入，并下载本地模型或连接模型服务。");}
     if(v){
       if(v.key!==key&&!(v.complete&&v.applied))throw new Error("另一个输入框有录音草稿，请先在那里完成。");
       if(!v.complete)throw new Error(v.error||"请先完成上一段转写");

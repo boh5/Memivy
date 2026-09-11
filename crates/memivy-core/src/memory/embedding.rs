@@ -1,6 +1,7 @@
 //! Version-derived index lifecycle. The app owns one writer; all readers share it.
 use super::{db::*, *};
 use crate::embedding::{self as emb, Preferences, cache::HfModelCache, chunk, client};
+use crate::models::{Registry, Source};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
 use std::time::Duration;
@@ -35,6 +36,9 @@ impl MemoryStore {
     pub fn embedding_status(&self) -> Result<EmbeddingStatus> {
         let prefs = Preferences::read(&self.root).map_err(model_error)?;
         let cache = HfModelCache::for_user().map_err(model_error)?;
+        let registry = Registry::read(&self.root).map_err(model_error)?;
+        let remote = registry.embedding.source == Source::Service;
+        let fingerprint = registry.fingerprint().map_err(model_error)?;
         let db = self.connection()?;
         let index = meta(&db)?;
         let total: i64 = db.query_row(
@@ -50,21 +54,21 @@ impl MemoryStore {
         } else if prefs.error.is_some() {
             "failed"
         } else if !prefs.wanted() {
-            if cache.published() {
+            if remote || cache.published() {
                 "disabled"
             } else {
                 "not_downloaded"
             }
-        } else if !cache.published() {
+        } else if !remote && !cache.published() {
             "downloading"
         } else if prefs.enabled
             && !prefs.preparing
             && index
                 .as_ref()
-                .is_some_and(|i| i.state == "ready" && i.fingerprint == emb::fingerprint())
+                .is_some_and(|i| i.state == "ready" && i.fingerprint == fingerprint)
         {
             "ready"
-        } else if !client::ready(&self.root) {
+        } else if !remote && !client::ready(&self.root) {
             "warming"
         } else {
             "indexing"
@@ -81,6 +85,32 @@ impl MemoryStore {
             failed,
             error: prefs.error,
         })
+    }
+    /// Publish a tested binding together with its activation state. Readers never
+    /// observe the candidate while activation can still fail.
+    pub fn apply_embedding_model(
+        &self,
+        registry: &mut Registry,
+        revision: &str,
+    ) -> std::result::Result<(), String> {
+        let _control = emb::lock(&self.root, "embedding-control.lock")?;
+        let mut prefs = Preferences::read(&self.root)?;
+        if prefs.clear_requested {
+            return Err("正在清理本地模型，请稍后重试".into());
+        }
+        let mut previous = Registry::read(&self.root)?;
+        registry.save(&self.root, revision)?;
+        prefs.preparing = true;
+        prefs.paused = false;
+        prefs.error = None;
+        if let Err(error) = prefs.save(&self.root) {
+            return Err(if previous.save(&self.root, &registry.revision).is_ok() {
+                error
+            } else {
+                format!("{error}；配置恢复未完成，请重新读取设置后检查")
+            });
+        }
+        Ok(())
     }
     pub fn embedding_control(&self, action: &str) -> Result<()> {
         let _lock = emb::lock(&self.root, "embedding-control.lock").map_err(model_error)?;
@@ -105,7 +135,14 @@ impl MemoryStore {
             }
             "retry" => {
                 let cache = HfModelCache::for_user().map_err(model_error)?;
-                if cache.published() && cache.verify().is_err() {
+                if Registry::read(&self.root)
+                    .map_err(model_error)?
+                    .embedding
+                    .source
+                    == Source::Local
+                    && cache.published()
+                    && cache.verify().is_err()
+                {
                     cache.clear().map_err(model_error)?;
                 }
                 prefs.preparing = true;
@@ -141,7 +178,13 @@ impl MemoryStore {
     pub(super) fn reset_embedding_index(&self) -> Result<()> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reset(&tx)?;
+        reset_with(
+            &tx,
+            &Registry::read(&self.root)
+                .map_err(model_error)?
+                .fingerprint()
+                .map_err(model_error)?,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -150,9 +193,16 @@ impl MemoryStore {
         let Ok(_writer) = emb::lock(&self.root, "embedding-writer.lock") else {
             return;
         };
+        let Ok(control) = emb::lock(&self.root, "embedding-control.lock") else {
+            return;
+        };
         let Ok(prefs) = Preferences::read(&self.root) else {
             return;
         };
+        let Ok(registry) = Registry::read(&self.root) else {
+            return;
+        };
+        drop(control);
         if prefs.clear_requested {
             match HfModelCache::for_user()
                 .and_then(|cache| cache.clear())
@@ -180,13 +230,14 @@ impl MemoryStore {
         if !prefs.wanted() || prefs.error.is_some() {
             return;
         }
+        let Ok(fingerprint) = registry.fingerprint() else {
+            return;
+        };
         // A ready, unchanged index must not wake an idle model every heartbeat.
         if prefs.enabled && !prefs.preparing {
             let unchanged = (|| -> Result<bool> {
                 let db = self.connection()?;
-                if meta(&db)?
-                    .is_none_or(|m| m.state != "ready" || m.fingerprint != emb::fingerprint())
-                {
+                if meta(&db)?.is_none_or(|m| m.state != "ready" || m.fingerprint != fingerprint) {
                     return Ok(false);
                 }
                 Ok(!db.query_row("SELECT EXISTS(SELECT 1 FROM memories m LEFT JOIN embedding_records e ON e.memory_id=m.id WHERE m.state='active' AND (e.version_id IS NULL OR e.version_id!=m.current_version_id))",[],|r|r.get::<_,bool>(0))?)
@@ -195,47 +246,68 @@ impl MemoryStore {
                 return;
             }
         }
-        let cache = match HfModelCache::for_user() {
-            Ok(cache) => cache,
-            Err(error) => {
-                self.embedding_failure(error);
+        if registry.embedding.source == Source::Local {
+            let cache = match HfModelCache::for_user() {
+                Ok(cache) => cache,
+                Err(error) => {
+                    self.embedding_failure_for(&fingerprint, error);
+                    return;
+                }
+            };
+            if !cache.published()
+                && let Err(e) = cache
+                    .download(|| {
+                        Preferences::read(&self.root).is_ok_and(|p| p.wanted())
+                            && self.embedding_matches(&fingerprint)
+                    })
+                    .await
+            {
+                self.embedding_failure_for(&fingerprint, e);
                 return;
             }
-        };
-        if !cache.published()
-            && let Err(e) = cache
-                .download(|| Preferences::read(&self.root).is_ok_and(|p| p.wanted()))
-                .await
-        {
-            self.embedding_failure(e);
-            return;
-        }
-        if !client::ready(&self.root) {
-            if let Err(e) = client::warmup(&self.root) {
-                self.embedding_failure(e);
-                return;
-            }
-            let began = std::time::Instant::now();
-            while !client::ready(&self.root) {
-                if let Some(error) = client::startup_error(&self.root) {
-                    self.embedding_failure(error);
+            if !client::ready(&self.root) {
+                if let Err(e) = client::warmup(&self.root) {
+                    self.embedding_failure_for(&fingerprint, e);
                     return;
                 }
-                if !Preferences::read(&self.root).is_ok_and(|p| p.wanted()) {
-                    return;
+                let began = std::time::Instant::now();
+                while !client::ready(&self.root) {
+                    if let Some(error) = client::startup_error(&self.root) {
+                        self.embedding_failure_for(&fingerprint, error);
+                        return;
+                    }
+                    if !Preferences::read(&self.root).is_ok_and(|p| p.wanted())
+                        || !self.embedding_matches(&fingerprint)
+                    {
+                        return;
+                    }
+                    if began.elapsed() > Duration::from_secs(60) {
+                        self.embedding_failure_for(
+                            &fingerprint,
+                            "模型加载失败或超过 60 秒，请重试".into(),
+                        );
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                if began.elapsed() > Duration::from_secs(60) {
-                    self.embedding_failure("模型加载失败或超过 60 秒，请重试".into());
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
         let store = self.clone();
         match tokio::task::spawn_blocking(move || store.embedding_step()).await {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => self.embedding_failure(e.to_string()),
-            Err(_) => self.embedding_failure("索引任务未完成，可重试".into()),
+            Ok(Err(DataError::Busy)) => {}
+            Ok(Err(e)) => self.embedding_failure_for(&fingerprint, e.to_string()),
+            Err(_) => self.embedding_failure_for(&fingerprint, "索引任务未完成，可重试".into()),
+        }
+    }
+    fn embedding_matches(&self, fingerprint: &str) -> bool {
+        Registry::read(&self.root)
+            .and_then(|r| r.fingerprint())
+            .is_ok_and(|f| f == fingerprint)
+    }
+    fn embedding_failure_for(&self, fingerprint: &str, error: String) {
+        if self.embedding_matches(fingerprint) {
+            self.embedding_failure(error);
         }
     }
     fn embedding_failure(&self, error: String) {
@@ -250,13 +322,37 @@ impl MemoryStore {
         }
     }
     fn embedding_step(&self) -> Result<()> {
-        self.embedding_step_with(|text| {
-            client::encode(&self.root, "document", text, Duration::from_secs(30))
-                .and_then(|v| emb::vector_bytes(&v))
+        let control =
+            emb::lock(&self.root, "embedding-control.lock").map_err(|_| DataError::Busy)?;
+        let r = Registry::read(&self.root).map_err(model_error)?;
+        drop(control);
+        let fp = r.fingerprint().map_err(model_error)?;
+        let remote = if r.embedding.source == Source::Service {
+            Some(r.resolve(&r.embedding).map_err(model_error)?)
+        } else {
+            None
+        };
+        self.embedding_step_for(&fp, |text| {
+            if let Some(m) = &remote {
+                crate::models::embed(m, text, r.embedding.dimensions, Duration::from_secs(30))
+                    .map(|v| crate::models::bytes(&v))
+            } else {
+                client::encode(&self.root, "document", text, Duration::from_secs(30))
+                    .and_then(|v| emb::vector_bytes(&v))
+            }
         })
     }
-    fn embedding_step_with(
+    #[cfg(test)]
+    fn embedding_step_with(&self, encode: impl FnMut(&str) -> emb::Result<Vec<u8>>) -> Result<()> {
+        let fp = Registry::read(&self.root)
+            .map_err(model_error)?
+            .fingerprint()
+            .map_err(model_error)?;
+        self.embedding_step_for(&fp, encode)
+    }
+    fn embedding_step_for(
         &self,
+        fingerprint: &str,
         mut encode: impl FnMut(&str) -> emb::Result<Vec<u8>>,
     ) -> Result<()> {
         // Restore cannot replace the database beneath this unit. No SQLite
@@ -267,9 +363,17 @@ impl MemoryStore {
             return Ok(());
         }
         let mut db = self.connection()?;
-        if meta(&db)?.is_none_or(|i| i.fingerprint != emb::fingerprint()) {
+        if Registry::read(&self.root)
+            .map_err(model_error)?
+            .fingerprint()
+            .map_err(model_error)?
+            != fingerprint
+        {
+            return Ok(());
+        }
+        if meta(&db)?.is_none_or(|i| i.fingerprint != fingerprint) {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            reset(&tx)?;
+            reset_with(&tx, fingerprint)?;
             tx.commit()?;
         }
         let index = meta(&db)?.ok_or(DataError::Integrity)?;
@@ -293,13 +397,16 @@ impl MemoryStore {
             }
             tx.commit()?;
             if failed && index.state == "building" {
-                self.embedding_failure("部分记忆编码失败，请重试；字面检索仍然可用".into());
+                self.embedding_failure_for(
+                    fingerprint,
+                    "部分记忆编码失败，请重试；字面检索仍然可用".into(),
+                );
             }
             if !failed {
                 let _control =
                     emb::lock(&self.root, "embedding-control.lock").map_err(model_error)?;
                 let mut p = Preferences::read(&self.root).map_err(model_error)?;
-                if p.wanted() {
+                if p.wanted() && self.embedding_matches(fingerprint) {
                     p.enabled = true;
                     p.preparing = false;
                     p.save(&self.root).map_err(model_error)?;
@@ -324,7 +431,13 @@ impl MemoryStore {
         let mut vectors = Vec::with_capacity(chunks.len());
         let mut error = None;
         for c in &chunks {
-            if !Preferences::read(&self.root).map_err(model_error)?.wanted() {
+            if !Preferences::read(&self.root).map_err(model_error)?.wanted()
+                || Registry::read(&self.root)
+                    .map_err(model_error)?
+                    .fingerprint()
+                    .map_err(model_error)?
+                    != fingerprint
+            {
                 return Ok(());
             }
             let reused:Option<Vec<u8>>=db.query_row("SELECT vector FROM embedding_chunks WHERE memory_id=?1 AND input_hash=?2 LIMIT 1",params![memory,c.hash],|r|r.get(0)).optional()?;
@@ -341,7 +454,13 @@ impl MemoryStore {
             }
         }
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if meta(&tx)?.is_none_or(|m| m.revision != index.revision) {
+        if meta(&tx)?.is_none_or(|m| m.revision != index.revision)
+            || Registry::read(&self.root)
+                .map_err(model_error)?
+                .fingerprint()
+                .map_err(model_error)?
+                != fingerprint
+        {
             return Ok(());
         }
         if !Preferences::read(&self.root).map_err(model_error)?.wanted() {
@@ -388,6 +507,7 @@ impl MemoryStore {
         &self,
         request: &SearchRequest,
     ) -> std::result::Result<Option<(String, Vec<u8>)>, String> {
+        let control = emb::lock(&self.root, "embedding-control.lock")?;
         let prefs = Preferences::read(&self.root)?;
         if !prefs.enabled || prefs.paused {
             return Ok(None);
@@ -395,7 +515,11 @@ impl MemoryStore {
         if let Some(error) = prefs.error {
             return Err(error);
         }
-        if !HfModelCache::for_user()?.published() {
+        let registry = Registry::read(&self.root)?;
+        drop(control);
+        let remote = registry.embedding.source == Source::Service;
+        let fingerprint = registry.fingerprint()?;
+        if !remote && !HfModelCache::for_user()?.published() {
             return Err("本地模型文件缺失，请在设置中重试".into());
         }
 
@@ -403,7 +527,7 @@ impl MemoryStore {
         let Some(index) = meta(&db).map_err(|e| e.to_string())? else {
             return Err("向量索引尚未建立".into());
         };
-        if index.state != "ready" || index.fingerprint != emb::fingerprint() {
+        if index.state != "ready" || index.fingerprint != fingerprint {
             return Err("向量索引正在重建".into());
         }
         let text = if let Some(m) = &request.reference_memory_id {
@@ -416,21 +540,36 @@ impl MemoryStore {
         } else {
             request.query.clone()
         };
-        let vector = client::encode(
-            &self.root,
-            "query",
-            &chunk::query(&text)?,
-            Duration::from_secs(2),
-        )?;
-        if !Preferences::read(&self.root)?.enabled {
-            return Err("语义检索已关闭".into());
+        let vector = if remote {
+            let input = format!("{}{}", registry.embedding.query_prefix, text);
+            crate::models::bytes(&crate::models::embed(
+                &registry.resolve(&registry.embedding)?,
+                &input,
+                registry.embedding.dimensions,
+                Duration::from_secs(3),
+            )?)
+        } else {
+            emb::vector_bytes(&client::encode(
+                &self.root,
+                "query",
+                &chunk::query(&text)?,
+                Duration::from_secs(2),
+            )?)?
+        };
+        if !Preferences::read(&self.root)?.enabled
+            || Registry::read(&self.root)?.fingerprint()? != fingerprint
+        {
+            return Err("语义检索配置已变化，本次使用基础搜索".into());
         }
-        Ok(Some((index.revision, emb::vector_bytes(&vector)?)))
+        Ok(Some((index.revision, vector)))
     }
 }
 pub(super) fn reset(db: &rusqlite::Connection) -> Result<()> {
+    reset_with(db, &emb::fingerprint())
+}
+fn reset_with(db: &rusqlite::Connection, fingerprint: &str) -> Result<()> {
     db.execute_batch("DELETE FROM embedding_chunks; DELETE FROM embedding_records;")?;
-    db.execute("INSERT INTO embedding_index_meta VALUES(1,?1,?2,'building',(SELECT COALESCE(max(rowid),0) FROM memories),0) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,revision=excluded.revision,state='building',upper_rowid=excluded.upper_rowid,cursor=0",params![emb::fingerprint(),id()])?;
+    db.execute("INSERT INTO embedding_index_meta VALUES(1,?1,?2,'building',(SELECT COALESCE(max(rowid),0) FROM memories),0) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,revision=excluded.revision,state='building',upper_rowid=excluded.upper_rowid,cursor=0",params![fingerprint,id()])?;
     Ok(())
 }
 
@@ -464,6 +603,63 @@ mod tests {
         let mut v = vec![0.0; emb::DIMENSIONS];
         v[0] = 1.0;
         emb::vector_bytes(&v).unwrap()
+    }
+    #[test]
+    fn model_switch_rejects_inflight_vectors_and_supports_new_dimensions() {
+        use crate::models::{Binding, Connection, Registry, Source};
+        let (d, s) = setup();
+        capture(&s, "保留原文，切换模型测试");
+        s.embedding_step_with(|_| Ok(vector())).unwrap();
+        let mut r = Registry::default();
+        r.connections.push(Connection {
+            id: "api".into(),
+            name: "Test".into(),
+            base_url: "http://localhost:9/v1".into(),
+            api_key: None,
+        });
+        r.embedding = Binding {
+            source: Source::Service,
+            connection: "api".into(),
+            model: "three".into(),
+            dimensions: Some(3),
+            ..Binding::default()
+        };
+        r.save(d.path(), "initial").unwrap();
+        s.embedding_step_with(|_| Ok(crate::models::bytes(&[1., 0., 0.])))
+            .unwrap();
+        let db = s.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT length(vector) FROM embedding_chunks", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            12
+        );
+        let rev = r.revision.clone();
+        r.embedding.model = "four".into();
+        r.embedding.dimensions = Some(4);
+        r.save(d.path(), &rev).unwrap();
+        s.embedding_step_with(|_| {
+            let rev = r.revision.clone();
+            r.embedding.model = "five".into();
+            r.embedding.dimensions = Some(5);
+            r.save(d.path(), &rev).unwrap();
+            Ok(crate::models::bytes(&[1., 0., 0., 0.]))
+        })
+        .unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM embedding_chunks", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        s.embedding_step_with(|_| Ok(crate::models::bytes(&[1., 0., 0., 0., 0.])))
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT length(vector) FROM embedding_chunks", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            20
+        );
     }
     #[tokio::test]
     async fn ready_index_stays_idle_without_a_worker_or_download() {

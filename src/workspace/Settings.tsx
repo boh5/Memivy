@@ -1,283 +1,41 @@
-import { useEffect, useState } from "react";
-import { call, errorText, type Settings } from "./api";
-import { ErrorNotice, Modal } from "./components";
+import {useEffect,useRef,useState} from "react";
+import {call,errorText,native} from "./api";
+import {Icon} from "../ui";
+import {Modal,ErrorNotice} from "./components";
 import DesktopSettings from "./DesktopSettings";
 import BackupSettings from "./BackupSettings";
-import VoiceSettings from "./VoiceSettings";
-import EmbeddingSettings from "./EmbeddingSettings";
 import McpSettings from "./McpSettings";
-export default function SettingsPanel({
-  onClose,
-  onRestore,
-  onChanged,
-}: {
-  onClose: () => void;
-  onRestore: (id: string) => void;
-  onChanged: () => void;
-}) {
-  const [settings, setSettings] = useState<Settings>({
-    configured: false,
-    base_url: "",
-    model: "",
-    has_key: false,
-    disable_reasoning: false,
-    max_output_tokens: null,
-    output_token_parameter: "max_tokens",
-  });
-  const [key, setKey] = useState(""),
-    [clearKey, setClearKey] = useState(false),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(false),
-    [mcpBusy, setMcpBusy] = useState(false),
-    [backupBusy, setBackupBusy] = useState(false),
-    [rebuild, setRebuild] = useState(false),
-    [ready, setReady] = useState(false),
-    [unreadable, setUnreadable] = useState(false);
-  useEffect(() => {
-    void call<Settings>("workspace_settings")
-      .then((s) => {
-        setSettings(s);
-        setReady(true);
-      })
-      .catch((e) => {
-        setError(errorText(e));
-        setUnreadable(true);
-        setReady(true);
-      });
-  }, []);
-  async function run(work: () => Promise<string>) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      setNotice(await work());
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function save() {
-    await call("workspace_configure", {
-      baseUrl: settings.base_url.trim(),
-      model: settings.model.trim(),
-      apiKey: clearKey ? "" : key || null,
-      disableReasoning: settings.disable_reasoning,
-      maxOutputTokens: settings.max_output_tokens,
-      outputTokenParameter: settings.output_token_parameter,
-      replaceUnreadable: unreadable,
-    });
-    setKey("");
-    setClearKey(false);
-    setUnreadable(false);
-    setSettings(await call<Settings>("workspace_settings"));
-    onChanged();
-  }
-  return (
-    <Modal
-      title="设置"
-      onClose={() => {
-        if (!busy && !mcpBusy && !backupBusy) onClose();
-      }}
-    >
-      <DesktopSettings />
-      <VoiceSettings />
-      <EmbeddingSettings />
-      <BackupSettings disabled={busy || mcpBusy} onBusyChange={setBackupBusy} onRestore={onRestore} />
-      <section className="settings-section">
-        <h3>本地数据</h3>
-        <p>记忆和草稿保存在这台 Mac。记录、编辑、搜索和导出都不依赖模型。</p>
-        <div className="setting-line">
-          <div>
-            <strong>修复搜索索引</strong>
-            <p>从本地记录重建索引，记忆正文保持原样。</p>
-          </div>
-          <button
-            className="outline-button"
-            disabled={busy || backupBusy}
-            onClick={() => setRebuild(true)}
-          >
-            重建索引
-          </button>
-        </div>
-      </section>
-      <section className="settings-section">
-        <h3>自己的模型</h3>
-        <p>
-          连接后即可问一问、接着讨论。提问会发送问题、必要的近期对话和相关记忆节选到这个模型。
-        </p>
-        {unreadable && (
-          <p className="workspace-warning">
-            现有模型配置无法读取。重新填写并保存会替换这份配置；本地记录仍可使用。
-          </p>
-        )}
-        <label>
-          API 地址
-          <input
-            type="url"
-            autoComplete="off"
-            aria-label="API 地址"
-            placeholder="https://example.com/v1"
-            value={settings.base_url}
-            disabled={busy || backupBusy || !ready}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, base_url: e.target.value }))
-            }
-          />
-        </label>
-        <label>
-          模型名称
-          <input
-            aria-label="模型名称"
-            autoComplete="off"
-            value={settings.model}
-            disabled={busy || backupBusy || !ready}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, model: e.target.value }))
-            }
-          />
-        </label>
-        <label>
-          API Key
-          <input
-            type="password"
-            autoComplete="new-password"
-            aria-label="API Key"
-            placeholder={
-              settings.has_key ? "已保存，留空保留" : "本地模型可以留空"
-            }
-            value={key}
-            disabled={busy || !ready || clearKey}
-            onChange={(e) => setKey(e.target.value)}
-          />
-        </label>
-        {settings.has_key && (
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={clearKey}
-              disabled={busy || backupBusy}
-              onChange={(e) => setClearKey(e.target.checked)}
-            />
-            清除已保存的 Key
-          </label>
-        )}
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={settings.disable_reasoning}
-            disabled={busy || backupBusy || !ready}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                disable_reasoning: e.target.checked,
-              }))
-            }
-          />
-          快速响应（关闭模型推理，端点需支持）
-        </label>
-        <details className="model-output-settings">
-          <summary>高级：模型输出上限</summary>
-          <p className="field-help">默认使用服务商的输出上限。若长文整理被截断，按模型支持的范围填写。部分推理模型的额度包含推理用量。</p>
-          <label>输出 token 上限<input type="number" min={1} max={1048576} step={1} placeholder="使用服务商默认值" aria-label="模型输出 token 上限" value={settings.max_output_tokens ?? ""} disabled={busy || backupBusy || !ready}
-            onChange={e => setSettings(s => ({ ...s, max_output_tokens: e.target.value === "" ? null : Number(e.target.value) }))} /></label>
-          <label>服务商支持的参数<select aria-label="模型输出上限参数" value={settings.output_token_parameter} disabled={busy || backupBusy || !ready} onChange={e => setSettings(s => ({ ...s, output_token_parameter: e.target.value as Settings["output_token_parameter"] }))}>
-            <option value="max_tokens">max_tokens（兼容端点）</option><option value="max_completion_tokens">max_completion_tokens（含推理额度）</option>
-          </select></label>
-        </details>
-        <p className="field-help">
-          Key 单独保存在本机配置文件中。更换 API 地址时需要重新填写
-          Key。连接测试只发送合成测试内容，不读取记忆。
-        </p>
-        <div className="action-row">
-          <button
-            className="send-button"
-            disabled={
-              busy || backupBusy ||
-              !ready ||
-              !settings.base_url.trim() ||
-              !settings.model.trim()
-            }
-            onClick={() =>
-              void run(async () => {
-                await save();
-                return "模型配置已保存在本机";
-              })
-            }
-          >
-            保存配置
-          </button>
-          <button
-            className="outline-button"
-            disabled={
-              busy || backupBusy ||
-              !ready ||
-              !settings.base_url.trim() ||
-              !settings.model.trim()
-            }
-            onClick={() =>
-              void run(async () => {
-                await save();
-                const capabilities=await call<NonNullable<Settings["model_capabilities"]>>("workspace_test_model");
-                const current=await call<Settings>("workspace_settings");
-                setSettings(current);
-                if(!current.model_capabilities) return "配置已变化，请对当前配置重新测试连接。";
-                if(!capabilities?.single_tool) return "连接测试完成：不支持工具调用，自动整理已暂停；已保存记忆仍可使用。";
-                if(!capabilities.multi_turn) return "连接测试完成：支持单次工具，问答和整理使用基本流程。";
-                return capabilities.structured_json?"连接测试通过：支持多轮检索与阅读，已启用增强问答和整理。":"支持多轮检索与阅读；结构化 JSON 未通过，正文整理等固定生成能力可能不可用。";
-              })
-            }
-          >
-            {busy ? "处理中…" : "保存并测试连接"}
-          </button>
-        </div>
-        {settings.configured&&<p className="field-help">{settings.model_capabilities?.multi_turn?"问答和录入整理可按需补查、补读当前记忆。":settings.model_capabilities?.single_tool===false?"当前模型不支持工具调用，自动整理暂停。":settings.model_capabilities?"当前使用基本问答和单次整理流程。":"尚未验证工具能力，暂用基本流程；测试连接后可启用多轮检索。"}</p>}
-      </section>
-      <McpSettings onBusyChange={setMcpBusy} />
-      <ErrorNotice text={error} />
-      {notice && (
-        <p className="settings-result" role="status">
-          {notice}
-        </p>
-      )}
-      {rebuild && (
-        <Modal
-          title="重建搜索索引？"
-          onClose={() => {
-            if (!busy) setRebuild(false);
-          }}
-        >
-          <p>
-            索引会从原话和版本重新生成。完成之前请稍候，原始内容不会被修改。
-          </p>
-          <div className="action-row">
-            <button
-              className="outline-button"
-              disabled={busy || backupBusy}
-              onClick={() => setRebuild(false)}
-            >
-              取消
-            </button>
-            <button
-              className="send-button"
-              disabled={busy || backupBusy}
-              onClick={() =>
-                void run(async () => {
-                  await call("library_rebuild");
-                  setRebuild(false);
-                  onChanged();
-                  return "搜索索引已重建";
-                })
-              }
-            >
-              {busy ? "重建中…" : "开始重建"}
-            </button>
-          </div>
-          <ErrorNotice text={error} />
-        </Modal>
-      )}
-    </Modal>
-  );
+import VoiceSettings from "./VoiceSettings";
+import ModelCapability from "./ModelCapability";
+import ModelStorage from "./ModelStorage";
+import {emptyBinding,indexLabel,modelNames,modelHints,type Models,type Binding,type Kind,type ConnectionDraft,type EmbeddingStatus} from "./modelTypes";
+import type {VoiceStatus} from "./useVoice";
+import "./settings.css";
+import logo from "../../design-demo/brand/memivy-icon.svg";
+type Page='ai'|'desktop'|'data'|'mcp'|Kind;
+const tabs=[['ai','spark','AI 与模型'],['desktop','desktop','快捷入口'],['data','database','数据与存储'],['mcp','link','外部连接']] as const;
+export default function SettingsPanel({onClose,onRestore,onChanged,initialPage="ai"}:{initialPage?:Page;onClose:()=>void;onRestore:(id:string)=>void;onChanged:()=>void}){
+ const [page,setPage]=useState<Page>(initialPage),[models,setModels]=useState<Models|null>(null),[embedding,setEmbedding]=useState<EmbeddingStatus|null>(null),[voice,setVoice]=useState<VoiceStatus|null>(null),[drafts,setDrafts]=useState<Partial<Record<Kind,Binding>>>({}),[error,setError]=useState(''),[busy,setBusy]=useState(false),[backupBusy,setBackupBusy]=useState(false),[mcpBusy,setMcpBusy]=useState(false),[repair,setRepair]=useState(false),[notice,setNotice]=useState('');
+ const [connectionDrafts,setConnectionDrafts]=useState<Partial<Record<Kind,ConnectionDraft|null>>>({});
+ const live=useRef(true),poll=useRef(0);const locked=busy||backupBusy||mcpBusy;
+ useEffect(()=>{live.current=true;void call<Models>('models_load').then(m=>{if(live.current){setModels(m);if(initialPage in modelNames){const k=initialPage as Kind;setDrafts({[k]:m[k]??{...emptyBinding(),source:'service',connection:''}})}}}).catch(e=>{if(live.current)setError(errorText(e))});return()=>{live.current=false;poll.current++}},[]);
+ async function refresh(){const n=++poll.current;const results=await Promise.allSettled([call<EmbeddingStatus>('embedding_status'),call<VoiceStatus>('voice_status')]);if(!live.current||n!==poll.current)return;const [e,v]=results;if(e.status==='fulfilled')setEmbedding(e.value);if(v.status==='fulfilled')setVoice(v.value);if(e.status==='rejected'||v.status==='rejected')setError('部分模型状态读取失败，记录与基础搜索仍可使用。');}
+ useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(""),3000);return()=>clearTimeout(timer)},[notice]);
+ useEffect(()=>{void refresh();const t=setInterval(()=>void refresh(),1500);return()=>clearInterval(t)},[]);
+ function navigate(next:Page){if(locked)return;setPage(next);setError('');setNotice('');if(models&&next in modelNames){const k=next as Kind;setDrafts(old=>({...old,[k]:old[k]??models[k]??{...emptyBinding(),source:'service',connection:''}}));}}
+ function saved(m:Models){setModels(m);setNotice('设置已保存在本机');onChanged();}
+ const active=page in modelNames?'ai':page;
+ const title=page in modelNames?modelNames[page as Kind]:tabs.find(t=>t[0]===page)?.[2]??'设置';
+ const sub=page in modelNames?modelHints[page as Kind]:page==='ai'?'为不同的事，选择合适的模型。':page==='desktop'?'在想法出现的时候，随手记下来。':page==='data'?'记忆留在本机，备份由你保管。':'让其他 AI 使用你在 Memivy 留下的记忆。';
+ return <Modal title="设置" className="model-settings" onClose={()=>{if(!locked)onClose()}}><div className="settings-shell"><aside className="settings-nav"><h2><img src={logo} alt=""/>设置</h2><nav aria-label="设置分类">{tabs.map(([id,icon,label])=><button key={id} className={active===id?'active':''} aria-current={active===id?'page':undefined} disabled={locked} onClick={()=>navigate(id)}><Icon name={icon}/>{label}</button>)}</nav><p>你的记忆，你来做主<br/><small>Memivy</small></p></aside><main className="settings-main"><header className="model-page-header">{(page in modelNames)&&<button className="icon-button" aria-label="返回 AI 与模型" disabled={locked} onClick={()=>navigate('ai')}><Icon name="back"/></button>}<div><h2>{title}</h2><p>{sub}</p></div></header>
+ {!native&&<p className="model-preview-note">浏览器为只读预览。请在 macOS 应用中配置模型。</p>}
+ {page==='ai'&&<><div className="settings-page"><div className="model-capabilities">{(Object.keys(modelNames) as Kind[]).map(k=>{const b=models?.[k],enabled=k==='llm'?!!b:k==='embedding'?!!(embedding?.enabled||embedding?.preparing||embedding?.paused):!!voice?.enabled;const status=k==='embedding'?indexLabel(embedding):k==='voice'?(voice?.session?.error?'转写未完成':voice?.error?'需要检查':enabled?'已启用':'未开启'):enabled?'已配置':'未配置';const local=b?.source==='local';return <section key={k} className="model-capability"><div className="model-cap-icon"><Icon name={k==='llm'?'spark':k==='embedding'?'search':'mic'} size={23}/></div><div className="model-cap-body"><h3>{modelNames[k]}{enabled&&<span className="model-badge">{local?'本机运行':'模型服务'}</span>}</h3><p>{modelHints[k]}</p><small>{enabled?(local?k==='embedding'?'Qwen3-Embedding · 0.6B':'Qwen3-ASR · 0.6B':b?.model):k==='llm'?'连接你自己的模型服务':`推荐本地模型 · 下载约 ${k==='embedding'?'640 MB':'1.02 GB'}`}</small></div><div className="model-cap-side"><small>{models?status:'读取设置…'}</small><button className="model-text-button" disabled={!models||locked} onClick={()=>navigate(k)}>{enabled?'管理':'设置'} →</button></div></section>})}</div><p className="model-subtle"><Icon name="lock" size={14}/>不连接模型，也可以记录、编辑和使用基础搜索。</p></div><footer className="model-footer"><span>连接信息只保存在这台 Mac</span></footer></>}
+ {page in modelNames&&models&&drafts[page as Kind]&&<ModelCapability connectionDraft={connectionDrafts[page as Kind]} setConnectionDraft={d=>setConnectionDrafts(old=>({...old,[page]:d}))} key={page} kind={page as Kind} models={models} draft={drafts[page as Kind]!} setDraft={d=>setDrafts(old=>({...old,[page]:d}))} embedding={embedding} voice={voice} onRefresh={refresh} onModels={saved} onReconcile={setModels} onSaved={m=>{setConnectionDrafts(old=>({...old,[page]:null}));saved(m);setDrafts(old=>({...old,[page]:m[page as Kind]??undefined}));setPage('ai')}} onDesktop={()=>navigate('desktop')} onBusy={setBusy}/>}
+ {page==='desktop'&&<div className="settings-page"><DesktopSettings/><VoiceSettings shortcutOnly/></div>}
+ {page==='data'&&<div className="settings-page"><BackupSettings disabled={busy||mcpBusy} onBusyChange={setBackupBusy} onRestore={onRestore}/><ModelStorage models={models} embedding={embedding} voice={voice} onRefresh={refresh} onBusy={setBusy}/><details><summary>搜索维护</summary><div className="setting-line"><div><strong>修复基础搜索索引</strong><p>从当前记忆重新生成，正文保持原样。</p></div><button className="outline-button" disabled={locked||!native} onClick={()=>setRepair(true)}>修复</button></div><button className="model-text-button" onClick={()=>navigate('embedding')}>管理语义索引 →</button></details></div>}
+ {page==='mcp'&&<div className="settings-page"><McpSettings onBusyChange={setMcpBusy}/></div>}
+ {notice&&<p className="model-notice" role="status">{notice}</p>}{error&&<div className="model-error"><ErrorNotice text={error}/><button className="model-text-button" disabled={locked} onClick={()=>void call<Models>('models_load').then(m=>{setModels(m);setError('')}).catch(e=>setError(errorText(e)))}>重新读取设置</button></div>}
+ </main></div>
+ {repair&&<Modal title="修复基础搜索索引？" onClose={()=>{if(!busy)setRepair(false)}}><p>从当前记忆重新生成索引，正文和草稿保持原样。</p><div className="action-row"><button className="outline-button" disabled={busy} onClick={()=>setRepair(false)}>取消</button><button className="send-button" disabled={busy} onClick={()=>{setBusy(true);void call('library_rebuild').then(()=>{setNotice('基础搜索索引已修复');setRepair(false)}).catch(e=>setError(errorText(e))).finally(()=>setBusy(false))}}>开始修复</button></div></Modal>}
+ </Modal>;
 }

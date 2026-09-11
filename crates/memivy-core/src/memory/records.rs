@@ -526,7 +526,9 @@ impl MemoryStore {
             },
             &hash,
         )?;
-        tx.execute("INSERT INTO organization_jobs(memory_id,input_version_id,capture_id,attempt_id,status,created_at) VALUES(?1,?2,?3,?4,'pending',?5)",params![saved.memory_id,saved.version_id,c.id,id(),c.created_at])?;
+        if crate::models::Registry::read(&self.root).is_ok_and(|r| r.auto_organize) {
+            tx.execute("INSERT INTO organization_jobs(memory_id,input_version_id,capture_id,attempt_id,status,created_at) VALUES(?1,?2,?3,?4,'pending',?5)",params![saved.memory_id,saved.version_id,c.id,id(),c.created_at])?;
+        }
         tx.commit()?;
         Ok(saved)
     }

@@ -207,6 +207,9 @@ impl MemoryStore {
         Ok(())
     }
     pub fn claim_organization(&self) -> Result<Option<OrganizationTask>> {
+        if !crate::models::Registry::read(&self.root).is_ok_and(|r| r.auto_organize) {
+            return Ok(None);
+        }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("UPDATE organization_jobs SET status='paused',reason='内容已有修改或草稿，请手动整理' WHERE status='pending' AND EXISTS(SELECT 1 FROM memories m WHERE m.id=organization_jobs.memory_id AND (m.state!='active' OR m.current_version_id!=input_version_id OR EXISTS(SELECT 1 FROM workspace_drafts WHERE key='memory:'||m.id)))",[])?;
@@ -406,6 +409,9 @@ impl MemoryStore {
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(r) = replay(&tx, &task.attempt_id, &hash)? {
             return Ok(r);
+        }
+        if !crate::models::Registry::read(&self.root).is_ok_and(|r| r.auto_organize) {
+            return Err(DataError::Conflict);
         }
         let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM organization_jobs j JOIN memories m ON m.id=j.memory_id WHERE j.memory_id=?1 AND j.input_version_id=?2 AND j.attempt_id=?3 AND j.status='processing' AND m.state='active' AND m.current_version_id=j.input_version_id AND NOT EXISTS(SELECT 1 FROM workspace_drafts WHERE key='memory:'||m.id))",params![task.memory.memory_id,task.memory.id,task.attempt_id],|r|r.get(0))?;
         if !valid || task.memory.parent_id.is_some() {

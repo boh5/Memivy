@@ -3,6 +3,7 @@ mod capture_panel;
 mod cleanup;
 mod desktop;
 mod mcp;
+mod models;
 mod prototype;
 mod storage;
 mod voice;

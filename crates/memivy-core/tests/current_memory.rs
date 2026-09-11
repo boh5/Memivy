@@ -501,3 +501,33 @@ fn deleting_a_discussion_removes_its_review_drafts_but_preserves_saved_memories(
     );
     store.check_integrity().unwrap();
 }
+
+#[test]
+fn organization_off_blocks_new_effects_but_preserves_receipt_replay() {
+    use memivy_core::models::Registry;
+    let dir = tempfile::tempdir().unwrap();
+    let store = MemoryStore::open(dir.path()).unwrap();
+    store.capture(&request("已整理事项")).unwrap();
+    let first = store.claim_organization().unwrap().unwrap();
+    let proposal = proposal("keep", "整理结果");
+    let receipt = store.apply_organization(&first, &proposal).unwrap();
+    let saved = store.capture(&request("新事项原文")).unwrap();
+    let pending = store.claim_organization().unwrap().unwrap();
+    let mut registry = Registry {
+        auto_organize: false,
+        ..Registry::default()
+    };
+    registry.save(dir.path(), "initial").unwrap();
+    assert_eq!(
+        store.apply_organization(&first, &proposal).unwrap(),
+        receipt
+    );
+    assert!(matches!(
+        store.apply_organization(&pending, &proposal),
+        Err(DataError::Conflict)
+    ));
+    assert_eq!(
+        store.memory(&saved.memory_id).unwrap().current.body,
+        "新事项原文"
+    );
+}

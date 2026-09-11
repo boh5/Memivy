@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memivy · 设置与模型 Demo</title>
+  <meta name="description" content="Memivy 设置与自带模型的独立交互原型。所有连接、下载与转写均为模拟。">
+  <link rel="icon" href="../brand/memivy-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./demo.js" defer></script>
+</head>
+<body>
+  <div class="demo-bar"><div><span class="demo-tag">交互 Demo</span><span class="demo-note">模拟数据 · 不连接模型，不读取你的记忆</span></div><div class="demo-actions"><label for="scenario">体验状态</label><select id="scenario"><option value="daily">日常使用</option><option value="new">首次使用</option><option value="error">语音转写失败</option></select><button id="reset">重置</button></div></div>
+  <div class="workspace" aria-label="记忆工作区示意">
+    <aside class="app-sidebar"><img src="../brand/memivy-logo.svg" alt="Memivy"><div class="app-selected">▤ &nbsp; 全部记忆</div><p>◷ &nbsp; 回顾</p><small>置顶</small><p>产品想法</p><p>最近读到的</p><small>专题</small><p>我的工作方式</p><p>生活里的小事</p><div class="app-bottom"><button id="open-settings">⚙ &nbsp; 设置</button><small>记忆保存在这台 Mac</small></div></aside>
+    <div class="app-main"><div class="app-top"><span>⌕ &nbsp; 找记忆，或直接问 AI…</span><span>＋ 记一下</span></div><div class="app-content"><div class="note-list"><h3>全部记忆 <small>128</small></h3><article><strong>让记录变得更轻一点</strong><p>想法出现的时候，先留下来。整理可以晚一点。</p><small>今天 · 产品想法</small></article><article><strong>我想保留的工作方式</strong><p>每天留一段不被打扰的时间。</p><small>昨天</small></article><article><strong>最近读到的一句话</strong><p>记录，是和未来的自己对话。</p><small>9 月 9 日</small></article></div><div class="note-body"><small>产品想法</small><h1>让记录变得更轻一点</h1><p>好工具应该让人更容易留下想法，<br>也更容易在需要时，找回它。</p><p>不用先想清楚放在哪个文件夹。<br>一句话，也值得留下来。</p></div></div></div>
+  </div>
+  <div class="settings-shade" id="settings-shade">
+    <section class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <aside class="settings-sidebar"><div class="settings-brand"><img src="../brand/memivy-icon.svg" alt=""><h1 id="settings-title">设置</h1></div><nav aria-label="设置分类" id="nav"></nav><div class="sidebar-foot"><span class="leaf-mark">⌁</span> 你的记忆，你来做主<span>Memivy · 模型设置预览</span></div></aside>
+      <div class="settings-main"><header id="page-header"></header><main id="page"></main><footer id="page-footer"></footer></div>
+    </section>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -148,7 +148,9 @@ export async function call<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return resourceCall<T>(name, args);
-  if (name === "voice_status") return {enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"模型目录由桌面应用按系统确定",session:null} as T;
+  if (name === "models_load") return {revision:"preview",connections:[],llm:null,embedding:{source:"local",connection:"",model:"",dimensions:null,query_prefix:"",disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",connection:"",model:"",dimensions:null,query_prefix:"",disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},auto_organize:true} as T;
+  if (name === "embedding_status") return {enabled:false,preparing:false,paused:false,state:"not_downloaded",downloaded:0,bytes:639150592,processed:0,total:1,failed:0,error:null} as T;
+  if (name === "voice_status") return {source:"local",label:"本机识别",local_available:false,enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"模型目录由桌面应用按系统确定",session:null} as T;
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "discussion_targets") return [] as T;

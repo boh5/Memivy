@@ -24,7 +24,7 @@ Memivy 的“记一下、问一问、接着想”共用一套本地数据和模�
 | 业务核心 | Rust |
 | 本地数据 | SQLite + FTS5，由 `rusqlite` 直接管理 |
 | 异步任务 | Tokio；任务状态持久化在 SQLite，不引入消息队列 |
-| 模型调用 | `reqwest` + `serde`，直接调用一个 OpenAI-compatible 端点 |
+| 模型调用 | `reqwest` + `serde`，按能力直接调用用户的 OpenAI-compatible 端点 |
 | MCP | 官方 Rust SDK `rmcp`，本机使用 stdio |
 | 原生补充 | 必要时使用 Swift 补齐 macOS 系统能力 |
 | 测试与发布 | Cargo test、Vitest、WebdriverIO、Mac 安装冒烟、GitHub Actions |
@@ -404,3 +404,16 @@ Windows、iOS、Android 不进入当前架构验收和开发排期，也不为�
 语音复用共享 CaptureForm 和既有草稿队列，不绕过 MemoryStore。Tauri host 使用 CPAL/CoreAudio 采集、Rubato 抗混叠重采样到 16 kHz 单声道；停顿分段、12 秒硬分段、单次 5 分钟上限。音频回调不做磁盘或推理操作。独立 `memivy-speech` 进程使用现有 llama-cpp-2 0.1.156 的 mtmd + Metal，音频编码器和解码模型都启用 GPU，失败可回退 CPU；闲置 60 秒释放进程。识别文字不经过额外润色模型。
 
 Qwen3-ASR-0.6B Q8_0 固定清单含语言模型和音频投影共 1,019,141,728 字节，在 Memivy 自有模型目录中使用 blobs/snapshots/locks、SHA-256 校验和断点下载。语音和 embedding 共用 dirs::cache_dir() 下固定 `com.memivy.app/models`：macOS 为 `~/Library/Caches/com.memivy.app/models/`，Windows 为 `%LOCALAPPDATA%\com.memivy.app\models\`；不受 HF 环境变量、资料库和测试应用标识影响。缓存被清理后可重新下载；语音设置与暂存录音仍归当前资料库。此处仅完成跨平台目录解析，不代表 Windows 应用已适配。模型进程不访问数据库；界面只从专门的语音状态读取结果，避免触发全局记忆刷新。转写完成且草稿持久化后解除语音写入，防止覆盖后续人工修改；提交与关闭等待录音末尾，失败禁止提交。
+
+
+## 统一模型设置与 BYOM（2026-09-11 授权）
+
+`models.rs` 在独立 `models.json` 中保存 LLM/Embedding/ASR 配置（内部绑定与录音快照复用现有结构，界面不暴露连接管理），0600 原子写入、文件锁及 revision CAS；读取前端视图只返回 has_key。首次读取沿用已有 LLM 配置，首次保存后统一注册表成为正式配置入口，旧文件不改写。凭据不进入 SQLite、备份、导出或录音会话。设置按已认可 Demo 接入正式共享 Modal，能力草稿和状态轮询隔离；测试证明绑定完整参数及配置 revision，10 分钟内有效，编辑后需重测。
+
+Embedding 采用有界 `/embeddings` 请求，验证返回条数、顺序、有限数值和固定维度，再归一化。schema 14 只调整派生向量 BLOB 的维度约束，保留当前正文/历史和既有本地向量。唯一索引指纹包含端点、模型、实测维度、查询指令和分段版本；在途写入及查询重新核对指纹，旧任务不能使新配置使用旧向量。沿用单写入者、增量处理、暂停/重试及关键词降级，不引入第二套索引管理。
+
+远程 ASR 复用现有采集、16 kHz 分段、草稿及提交边界，用 multipart WAV 调用 `/audio/transcriptions`，60 秒超时、有限响应、禁重定向；静音探测与真实录音质量区分。会话持久化模型绑定与端点快照，Key 仍按连接 ID 从私有配置读取；正在被能力或暂存录音使用的连接禁止删除和原地换地址。不同录音可使用新配置，已开始的录音保持原模型。
+
+2026-09-11 后续简化：用户要求每项能力直接填写地址、模型、Key，去掉连接选择和右下角管理链接。候选地址及 Key 仅在内存测试证明中暂存，通过测试并应用才原子保存；修改一项配置不会改写其他能力的地址或 Key。仅在地址相同且用户留空时沿用该项已有 Key。
+
+本轮 Review 修复：候选 LLM 探测只返回能力结果，应用成功后才保存活动能力缓存；Embedding 配置发布与启用共用控制锁，编码请求先取得一致快照，在途旧任务仍按指纹失效，不阻塞用户更换模型。启用失败恢复旧配置并让前端重新读取 revision。失败录音仅允许为相同端点和模型修正旧绑定的 Key，音频不会随模型切换改投其他端点。仅修改 Embedding Key 不提示或触发全量重建。

@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 13;
+pub(super) const SCHEMA: i64 = 14;
 pub(super) const APPLICATION_ID: i64 = 0x4d495659;
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -251,6 +251,11 @@ impl MemoryStore {
         if version < 13 {
             tx.execute_batch(include_str!(
                 "../../../../migrations/memory/013_ui_changes.sql"
+            ))?;
+        }
+        if version < 14 {
+            tx.execute_batch(include_str!(
+                "../../../../migrations/memory/014_model_vectors.sql"
             ))?;
         }
         tx.commit()?;

@@ -45,7 +45,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
   }
   return <section className="settings-section desktop-settings">
     <h3>外部 Agent · MCP</h3>
-    <p>允许外部 Agent 保存你明确要求记住的原话、检索少量已保存的记忆。返回的内容可能由该 Agent 发送给它使用的模型。</p>
+    <p>允许外部 Agent 保存你明确要求记住的原话、检索少量已保存的记忆。返回的内容可能由该 Agent 发送给它使用的模型。检索共用「语义检索」设置；选用模型服务后，搜索问题也会发送到该服务。</p>
     <label className="checkbox-label">
       <input type="checkbox" checked={state?.enabled ?? false} disabled={!native || !state || busy}
         onChange={event => { const enabled = event.target.checked; void run(() => updateEnabled(enabled)); }} />

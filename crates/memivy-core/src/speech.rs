@@ -56,6 +56,27 @@ impl SpeechCache {
             })
             .sum()
     }
+    pub fn clear(&self) -> Result<()> {
+        let locks = self
+            .root
+            .join(".locks/models--ggml-org--Qwen3-ASR-0.6B-GGUF");
+        let _guards = MODELS
+            .iter()
+            .map(|m| lock(&locks, &format!("{}.lock", m.sha256)))
+            .collect::<Result<Vec<_>>>()?;
+        for m in &MODELS {
+            for p in [
+                self.path(m),
+                self.blob(m),
+                self.blob(m).with_extension("incomplete"),
+            ] {
+                if p.symlink_metadata().is_ok() {
+                    fs::remove_file(p).map_err(|_| "模型文件无法删除")?;
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn verify(&self) -> Result<()> {
         for m in &MODELS {
             verify(&self.path(m), m)?;
