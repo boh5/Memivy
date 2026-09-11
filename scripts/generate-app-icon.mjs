@@ -15,4 +15,13 @@ execFileSync(resolve(root,'node_modules/.bin/tauri'),['icon',resolve(work,'app-i
 mkdirSync(resolve(root,'src-tauri/icons'),{recursive:true});
 copyFileSync(resolve(work,'icon.icns'),resolve(root,'src-tauri/icons/memivy.icns'));
 copyFileSync(resolve(work,'icon.png'),resolve(root,'src-tauri/icons/app-icon.png'));
+// The dev NSImage does not receive the bundle icon's system treatment.
+const devWork=resolve(work,'dev');
+mkdirSync(devWork,{recursive:true});
+writeFileSync(resolve(devWork,'dev-icon.svg'),source
+  .replace('width="48" height="48" viewBox="0 0 48 48"',
+    'width="1024" height="1024" viewBox="-6 -6 60 60"'));
+execFileSync(resolve(root,'node_modules/.bin/tauri'),['icon',resolve(devWork,'dev-icon.svg'),'-o',devWork],{stdio:'ignore'});
+copyFileSync(resolve(devWork,'icon.icns'),resolve(root,'src-tauri/icons/dev-icon.icns'));
+copyFileSync(resolve(devWork,'icon.png'),resolve(root,'src-tauri/icons/dev-icon.png'));
 console.log('Generated macOS app icon from the selected Memivy vector logo.');
