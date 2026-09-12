@@ -29,7 +29,7 @@ pub(super) struct IndexMeta {
 pub(super) fn meta(db: &rusqlite::Connection) -> Result<Option<IndexMeta>> {
     Ok(db.query_row("SELECT fingerprint,revision,state,upper_rowid,cursor FROM embedding_index_meta WHERE id=1",[],|r|Ok(IndexMeta {fingerprint:r.get(0)?,revision:r.get(1)?,state:r.get(2)?,upper:r.get(3)?,cursor:r.get(4)?})).optional()?)
 }
-fn model_error(_: String) -> DataError {
+fn model_error(_: impl std::fmt::Display) -> DataError {
     DataError::Io
 }
 impl MemoryStore {
@@ -96,7 +96,7 @@ impl MemoryStore {
         let _control = emb::lock(&self.root, "embedding-control.lock")?;
         let mut prefs = Preferences::read(&self.root)?;
         if prefs.clear_requested {
-            return Err("正在清理本地模型，请稍后重试".into());
+            return Err("embedding_clearing".into());
         }
         let mut previous = Registry::read(&self.root)?;
         registry.save(&self.root, revision)?;
@@ -107,7 +107,7 @@ impl MemoryStore {
             return Err(if previous.save(&self.root, &registry.revision).is_ok() {
                 error
             } else {
-                format!("{error}；配置恢复未完成，请重新读取设置后检查")
+                "configuration_restore_failed".into()
             });
         }
         Ok(())
@@ -216,11 +216,11 @@ impl MemoryStore {
                         let _ = p.save(&self.root);
                     }
                 }
-                Err(e) => {
+                Err(_) => {
                     if let Ok(_control) = emb::lock(&self.root, "embedding-control.lock") {
                         let mut p = prefs;
                         p.clear_requested = false;
-                        p.error = Some(e.to_string());
+                        p.error = Some("embedding_clear_failed".into());
                         let _ = p.save(&self.root);
                     }
                 }
@@ -282,10 +282,7 @@ impl MemoryStore {
                         return;
                     }
                     if began.elapsed() > Duration::from_secs(60) {
-                        self.embedding_failure_for(
-                            &fingerprint,
-                            "模型加载失败或超过 60 秒，请重试".into(),
-                        );
+                        self.embedding_failure_for(&fingerprint, "embedding_load_failed".into());
                         return;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -296,8 +293,8 @@ impl MemoryStore {
         match tokio::task::spawn_blocking(move || store.embedding_step()).await {
             Ok(Ok(())) => {}
             Ok(Err(DataError::Busy)) => {}
-            Ok(Err(e)) => self.embedding_failure_for(&fingerprint, e.to_string()),
-            Err(_) => self.embedding_failure_for(&fingerprint, "索引任务未完成，可重试".into()),
+            Ok(Err(_)) => self.embedding_failure_for(&fingerprint, "embedding_index_failed".into()),
+            Err(_) => self.embedding_failure_for(&fingerprint, "embedding_index_failed".into()),
         }
     }
     fn embedding_matches(&self, fingerprint: &str) -> bool {
@@ -336,6 +333,7 @@ impl MemoryStore {
             if let Some(m) = &remote {
                 crate::models::embed(m, text, r.embedding.dimensions, Duration::from_secs(30))
                     .map(|v| crate::models::bytes(&v))
+                    .map_err(String::from)
             } else {
                 client::encode(&self.root, "document", text, Duration::from_secs(30))
                     .and_then(|v| emb::vector_bytes(&v))
@@ -397,10 +395,7 @@ impl MemoryStore {
             }
             tx.commit()?;
             if failed && index.state == "building" {
-                self.embedding_failure_for(
-                    fingerprint,
-                    "部分记忆编码失败，请重试；字面检索仍然可用".into(),
-                );
+                self.embedding_failure_for(fingerprint, "embedding_index_failed".into());
             }
             if !failed {
                 let _control =
@@ -520,15 +515,15 @@ impl MemoryStore {
         let remote = registry.embedding.source == Source::Service;
         let fingerprint = registry.fingerprint()?;
         if !remote && !HfModelCache::for_user()?.published() {
-            return Err("本地模型文件缺失，请在设置中重试".into());
+            return Err("embedding_model_missing".into());
         }
 
         let db = self.connection().map_err(|e| e.to_string())?;
         let Some(index) = meta(&db).map_err(|e| e.to_string())? else {
-            return Err("向量索引尚未建立".into());
+            return Err("embedding_index_missing".into());
         };
         if index.state != "ready" || index.fingerprint != fingerprint {
-            return Err("向量索引正在重建".into());
+            return Err("embedding_index_rebuilding".into());
         }
         let text = if let Some(m) = &request.reference_memory_id {
             let v = self.memory(m).map_err(|e| e.to_string())?.current;
@@ -559,7 +554,7 @@ impl MemoryStore {
         if !Preferences::read(&self.root)?.enabled
             || Registry::read(&self.root)?.fingerprint()? != fingerprint
         {
-            return Err("语义检索配置已变化，本次使用基础搜索".into());
+            return Err("embedding_configuration_changed".into());
         }
         Ok(Some((index.revision, vector)))
     }

@@ -758,7 +758,7 @@ impl MemoryStore {
         )?;
         save_receipt(&tx, &receipt, &hash)?;
         save_changes(&tx, &receipt.request_id, &inverse)?;
-        tx.execute("UPDATE organization_jobs SET receipt_id=?2,status='done',reason='已按你的选择纠正归属' WHERE capture_id=?1",params![r.capture_id,receipt.request_id])?;
+        tx.execute("UPDATE organization_jobs SET receipt_id=?2,status='done',reason='',reason_code='organization_corrected' WHERE capture_id=?1",params![r.capture_id,receipt.request_id])?;
         tx.commit()?;
         Ok(receipt)
     }

@@ -1,3 +1,5 @@
+import { message, type UiMessage } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { call, errorText, native, type Key, type Topic } from "./api";
@@ -18,10 +20,10 @@ export const previewDesktop: DesktopState = { expanded: true, generation: 1, pin
   last_memory: null, error: null, configured: false, ready_ms: null, save_ms: null, receipt: false };
 export function useDesktop() {
   const [state, setState] = useState<DesktopState | null>(native ? null : previewDesktop);
-  const [error, setError] = useState("");
+  const [error, setError] = useNotice();
   const newest = useRef(-1), requests = useRef(0);
   const accept = useCallback((next: DesktopState) => {
-    if (!next) { setError("快捷入口状态未能读取，已保留当前窗口。"); return; }
+    if (!next) { setError(message("errors", "desktop_status_failed")); return; }
     const sequence = next.sequence ?? next.generation;
     if (sequence < newest.current) return;
     newest.current = sequence;
@@ -46,7 +48,7 @@ export function useDesktop() {
   return { state, error, refresh, update };
 }
 // Both WebViews acknowledge exit only after their own draft queue is durable.
-export function useWindowLifecycle(onError: (error: string) => void) {
+export function useWindowLifecycle(onError: (error: UiMessage) => void) {
   const errorRef = useRef(onError); errorRef.current = onError;
   useEffect(() => {
     if (!native) return;
@@ -55,12 +57,12 @@ export function useWindowLifecycle(onError: (error: string) => void) {
       listen<number>("desktop-exit-request", e => {
         // An unconfirmed conclusion or settings form must remain reviewable.
         if (document.querySelector("dialog[open]")) {
-          errorRef.current("请先完成或关闭当前对话框，再退出 Memivy。");
+          errorRef.current(message("errors", "quit_dialog_active"));
           void call("desktop_exit_ready", { id: e.payload, error: true });
           return;
         }
         void finishVoiceInputs().then(() => flushDrafts()).then(() => call("desktop_exit_ready", { id: e.payload, error: false }))
-          .catch(error => { errorRef.current(`草稿尚未保存，已保留窗口。${errorText(error)}`); void call("desktop_exit_ready", { id: e.payload, error: true }); });
+          .catch(error => { errorRef.current(message("errors", "window_draft_preserved", { error: errorText(error) })); void call("desktop_exit_ready", { id: e.payload, error: true }); });
       }),
     ];
     void Promise.all(events).then(() => call("desktop_ready", { generation: null })).catch(e => errorRef.current(errorText(e)));

@@ -335,6 +335,10 @@ pub struct PreparedRestore {
 pub struct RestoreResult {
     pub restored: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     pub previous_backup: Option<PathBuf>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -381,6 +385,20 @@ fn previous_path(root: &Path, id: &str) -> PathBuf {
     root.join("recovery")
         .join(format!("before-restore-{id}.db"))
 }
+fn restore_error_code(error: &DataError) -> &'static str {
+    match error {
+        DataError::Io => "io",
+        DataError::Busy => "busy",
+        DataError::Database => "database",
+        DataError::Conflict | DataError::RequestConflict => "conflict",
+        DataError::Schema => "schema",
+        DataError::Integrity => "integrity",
+        DataError::DestinationExists => "destination_exists",
+        DataError::Unavailable => "unavailable",
+        _ => "operation_failed",
+    }
+}
+
 fn finish_restore(root: &Path, result: &RestoreResult) -> Result<()> {
     write_state(root, "restore-result.json", result)?;
     fs::remove_file(root.join("restore-pending.json"))?;
@@ -408,6 +426,8 @@ fn rollback_restore(root: &Path, pending: &PendingRestore) -> Result<()> {
         &RestoreResult {
             restored: false,
             message: "恢复未完成，已退回恢复前的内容。".into(),
+            message_code: Some("restore_rolled_back".into()),
+            error_code: None,
             previous_backup: Some(backup),
         },
     )
@@ -489,6 +509,8 @@ impl MemoryStore {
                 &RestoreResult {
                     restored: true,
                     message: "已恢复备份，恢复前的内容也已保留。".into(),
+                    message_code: Some("restore_completed".into()),
+                    error_code: None,
                     previous_backup: Some(previous_path(root, &pending.id)),
                 },
             ),
@@ -506,6 +528,8 @@ impl MemoryStore {
                         &RestoreResult {
                             restored: false,
                             message: format!("恢复未完成，原记忆库保留。{error}"),
+                            message_code: Some("restore_failed_preserved".into()),
+                            error_code: Some(restore_error_code(&error).into()),
                             previous_backup: None,
                         },
                     )?;
@@ -560,6 +584,8 @@ impl MemoryStore {
             &RestoreResult {
                 restored: true,
                 message: "已恢复备份，恢复前的内容也已保留。".into(),
+                message_code: Some("restore_completed".into()),
+                error_code: None,
                 previous_backup: Some(backup),
             },
         )
@@ -649,5 +675,23 @@ mod restore_tests {
         ));
         drop(gate);
         assert!(MemoryStore::open(dir.path()).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod restore_message_tests {
+    use super::*;
+    #[test]
+    fn old_restore_messages_are_preserved_without_guessing_their_code() {
+        let old =
+            r#"{"restored":false,"message":"historical original text","previous_backup":null}"#;
+        let value: RestoreResult = serde_json::from_str(old).unwrap();
+        assert_eq!(value.message, "historical original text");
+        assert!(value.message_code.is_none());
+        assert_eq!(restore_error_code(&DataError::Busy), "busy");
+        assert_eq!(
+            restore_error_code(&DataError::McpDisabled),
+            "operation_failed"
+        );
     }
 }

@@ -1,0 +1,16 @@
+{
+  "statusPaused": "快捷入口已暂停",
+  "statusReady": "本地记录可用",
+  "capture": "记一下",
+  "ask": "问一问",
+  "open": "打开 Memivy",
+  "hideCompanion": "隐藏桌面助手",
+  "showCompanion": "显示桌面助手",
+  "resume": "恢复快捷入口",
+  "pause": "暂停快捷入口",
+  "settings": "设置…",
+  "quit": "退出 Memivy",
+  "captureWindow": "Memivy · 快捷入口",
+  "backupSave": "备份记忆、原话、历史、讨论和草稿，不包含模型密钥。请选择新的文件名。",
+  "backupOpen": "选择 Memivy 备份；校验后可确认整库恢复。"
+}

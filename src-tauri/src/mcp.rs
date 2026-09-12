@@ -1,3 +1,4 @@
+use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -9,7 +10,7 @@ fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("仅主窗口可以配置 MCP".into())
+        Err(HostError::new("main_window_required"))
     }
 }
 fn executable() -> Option<PathBuf> {
@@ -55,8 +56,8 @@ pub(crate) async fn mcp_set_enabled(
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || store.set_mcp_enabled(enabled))
         .await
-        .map_err(|_| "MCP 设置任务未完成".to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|_| HostError::new("mcp_settings_failed"))?
+        .map_err(HostError::from)
 }
 #[derive(Debug, Serialize)]
 pub(crate) struct McpDiagnostic {
@@ -76,19 +77,20 @@ async fn response(
             .take(64 * 1024 + 1)
             .read_until(b'\n', &mut line)
             .await
-            .map_err(|_| "MCP 诊断读取失败")?;
+            .map_err(|_| HostError::new("mcp_diagnostic_failed"))?;
         if line.is_empty() || line.len() > 64 * 1024 {
-            return Err("MCP 诊断响应无效".into());
+            return Err(HostError::new("mcp_invalid_response"));
         }
-        let value: Value = serde_json::from_slice(&line).map_err(|_| "MCP 诊断响应无效")?;
+        let value: Value =
+            serde_json::from_slice(&line).map_err(|_| HostError::new("mcp_invalid_response"))?;
         if value["id"] == id {
             if value.get("error").is_some() {
-                return Err("MCP 协议检查未通过".into());
+                return Err(HostError::new("mcp_protocol_failed"));
             }
             return Ok(value["result"].clone());
         }
     }
-    Err("MCP 诊断响应无效".into())
+    Err(HostError::new("mcp_invalid_response"))
 }
 pub(crate) async fn diagnose(
     binary: PathBuf,
@@ -102,27 +104,27 @@ pub(crate) async fn diagnose(
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|_| "MCP 程序无法启动，请检查安装位置")?;
+        .map_err(|_| HostError::new("mcp_start_failed"))?;
     let checked = tokio::time::timeout(Duration::from_secs(8), async {
-        let mut input = child.stdin.take().ok_or("MCP 诊断输入不可用")?;
-        let mut output = tokio::io::BufReader::new(child.stdout.take().ok_or("MCP 诊断输出不可用")?);
-        input.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"memivy-local-check\",\"version\":\"0.1.0\"}}}\n").await.map_err(|_| "MCP 诊断发送失败")?;
+        let mut input = child.stdin.take().ok_or(HostError::new("mcp_diagnostic_failed"))?;
+        let mut output = tokio::io::BufReader::new(child.stdout.take().ok_or(HostError::new("mcp_diagnostic_failed"))?);
+        input.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"memivy-local-check\",\"version\":\"0.1.0\"}}}\n").await.map_err(|_| HostError::new("mcp_diagnostic_failed"))?;
         let info = response(&mut output, 1).await?;
         if info["serverInfo"]["name"] != "memivy" || info["serverInfo"]["version"] != env!("CARGO_PKG_VERSION") {
-            return Err("MCP 程序版本与应用不一致，请重新安装同一版本".into());
+            return Err(HostError::new("mcp_version_mismatch"));
         }
-        input.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n").await.map_err(|_| "MCP 诊断发送失败")?;
+        input.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n").await.map_err(|_| HostError::new("mcp_diagnostic_failed"))?;
         let list = response(&mut output, 2).await?;
-        let mut tools: Vec<String> = list["tools"].as_array().ok_or("MCP 工具清单无效")?.iter()
+        let mut tools: Vec<String> = list["tools"].as_array().ok_or(HostError::new("mcp_invalid_response"))?.iter()
             .map(|t| t["name"].as_str().unwrap_or_default().to_string()).collect();
         tools.sort();
-        if tools != ["memory_capture", "memory_search"] { return Err("MCP 工具清单与应用不一致".into()); }
+        if tools != ["memory_capture", "memory_search"] { return Err(HostError::new("mcp_tools_mismatch")); }
         Ok(McpDiagnostic {
             server_version: env!("CARGO_PKG_VERSION").into(),
-            protocol_version: info["protocolVersion"].as_str().ok_or("MCP 协议版本无效")?.into(),
+            protocol_version: info["protocolVersion"].as_str().ok_or(HostError::new("mcp_invalid_response"))?.into(),
             tools, enabled, scope: "local_stdio_only",
         })
-    }).await.map_err(|_| "MCP 本地检查超时".to_string()).and_then(|r| r);
+    }).await.map_err(|_| HostError::new("mcp_timeout")).and_then(|r| r);
     let _ = child.kill().await;
     let _ = child.wait().await;
     checked
@@ -133,13 +135,12 @@ pub(crate) async fn mcp_diagnose(
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<McpDiagnostic> {
     require_main(&window)?;
-    let binary =
-        executable().ok_or("未找到同包 MCP 程序，请重新安装完整应用；开发环境先构建 memivy-mcp")?;
+    let binary = executable().ok_or(HostError::new("mcp_missing"))?;
     let root = state
         .store
         .database_path()
         .parent()
-        .ok_or("数据位置无效")?
+        .ok_or(HostError::new("io"))?
         .to_path_buf();
     diagnose(binary, root, state.store.mcp_enabled()).await
 }

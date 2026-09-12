@@ -37,15 +37,15 @@ pub fn hash(bytes: &[u8]) -> String {
 }
 pub type Result<T> = std::result::Result<T, String>;
 pub(crate) fn io(_: impl std::fmt::Display) -> String {
-    "本地模型文件操作失败，请检查权限与磁盘空间".into()
+    "model_cache_io".into()
 }
 pub fn private_dir(path: &Path) -> Result<()> {
     if !path.is_absolute() {
-        return Err("模型目录必须是本地绝对路径".into());
+        return Err("model_cache_path".into());
     }
     fs::create_dir_all(path).map_err(io)?;
     if !fs::symlink_metadata(path).map_err(io)?.is_dir() {
-        return Err("模型目录不可用".into());
+        return Err("model_cache_path".into());
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(io)
 }
@@ -53,7 +53,7 @@ pub fn lock(root: &Path, name: &str) -> Result<File> {
     private_dir(root)?;
     let p = root.join(name);
     if fs::symlink_metadata(&p).is_ok_and(|m| !m.is_file()) {
-        return Err("模型锁文件不可用".into());
+        return Err("embedding_busy".into());
     }
     let f = OpenOptions::new()
         .read(true)
@@ -63,11 +63,12 @@ pub fn lock(root: &Path, name: &str) -> Result<File> {
         .mode(0o600)
         .open(p)
         .map_err(io)?;
-    f.try_lock().map_err(|_| "模型任务已在运行".to_string())?;
+    f.try_lock().map_err(|_| "embedding_busy".to_string())?;
     Ok(f)
 }
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let mut f = tempfile::NamedTempFile::new_in(path.parent().ok_or("目录不可用")?).map_err(io)?;
+    let mut f =
+        tempfile::NamedTempFile::new_in(path.parent().ok_or("model_cache_path")?).map_err(io)?;
     serde_json::to_writer(&mut f, value).map_err(io)?;
     f.flush().map_err(io)?;
     f.as_file().sync_all().map_err(io)?;
@@ -92,9 +93,10 @@ impl Preferences {
             return Ok(Self::default());
         }
         if fs::metadata(&p).map_err(io)?.len() > 4096 {
-            return Err("语义检索配置不可读取".into());
+            return Err("embedding_settings_invalid".into());
         }
-        serde_json::from_slice(&fs::read(p).map_err(io)?).map_err(|_| "语义检索配置不可读取".into())
+        serde_json::from_slice(&fs::read(p).map_err(io)?)
+            .map_err(|_| "embedding_settings_invalid".into())
     }
     pub fn save(&self, root: &Path) -> Result<()> {
         write_json(&root.join("embedding.json"), self)
@@ -114,7 +116,7 @@ pub fn socket_dir(root: &Path) -> Result<PathBuf> {
 }
 pub fn vector_bytes(vector: &[f32]) -> Result<Vec<u8>> {
     if vector.len() != DIMENSIONS || vector.iter().any(|v| !v.is_finite()) {
-        return Err("模型返回的向量维度或数值无效".into());
+        return Err("embedding_response_invalid".into());
     }
     let norm = vector
         .iter()
@@ -122,7 +124,7 @@ pub fn vector_bytes(vector: &[f32]) -> Result<Vec<u8>> {
         .sum::<f64>()
         .sqrt();
     if !(0.999..=1.001).contains(&norm) {
-        return Err("模型向量没有正确归一化".into());
+        return Err("embedding_response_invalid".into());
     }
     Ok(vector.iter().flat_map(|v| v.to_le_bytes()).collect())
 }

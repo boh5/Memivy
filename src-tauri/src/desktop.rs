@@ -122,13 +122,13 @@ impl Desktop {
                 Ok(p) => (p, None),
                 Err(_) => (
                     Preferences::default(),
-                    Some("快捷入口设置无法读取，请在设置中重新保存。".into()),
+                    Some("desktop_settings_invalid".into()),
                 ),
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Preferences::default(), None),
             Err(_) => (
                 Preferences::default(),
-                Some("快捷入口设置无法读取，请检查本机目录权限。".into()),
+                Some("desktop_settings_unreadable".into()),
             ),
         };
         Self {
@@ -159,22 +159,22 @@ impl Desktop {
     fn persist(&self, prefs: &Preferences) -> HostResult<()> {
         use std::os::unix::fs::OpenOptionsExt;
         let temp = self.path.with_extension("json.tmp");
-        let bytes = serde_json::to_vec(prefs).map_err(|_| "无法保存快捷入口设置")?;
+        let bytes = serde_json::to_vec(prefs).map_err(|_| "desktop_settings_save_failed")?;
         let mut f = fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
             .open(&temp)
-            .map_err(|_| "无法保存快捷入口设置")?;
+            .map_err(|_| "desktop_settings_save_failed")?;
         f.write_all(&bytes)
             .and_then(|_| f.sync_all())
-            .map_err(|_| "无法保存快捷入口设置")?;
-        fs::rename(&temp, &self.path).map_err(|_| "无法保存快捷入口设置")?;
+            .map_err(|_| "desktop_settings_save_failed")?;
+        fs::rename(&temp, &self.path).map_err(|_| "desktop_settings_save_failed")?;
         if let Some(parent) = self.path.parent() {
             fs::File::open(parent)
                 .and_then(|f| f.sync_all())
-                .map_err(|_| "无法确认快捷入口设置已保存")?;
+                .map_err(|_| "desktop_settings_confirm_failed")?;
         }
         Ok(())
     }
@@ -191,7 +191,7 @@ fn require(window: &tauri::WebviewWindow) -> HostResult<()> {
     if matches!(window.label(), "main" | "capture") {
         Ok(())
     } else {
-        Err("窗口无权执行此操作".into())
+        Err("forbidden".into())
     }
 }
 fn login_status() -> String {
@@ -345,7 +345,9 @@ fn panel_frame(
 // Main thread only. Tao queues macOS frame changes, so calculate the complete
 // destination before scheduling either mutation; never read back a pending size.
 fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement) -> HostResult<()> {
-    let w = app.get_webview_window("capture").ok_or("快捷窗口不可用")?;
+    let w = app
+        .get_webview_window("capture")
+        .ok_or("capture_window_unavailable")?;
     let saved = app.state::<Desktop>().inner.lock().unwrap().prefs.position;
     let destination = match placement {
         Placement::Cursor => w.cursor_position().ok().map(|p| (p.x, p.y)),
@@ -356,13 +358,13 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
         .and_then(|(x, y)| w.monitor_from_point(x, y).ok().flatten())
         .or_else(|| w.current_monitor().ok().flatten())
         .or_else(|| w.primary_monitor().ok().flatten())
-        .ok_or("无法定位显示器")?;
+        .ok_or("display_unavailable")?;
     let frame = panel_frame(
         tauri::LogicalSize::new(width, height),
         placement,
         tauri::PhysicalRect {
-            position: w.outer_position().map_err(|_| "无法读取窗口位置")?,
-            size: w.outer_size().map_err(|_| "无法读取窗口尺寸")?,
+            position: w.outer_position().map_err(|_| "window_geometry_failed")?,
+            size: w.outer_size().map_err(|_| "window_geometry_failed")?,
         },
         saved,
         m.work_area(),
@@ -370,13 +372,13 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
     );
     w.set_size(frame.size.to_logical::<f64>(m.scale_factor()))
         .and_then(|_| w.set_position(frame.position))
-        .map_err(|_| "无法调整快捷窗口".into())
+        .map_err(|_| "window_geometry_failed".into())
 }
 pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> HostResult<()> {
     let started = Instant::now();
     let panel = app
         .get_webview_panel("capture")
-        .map_err(|_| "快捷窗口不可用")?;
+        .map_err(|_| "capture_window_unavailable")?;
     let front = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication();
     let desktop = app.state::<Desktop>();
     let (was_expanded, discussion);
@@ -389,19 +391,19 @@ pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> Ho
                 .state::<Workspace>()
                 .store
                 .workspace_draft("quick_capture")
-                .map_err(|e| e.to_string())?
+                .map_err(crate::errors::HostError::from)?
                 .is_none_or(|d| d.body.is_empty())
             {
                 s.prefs.source_app = front
                     .as_ref()
                     .and_then(|p| p.localizedName())
                     .map(|n| n.to_string())
-                    .unwrap_or_else(|| "未知应用".into());
+                    .unwrap_or_default();
             }
         }
         if let Some(mode) = mode.filter(|_| !s.modal_open) {
             if !matches!(mode.as_str(), "capture" | "ask") {
-                return Err("输入用途无效".into());
+                return Err("capture_mode_invalid".into());
             }
             s.prefs.mode = mode;
         }
@@ -438,7 +440,7 @@ fn collapse(app: &tauri::AppHandle, restore: bool) -> HostResult<()> {
     let started = Instant::now();
     let panel = app
         .get_webview_panel("capture")
-        .map_err(|_| "快捷窗口不可用")?;
+        .map_err(|_| "capture_window_unavailable")?;
     let was_key = panel.as_panel().isKeyWindow();
     let (pid, visible, receipt) = {
         let desktop = app.state::<Desktop>();
@@ -481,31 +483,31 @@ fn collapse(app: &tauri::AppHandle, restore: bool) -> HostResult<()> {
     Ok(())
 }
 pub fn show_main(app: &tauri::AppHandle) -> HostResult<()> {
-    let w = app.get_webview_window("main").ok_or("主窗口不可用")?;
+    let w = app
+        .get_webview_window("main")
+        .ok_or("main_window_unavailable")?;
     w.show()
         .and_then(|_| w.set_focus())
         .and_then(|_| w.as_ref().set_focus())
-        .map_err(|_| "无法打开主窗口".into())
+        .map_err(|_| "main_window_unavailable".into())
 }
 pub(crate) fn parse_shortcut(text: &str) -> HostResult<Shortcut> {
     if text.len() > 100 {
-        return Err("快捷键格式无效".into());
+        return Err("shortcut_invalid".into());
     }
-    let shortcut: Shortcut = text
-        .parse()
-        .map_err(|_| "无法识别这个快捷键，请重新录入。")?;
+    let shortcut: Shortcut = text.parse().map_err(|_| "shortcut_invalid")?;
     if !shortcut
         .mods
         .intersects(Modifiers::CONTROL | Modifiers::SUPER | Modifiers::ALT)
         || shortcut.mods.contains(Modifiers::CONTROL | Modifiers::ALT)
     {
-        return Err("请选择带有修饰键的快捷键，并避开 VoiceOver 的 ⌃⌥ 组合。".into());
+        return Err("shortcut_modifiers_required".into());
     }
     if shortcut.key == Code::Space
         || (shortcut.mods.contains(Modifiers::SUPER)
             && matches!(shortcut.key, Code::KeyQ | Code::KeyW | Code::Tab))
     {
-        return Err("这个组合常用于系统或窗口操作，请换一个快捷键。".into());
+        return Err("shortcut_reserved".into());
     }
     Ok(shortcut)
 }
@@ -539,41 +541,57 @@ fn register(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
                 {
                     let _ = h.emit_to("capture", "desktop-dismiss-request", generation);
                 } else if let Err(e) = open(&h, None, true) {
-                    set_error(&h, e);
+                    set_error(&h, e.to_string());
                 }
             });
         })
-        .map_err(|_| {
-            "快捷键注册失败，可能已被其他应用占用。请修改快捷键；菜单栏入口仍可使用。".into()
-        })
+        .map_err(|_| "shortcut_register_failed".into())
 }
 pub(crate) fn set_error(app: &tauri::AppHandle, error: String) {
     app.state::<Desktop>().inner.lock().unwrap().error = Some(error);
     publish(app);
 }
-fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let p = app.state::<Desktop>().inner.lock().unwrap().prefs.clone();
     let status = MenuItem::with_id(
         app,
         "status",
         if p.paused {
-            "快捷入口已暂停"
+            crate::i18n::text(app, "statusPaused")
         } else {
-            "本地记录可用"
+            crate::i18n::text(app, "statusReady")
         },
         false,
         None::<&str>,
     )?;
-    let capture = MenuItem::with_id(app, "quick-capture", "记一下", true, None::<&str>)?;
-    let ask = MenuItem::with_id(app, "quick-ask", "问一问", true, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", "打开 Memivy", true, None::<&str>)?;
+    let capture = MenuItem::with_id(
+        app,
+        "quick-capture",
+        crate::i18n::text(app, "capture"),
+        true,
+        None::<&str>,
+    )?;
+    let ask = MenuItem::with_id(
+        app,
+        "quick-ask",
+        crate::i18n::text(app, "ask"),
+        true,
+        None::<&str>,
+    )?;
+    let open = MenuItem::with_id(
+        app,
+        "open",
+        crate::i18n::text(app, "open"),
+        true,
+        None::<&str>,
+    )?;
     let visible = MenuItem::with_id(
         app,
         "leaf",
         if p.visible {
-            "隐藏桌面助手"
+            crate::i18n::text(app, "hideCompanion")
         } else {
-            "显示桌面助手"
+            crate::i18n::text(app, "showCompanion")
         },
         true,
         None::<&str>,
@@ -582,15 +600,27 @@ fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         app,
         "pause",
         if p.paused {
-            "恢复快捷入口"
+            crate::i18n::text(app, "resume")
         } else {
-            "暂停快捷入口"
+            crate::i18n::text(app, "pause")
         },
         true,
         None::<&str>,
     )?;
-    let settings = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出 Memivy", true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        app,
+        "settings",
+        crate::i18n::text(app, "settings"),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "quit",
+        crate::i18n::text(app, "quit"),
+        true,
+        None::<&str>,
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
@@ -661,17 +691,17 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     _ => Ok(()),
                 };
                 if let Err(e) = result {
-                    set_error(&h, e);
+                    set_error(&h, e.to_string());
                 }
             });
         })
         .build(app)?;
-    update_menu(app.handle())?;
+    crate::i18n::update_native(app.handle());
     let p = app.state::<Desktop>().inner.lock().unwrap().prefs.clone();
     if !p.paused
         && let Err(e) = register(app.handle(), &p.shortcut)
     {
-        set_error(app.handle(), e);
+        set_error(app.handle(), e.to_string());
     }
     layout(app.handle(), 72.0, 76.0, Placement::SavedLeaf)?;
     if p.visible && !p.paused {
@@ -700,7 +730,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     if desktop.inner.lock().unwrap().modal_open
         && (patch.mode.is_some() || patch.topic_id.is_some() || patch.clear_topic == Some(true))
     {
-        return Err("请先完成或关闭快捷窗口中的对话框，再切换话题。".into());
+        return Err("desktop_dialog_active".into());
     }
     let old = desktop.inner.lock().unwrap().prefs.clone();
     let mut p = old.clone();
@@ -720,7 +750,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     }
     if let Some(v) = patch.mode {
         if !matches!(v.as_str(), "capture" | "ask") {
-            return Err("输入用途无效".into());
+            return Err("capture_mode_invalid".into());
         }
         p.mode = v;
     }
@@ -729,7 +759,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
             .state::<Workspace>()
             .store
             .conversation(&id)
-            .map_err(|e| e.to_string())?;
+            .map_err(crate::errors::HostError::from)?;
         next_topic = Some(Some(topic));
         p.topic_id = Some(id);
         p.mode = "ask".into();
@@ -780,7 +810,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
             Placement::SavedLeaf,
         )?;
         app.get_webview_panel("capture")
-            .map_err(|_| "快捷窗口不可用")?
+            .map_err(|_| "capture_window_unavailable")?
             .order_front_regardless();
     }
     if snapshot(app).expanded {
@@ -795,7 +825,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
             Placement::KeepAnchor,
         )?;
     }
-    update_menu(app).map_err(|_| "菜单栏无法更新")?;
+    update_menu(app).map_err(|_| "native_menu_unavailable")?;
     publish(app);
     Ok(())
 }
@@ -808,8 +838,8 @@ pub(crate) async fn on_main<T: Send + 'static>(
     app.run_on_main_thread(move || {
         let _ = tx.send(work(h));
     })
-    .map_err(|_| "窗口操作未完成")?;
-    rx.await.map_err(|_| "窗口操作未完成")?
+    .map_err(|_| "window_operation_failed")?;
+    rx.await.map_err(|_| "window_operation_failed")?
 }
 #[tauri::command]
 pub async fn desktop_state(
@@ -820,7 +850,7 @@ pub async fn desktop_state(
     let context_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || refresh_context(&context_app))
         .await
-        .map_err(|_| "快捷入口状态未能读取")?;
+        .map_err(|_| "desktop_status_failed")?;
     on_main(&app, |h| Ok(snapshot(&h))).await
 }
 #[tauri::command]
@@ -830,7 +860,7 @@ pub fn desktop_modal(
     open: bool,
 ) -> HostResult<()> {
     if window.label() != "capture" {
-        return Err("仅快捷窗口可以更新此状态".into());
+        return Err("capture_window_required".into());
     }
     app.state::<Desktop>().inner.lock().unwrap().modal_open = open;
     Ok(())
@@ -914,7 +944,7 @@ pub async fn desktop_composer_resize(
     height: f64,
 ) -> HostResult<()> {
     if window.label() != "capture" || !height.is_finite() {
-        return Err("无效的快捷窗口尺寸请求".into());
+        return Err("window_size_invalid".into());
     }
     on_main(&app, move |h| {
         let desktop = h.state::<Desktop>();
@@ -967,7 +997,7 @@ pub async fn desktop_capture(
     let start = Instant::now();
     let store = app.state::<Workspace>().store.clone();
     if !matches!(request.origin, Origin::User { .. }) {
-        return Err("快捷入口只能保存你主动输入的记录".into());
+        return Err("capture_origin_invalid".into());
     }
     if let Origin::User { project, uri, .. } = &request.origin
         && (project.is_some()
@@ -978,7 +1008,7 @@ pub async fn desktop_capture(
                     && !v.starts_with('/')
             }))
     {
-        return Err("请附带网页链接或绝对文件路径，或移除来源后保存。".into());
+        return Err("capture_source_required".into());
     }
     let raw = super::workspace::blocking(move || store.capture(&request)).await?;
     let committed_ms = std::time::SystemTime::now()
@@ -997,7 +1027,7 @@ pub async fn desktop_capture(
         }
         s.prefs.last_memory = Some(memory_id);
         if let Err(e) = desktop.persist(&s.prefs) {
-            s.error = Some(e);
+            s.error = Some(e.to_string());
         }
         Ok(())
     })
@@ -1061,7 +1091,7 @@ pub async fn desktop_expand(
             .ready_windows
             .contains("main")
         {
-            return Err("主窗口正在准备，请稍后重试。".into());
+            return Err("window_not_ready".into());
         }
         let s = snapshot(&h);
         let route = MainRoute {
@@ -1075,7 +1105,7 @@ pub async fn desktop_expand(
         h.state::<Desktop>().inner.lock().unwrap().handoff = Some(s.generation);
         if let Err(error) = show_main(&h).and_then(|_| {
             h.emit_to("main", "desktop-route", route)
-                .map_err(|_| "主窗口尚未准备好，请重试".to_string())
+                .map_err(|_| crate::errors::HostError::new("window_not_ready"))
         }) {
             h.state::<Desktop>().inner.lock().unwrap().handoff = None;
             return Err(error);
@@ -1092,7 +1122,7 @@ pub async fn desktop_handoff_ready(
     failed: Option<bool>,
 ) -> HostResult<()> {
     if window.label() != "main" {
-        return Err("仅主窗口可以完成交接".into());
+        return Err("main_window_required".into());
     }
     on_main(&app, move |h| {
         if snapshot(&h).generation == generation {
@@ -1115,41 +1145,47 @@ pub async fn desktop_drag(
     phase: String,
 ) -> HostResult<()> {
     if window.label() != "capture" {
-        return Err("仅快捷窗口可以拖动".into());
+        return Err("capture_window_required".into());
     }
     on_main(&app, move |h| {
         let d = h.state::<Desktop>();
         match phase.as_str() {
             "start" => {
-                let origin = window.outer_position().map_err(|_| "无法拖动")?;
-                let cursor = window.cursor_position().map_err(|_| "无法拖动")?;
+                let origin = window.outer_position().map_err(|_| "window_drag_failed")?;
+                let cursor = window.cursor_position().map_err(|_| "window_drag_failed")?;
                 d.inner.lock().unwrap().drag = Some((origin, cursor));
             }
             "move" => {
                 let drag = d.inner.lock().unwrap().drag;
                 if let Some((origin, cursor)) = drag {
-                    let now = window.cursor_position().map_err(|_| "无法拖动")?;
+                    let now = window.cursor_position().map_err(|_| "window_drag_failed")?;
                     window
                         .set_position(tauri::PhysicalPosition::new(
                             origin.x + (now.x - cursor.x) as i32,
                             origin.y + (now.y - cursor.y) as i32,
                         ))
-                        .map_err(|_| "无法拖动")?;
+                        .map_err(|_| "window_drag_failed")?;
                 }
             }
             "end" => {
-                let pos = window.outer_position().map_err(|_| "无法保存位置")?;
+                let pos = window
+                    .outer_position()
+                    .map_err(|_| "window_position_save_failed")?;
                 let mut s = d.inner.lock().unwrap();
                 s.drag = None;
-                let size = window.outer_size().map_err(|_| "无法保存位置")?;
-                let scale = window.scale_factor().map_err(|_| "无法保存位置")?;
+                let size = window
+                    .outer_size()
+                    .map_err(|_| "window_position_save_failed")?;
+                let scale = window
+                    .scale_factor()
+                    .map_err(|_| "window_position_save_failed")?;
                 s.prefs.position = Some((
                     pos.x + size.width as i32 - (72.0 * scale) as i32,
                     pos.y + size.height as i32 - (76.0 * scale) as i32,
                 ));
                 d.persist(&s.prefs)?;
             }
-            _ => return Err("拖动操作无效".into()),
+            _ => return Err("window_drag_invalid".into()),
         }
         Ok(())
     })
@@ -1158,13 +1194,13 @@ pub async fn desktop_drag(
 #[tauri::command]
 pub async fn desktop_login_status(window: tauri::WebviewWindow) -> HostResult<String> {
     if window.label() != "main" {
-        return Err("请在主窗口查询登录启动".into());
+        return Err("main_window_required".into());
     }
     // ServiceManagement synchronously talks to a system service. Query only
     // when Settings needs it, and never block AppKit's window/event thread.
     tauri::async_runtime::spawn_blocking(|| objc2::rc::autoreleasepool(|_| login_status()))
         .await
-        .map_err(|_| "无法读取登录项状态，请重试".into())
+        .map_err(|_| "login_status_failed".into())
 }
 #[tauri::command]
 pub async fn desktop_login(
@@ -1173,19 +1209,28 @@ pub async fn desktop_login(
     enabled: Option<bool>,
 ) -> HostResult<String> {
     if window.label() != "main" {
-        return Err("请在主窗口设置登录启动".into());
+        return Err("main_window_required".into());
     }
-    on_main(&app,move|_|{
+    on_main(&app, move |_| {
         unsafe {
-            if let Some(enabled)=enabled {
-                let service:Retained<AnyObject>=msg_send![class!(SMAppService),mainAppService];
-                let mut error:Option<Retained<objc2_foundation::NSError>>=None;
-                let ok:bool=if enabled {msg_send![&*service,registerAndReturnError:&mut error]} else {msg_send![&*service,unregisterAndReturnError:&mut error]};
-                if !ok {return Err("macOS 未能更新登录项。请将 Memivy 放入应用程序目录后重试，或检查系统设置中的登录项。".into());}
-            } else {let _:()=msg_send![class!(SMAppService),openSystemSettingsLoginItems];}
+            if let Some(enabled) = enabled {
+                let service: Retained<AnyObject> = msg_send![class!(SMAppService), mainAppService];
+                let mut error: Option<Retained<objc2_foundation::NSError>> = None;
+                let ok: bool = if enabled {
+                    msg_send![&*service,registerAndReturnError:&mut error]
+                } else {
+                    msg_send![&*service,unregisterAndReturnError:&mut error]
+                };
+                if !ok {
+                    return Err("login_update_failed".into());
+                }
+            } else {
+                let _: () = msg_send![class!(SMAppService), openSystemSettingsLoginItems];
+            }
         }
         Ok(login_status())
-    }).await
+    })
+    .await
 }
 pub fn request_quit(app: &tauri::AppHandle) {
     let (id, windows) = {
@@ -1223,10 +1268,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
             if let Some(waiting) = waiting {
                 termination::reply(false);
                 crate::backup::cancel_restart(&app);
-                set_error(
-                    &app,
-                    "窗口尚未确认草稿保存，已取消退出。请核对草稿后重试。".into(),
-                );
+                set_error(&app, "quit_draft_unconfirmed".into());
                 if waiting.contains("capture") {
                     open(&app, None, true)?;
                 } else {
@@ -1422,10 +1464,7 @@ pub async fn desktop_exit_ready(
         if error {
             termination::reply(false);
             crate::backup::cancel_restart(&h);
-            set_error(
-                &h,
-                "请先完成当前对话框或核对未保存的草稿，再退出 Memivy。".into(),
-            );
+            set_error(&h, "quit_dialog_active".into());
             if window.label() == "capture" {
                 open(&h, None, true)?;
             } else {

@@ -10,6 +10,66 @@ use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
+
+#[tokio::test]
+async fn answer_presentation_uses_question_language_and_preserves_original_memory() {
+    let (_dir, store, _receipt, source, topic) = setup();
+    let turn = store
+        .start_turn(
+            &id(),
+            &topic,
+            "Please answer in English: what should we consider next?",
+            &[],
+        )
+        .unwrap();
+    let (config, requests, _, _, server) = fixture_answer(
+        false,
+        false,
+        json!({"queries":["桌面体验", "desktop"]}),
+        Some(
+            json!({"recollections":[],"ideas":"Consider a smaller first step.","conclusion":"",
+            "presentation":{"no_evidence":"I have not found enough memory evidence.","ideas_heading":"Further thoughts:","conclusion_heading":"A conclusion to keep:"}}),
+        ),
+    );
+    store
+        .answer_discussion_with_language(&config, &topic, &turn, &[], "zh-CN")
+        .await
+        .unwrap();
+    server.join().unwrap();
+    let result = store.turn(&turn.id).unwrap();
+    assert_eq!(
+        result.assistant.text,
+        "I have not found enough memory evidence.\n\nFurther thoughts:\nConsider a smaller first step."
+    );
+    let calls = requests.lock().unwrap();
+    let instruction = calls[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["role"] == "system")
+        .map(|m| m["content"].as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(instruction.contains("explicit language request first"));
+    assert!(instruction.contains("finally Simplified Chinese"));
+    assert!(
+        calls[0]["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("原始拼写")
+    );
+    assert_eq!(
+        store.resolve_source(&source, 1200).unwrap().text,
+        "旧版本：桌面体验优先"
+    );
+    assert!(
+        store
+            .search(&SearchRequest::text("smaller first step", 20))
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
 type Fixture = (
     ModelConfig,
     Arc<Mutex<Vec<Value>>>,
@@ -81,7 +141,7 @@ fn fixture_answer(
             } else if let Some(answer) = &answer {
                 answer.clone()
             } else {
-                json!({"recollections":[{"text":"旧版本说先做好桌面体验。","sources":[if unknown{"M99"}else{"M1"}]}],"ideas":"generated_suggestion_not_memory","conclusion":"reviewed_conclusion_fixture"})
+                json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"旧版本说先做好桌面体验。","sources":[if unknown{"M99"}else{"M1"}]}],"ideas":"generated_suggestion_not_memory","conclusion":"reviewed_conclusion_fixture"})
             };
             let body=json!({"choices":[{"message":{"content":content.to_string()},"finish_reason":"stop"}]}).to_string();
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
@@ -139,8 +199,17 @@ async fn grounded_discussion_uses_versioned_sources_and_saves_only_after_confirm
     assert_eq!(result.assistant.citations[0].source, source);
     let calls = requests.lock().unwrap();
     assert_eq!(calls.len(), 2);
-    let payload: Value =
-        serde_json::from_str(calls[1]["messages"][1]["content"].as_str().unwrap()).unwrap();
+    let payload: Value = serde_json::from_str(
+        calls[1]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "user")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(payload["evidence"][0]["text"], "旧版本：桌面体验优先");
     assert!(payload["evidence"].as_array().unwrap().len() <= 8);
     drop(calls);
@@ -302,7 +371,7 @@ async fn evidence_uses_matching_unicode_excerpt_and_preserves_history_identity()
         false,
         json!({"queries":["关键目标","桌面体验"]}),
         Some(
-            json!({"recollections":[{"text":"当前目标包括快捷入口。","sources":["M1"]}],"ideas":"","conclusion":""}),
+            json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"当前目标包括快捷入口。","sources":["M1"]}],"ideas":"","conclusion":""}),
         ),
     );
     store
@@ -311,8 +380,17 @@ async fn evidence_uses_matching_unicode_excerpt_and_preserves_history_identity()
         .unwrap();
     server.join().unwrap();
     let calls = requests.lock().unwrap();
-    let payload: Value =
-        serde_json::from_str(calls[1]["messages"][1]["content"].as_str().unwrap()).unwrap();
+    let payload: Value = serde_json::from_str(
+        calls[1]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "user")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert!(
         payload["evidence"][0]["text"]
             .as_str()
@@ -370,7 +448,9 @@ async fn no_evidence_and_uncited_recollections_are_distinct() {
             false,
             false,
             json!({"queries":["海岛"]}),
-            Some(json!({"recollections":sources,"ideas":"","conclusion":""})),
+            Some(
+                json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":sources,"ideas":"","conclusion":""}),
+            ),
         );
         let result = store.answer_discussion(&config, &topic, &turn, &[]).await;
         server.join().unwrap();
@@ -442,9 +522,9 @@ async fn multi_query_answer_reads_current_facts_without_recovering_archived_deta
             false,
             json!({"queries":["木桥","收费"]}),
             Some(if raw_only {
-                json!({"recollections":[],"ideas":"当前记忆未提供收费信息。","conclusion":""})
+                json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[],"ideas":"当前记忆未提供收费信息。","conclusion":""})
             } else {
-                json!({"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""})
+                json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"每年 120 元。","sources":[alias]}],"ideas":"","conclusion":""})
             }),
         );
         store
@@ -453,8 +533,17 @@ async fn multi_query_answer_reads_current_facts_without_recovering_archived_deta
             .unwrap();
         server.join().unwrap();
         let calls = requests.lock().unwrap();
-        let payload: Value =
-            serde_json::from_str(calls[1]["messages"][1]["content"].as_str().unwrap()).unwrap();
+        let payload: Value = serde_json::from_str(
+            calls[1]["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "user")
+                .unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
         let supplied = payload["evidence"]
             .as_array()
             .unwrap()

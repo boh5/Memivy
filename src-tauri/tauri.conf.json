@@ -16,7 +16,10 @@
         "title": "Memivy",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 18, "y": 28 },
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 28
+        },
         "width": 1140,
         "height": 790,
         "minWidth": 760,
@@ -26,7 +29,7 @@
       },
       {
         "label": "capture",
-        "title": "Memivy · 快捷入口",
+        "title": "Memivy",
         "url": "index.html?window=capture",
         "width": 72,
         "height": 76,
@@ -53,7 +56,11 @@
     ],
     "macOS": {
       "minimumSystemVersion": "26.0",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "infoplist/en.lproj/InfoPlist.strings",
+        "Resources/zh-Hans.lproj/InfoPlist.strings": "infoplist/zh-Hans.lproj/InfoPlist.strings"
+      }
     }
   }
 }

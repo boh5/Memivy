@@ -2,6 +2,8 @@ mod backup;
 mod capture_panel;
 mod cleanup;
 mod desktop;
+mod errors;
+mod i18n;
 mod mcp;
 mod models;
 mod prototype;

@@ -71,6 +71,7 @@ impl Session {
 }
 #[derive(Serialize)]
 pub struct SessionView {
+    source: Source,
     label: String,
     id: String,
     key: String,
@@ -89,6 +90,7 @@ pub struct SessionView {
 impl From<&Session> for SessionView {
     fn from(s: &Session) -> Self {
         Self {
+            source: s.binding.source.clone(),
             label: s.label.clone(),
             id: s.id.clone(),
             key: s.key.clone(),
@@ -151,13 +153,15 @@ pub struct Status {
 impl Service {
     fn persist(&self, s: &State) -> HostResult<()> {
         write_json(&self.root.join("session.json"), &s.session)
+            .map_err(|_| crate::errors::HostError::new("voice_audio_save_failed"))
     }
     fn save_prefs(&self, prefs: &Preferences) -> HostResult<()> {
         write_json(&self.root.join("settings.json"), prefs)
+            .map_err(|_| crate::errors::HostError::new("voice_audio_save_failed"))
     }
     fn status(&self) -> HostResult<Status> {
-        let cache = SpeechCache::for_user()?;
-        let r = Registry::read(self.root.parent().ok_or("语音目录无效")?)?;
+        let cache = SpeechCache::for_user().map_err(|_| "voice_cache_unavailable")?;
+        let r = Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?;
         let remote = r.voice.source == Source::Service;
         let s = self.state.lock().unwrap();
         Ok(Status {
@@ -165,7 +169,7 @@ impl Service {
             label: if remote {
                 r.connection(&r.voice.connection)?.name.clone()
             } else {
-                "本机识别".into()
+                "voice_local".into()
             },
             local_available: cache.ready(),
             enabled: s.prefs.enabled,
@@ -207,13 +211,14 @@ impl Service {
     fn begin(&self, session: Session, stop: Arc<AtomicBool>) -> HostResult<()> {
         let mut s = self.state.lock().unwrap();
         if !s.prefs.enabled {
-            return Err("请先在设置中启用语音输入".into());
+            return Err("voice_disabled".into());
         }
         if s.session.is_some() {
-            return Err("已有录音草稿，请先完成或舍弃上一段录音".into());
+            return Err("voice_draft_exists".into());
         }
         // Persist first: a failed write must not leave a phantom starting session.
-        write_json(&self.root.join("session.json"), &Some(&session))?;
+        write_json(&self.root.join("session.json"), &Some(&session))
+            .map_err(|_| "voice_audio_save_failed")?;
         *self.stop.lock().unwrap() = Some(stop);
         s.session = Some(session);
         s.error = None;
@@ -224,7 +229,7 @@ impl Service {
         let mut engine = self.engine.lock().unwrap();
         if engine.is_none() {
             if !self.state.lock().unwrap().prefs.enabled {
-                return Err("语音输入已关闭".into());
+                return Err("voice_disabled".into());
             }
             {
                 let mut s = self.state.lock().unwrap();
@@ -237,7 +242,7 @@ impl Service {
                     if !s.prefs.enabled {
                         s.model = "unloaded".into();
                         s.backend = None;
-                        return Err("语音输入已关闭".into());
+                        return Err("voice_disabled".into());
                     }
                     s.backend = Some(worker.backend.clone());
                     s.model = "ready".into();
@@ -247,7 +252,7 @@ impl Service {
                     let mut s = self.state.lock().unwrap();
                     s.model = "failed".into();
                     s.error = Some(e.clone());
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
@@ -325,9 +330,10 @@ impl Service {
         if load || job.is_some() {
             let result = (|| {
                 if let Some((_, _, file, binding, endpoint)) = &job {
-                    let bytes = fs::read(self.root.join(file)).map_err(|_| "暂存录音不可读取")?;
+                    let bytes =
+                        fs::read(self.root.join(file)).map_err(|_| "voice_audio_unreadable")?;
                     if bytes.len() > 16000 * 20 * 4 || bytes.len() % 4 != 0 {
-                        return Err("暂存录音格式无效".into());
+                        return Err("voice_audio_invalid".into());
                     }
                     let samples: Vec<f32> = bytes
                         .as_chunks::<4>()
@@ -336,22 +342,23 @@ impl Service {
                         .map(|b| f32::from_le_bytes(*b))
                         .collect();
                     if binding.source == Source::Service {
-                        let r = Registry::read(self.root.parent().ok_or("语音目录无效")?)?;
+                        let r =
+                            Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?;
                         let m = r.resolve(binding)?;
                         if m.base_url != *endpoint {
-                            return Err("录音使用的服务地址已变化，请恢复原连接后重试".into());
+                            return Err("voice_endpoint_changed".into());
                         }
-                        return memivy_core::models::transcribe(&m, &samples);
+                        return memivy_core::models::transcribe(&m, &samples).map_err(String::from);
                     }
                     self.ensure_engine()?;
                     self.engine
                         .lock()
                         .unwrap()
                         .as_mut()
-                        .ok_or("语音模型未加载")?
+                        .ok_or("voice_not_loaded")?
                         .transcribe(&samples)
                 } else {
-                    if Registry::read(self.root.parent().ok_or("语音目录无效")?)?
+                    if Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?
                         .voice
                         .source
                         == Source::Local
@@ -383,14 +390,14 @@ impl Service {
                     Ok(text) => v.parts[index].text = Some(text),
                     Err(e) => {
                         v.error = Some(e.clone());
-                        s.error = Some(e);
+                        s.error = Some(e.to_string());
                         s.model = "failed".into();
                     }
                 }
                 if let Err(e) = self.persist(&s)
                     && let Some(v) = s.session.as_mut()
                 {
-                    v.error = Some(e);
+                    v.error = Some(e.to_string());
                 }
             }
         } else {
@@ -431,7 +438,7 @@ impl Service {
             .session
             .as_mut()
             .filter(|v| v.id == id)
-            .ok_or("录音会话已结束")?;
+            .ok_or("voice_session_ended")?;
         let file = format!("{}-{}.pcm", v.id, v.parts.len());
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
@@ -440,11 +447,11 @@ impl Service {
             .create_new(true)
             .mode(0o600)
             .open(self.root.join(&file))
-            .map_err(|_| "录音暂存失败，请检查磁盘空间")?;
+            .map_err(|_| "voice_audio_save_failed")?;
         let bytes: Vec<u8> = pcm.iter().flat_map(|v| v.to_le_bytes()).collect();
         f.write_all(&bytes)
             .and_then(|_| f.sync_all())
-            .map_err(|_| "录音暂存失败，请检查磁盘空间")?;
+            .map_err(|_| "voice_audio_save_failed")?;
         v.parts.push(Part { file, text: None });
         self.persist(&s)
     }
@@ -459,10 +466,11 @@ impl Service {
             return Ok(());
         };
         if v.recording || v.starting || v.processing {
-            return Err("请先结束录音和转写".into());
+            return Err("voice_busy".into());
         }
         let files = v.parts.iter().map(|p| p.file.clone()).collect::<Vec<_>>();
-        write_json(&self.root.join("session.json"), &Option::<Session>::None)?;
+        write_json(&self.root.join("session.json"), &Option::<Session>::None)
+            .map_err(|_| "voice_audio_save_failed")?;
         s.session = None;
         for f in files {
             let _ = fs::remove_file(self.root.join(f));
@@ -475,11 +483,13 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
         .map_err(|e| e.to_string())?
         .join("voice");
     // A broken optional voice configuration must never prevent ordinary capture.
-    let mut setup_error = private_dir(&root).err();
+    let mut setup_error = private_dir(&root)
+        .err()
+        .map(|_| "voice_directory_invalid".to_string());
     let prefs = match read_preferences(&root) {
         Ok(p) => p,
         Err(e) => {
-            setup_error = Some(e);
+            setup_error = Some(e.to_string());
             Preferences::default()
         }
     };
@@ -492,7 +502,7 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
         v.starting = false;
         v.processing = false;
         if v.parts.iter().any(|p| p.text.is_none()) {
-            v.error = Some("上次转写中断，录音已保留，请重试。".into());
+            v.error = Some("voice_interrupted".into());
         }
     }
     let preload = setup_error.is_none() && prefs.enabled && prefs.preload;
@@ -521,7 +531,7 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
         && !shortcut.is_empty()
         && let Err(e) = register_shortcut(app, &shortcut)
     {
-        service.state.lock().unwrap().error = Some(e);
+        service.state.lock().unwrap().error = Some(e.to_string());
     }
     let weak = Arc::downgrade(&service);
     std::thread::spawn(move || {
@@ -551,9 +561,9 @@ pub fn voice_start(
         || base.len() > 100_000
         || prefix.len() + suffix.len() > 100_000
     {
-        return Err("语音输入目标无效".into());
+        return Err("voice_target_invalid".into());
     }
-    let registry = Registry::read(voice.0.root.parent().ok_or("语音目录无效")?)?;
+    let registry = Registry::read(voice.0.root.parent().ok_or("voice_directory_invalid")?)?;
     let binding = registry.voice.clone();
     let (endpoint, label) = if binding.source == Source::Service {
         let m = registry.resolve(&binding)?;
@@ -562,10 +572,13 @@ pub fn voice_start(
             registry.connection(&binding.connection)?.name.clone(),
         )
     } else {
-        if !SpeechCache::for_user()?.ready() {
-            return Err("请先在设置中下载语音模型".into());
+        if !SpeechCache::for_user()
+            .map_err(|_| "voice_cache_unavailable")?
+            .ready()
+        {
+            return Err("voice_download_required".into());
         }
-        (String::new(), "本机识别".into())
+        (String::new(), "voice_local".into())
     };
     let service = voice.0.clone();
     let id = uuid::Uuid::new_v4().to_string();
@@ -599,7 +612,7 @@ pub fn voice_start(
             v.recording = false;
             v.level = 0.;
             if let Err(e) = result {
-                v.error = Some(e);
+                v.error = Some(e.to_string());
             }
         }
         let _ = service.persist(&s);
@@ -630,7 +643,7 @@ pub fn voice_retry(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()>
     let mut s = voice.0.state.lock().unwrap();
     if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
         if v.recording || v.starting || v.processing {
-            return Err("请先停止录音".into());
+            return Err("voice_recording_active".into());
         }
         let previous = v.error.take();
         if let Err(e) = voice.0.persist(&s) {
@@ -669,7 +682,16 @@ pub async fn voice_control(
                 };
                 let mut s = service.state.lock().unwrap();
                 match result {
-                    Err(e) => s.error = Some(e),
+                    Err(_) => {
+                        s.error = Some(
+                            if service.download_cancel.load(Ordering::SeqCst) {
+                                "cancelled"
+                            } else {
+                                "voice_download_failed"
+                            }
+                            .into(),
+                        )
+                    }
                     Ok(()) if s.model == "failed" => {
                         s.model = "unloaded".into();
                         s.backend = None;
@@ -694,23 +716,26 @@ pub async fn voice_control(
         "load" => {
             let mut s = service.state.lock().unwrap();
             if !s.prefs.enabled {
-                return Err("请先启用语音输入".into());
+                return Err("voice_disabled".into());
             }
-            if !SpeechCache::for_user()?.ready() {
-                return Err("请先下载模型".into());
+            if !SpeechCache::for_user()
+                .map_err(|_| "voice_cache_unavailable")?
+                .ready()
+            {
+                return Err("voice_download_required".into());
             }
             s.load_requested = true;
         }
         "unload" => {
             if service.active() {
-                return Err("请先结束录音和转写".into());
+                return Err("voice_busy".into());
             }
             service.engine.lock().unwrap().take();
             let mut s = service.state.lock().unwrap();
             s.model = "unloaded".into();
             s.backend = None;
         }
-        _ => return Err("未知语音操作".into()),
+        _ => return Err("voice_action_invalid".into()),
     }
     Ok(())
 }
@@ -725,7 +750,7 @@ fn configure(
     match action {
         "enable" | "disable" => {
             if action == "disable" && service.active() {
-                return Err("请先结束录音和转写".into());
+                return Err("voice_busy".into());
             }
             let mut s = service.state.lock().unwrap();
             let enabled = action == "enable";
@@ -779,7 +804,7 @@ fn configure(
                     .unregister(crate::desktop::parse_shortcut(&old)?);
             }
         }
-        _ => return Err("未知语音设置".into()),
+        _ => return Err("voice_action_invalid".into()),
     }
     Ok(())
 }
@@ -787,7 +812,7 @@ fn register_shortcut(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
     let shortcut = crate::desktop::parse_shortcut(text)?;
     if app.global_shortcut().is_registered(shortcut) {
-        return Err("快捷键已被占用，请换一个组合".into());
+        return Err("shortcut_taken".into());
     }
     app.global_shortcut()
         .on_shortcut(shortcut, |app, _, event| {
@@ -821,7 +846,7 @@ fn register_shortcut(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
                 }
             });
         })
-        .map_err(|_| "语音快捷键注册失败，请换一个组合".into())
+        .map_err(|_| "voice_shortcut_failed".into())
 }
 #[tauri::command]
 pub fn voice_take_shortcut(window: tauri::WebviewWindow, voice: tauri::State<'_, Voice>) -> bool {
@@ -839,7 +864,7 @@ mod tests {
         let session = Session {
             binding: Binding::default(),
             endpoint: String::new(),
-            label: "本机识别".into(),
+            label: "voice_local".into(),
             id: "fixture".into(),
             key: "capture".into(),
             base: "existing text".into(),
@@ -1068,7 +1093,7 @@ pub fn voice_applied(voice: tauri::State<'_, Voice>, id: String) -> HostResult<(
     let mut s = voice.0.state.lock().unwrap();
     if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
         if !v.complete() {
-            return Err("转写尚未完成".into());
+            return Err("voice_incomplete".into());
         }
         let previous = v.applied;
         v.applied = true;
@@ -1091,11 +1116,15 @@ fn read_preferences(root: &std::path::Path) -> HostResult<Preferences> {
     if !p.exists() {
         return Ok(Preferences::default());
     }
-    if fs::metadata(&p).map_err(|_| "语音设置不可读取")?.len() > 4096 {
-        return Err("语音设置文件无效，文字输入仍可使用".into());
+    if fs::metadata(&p)
+        .map_err(|_| "voice_settings_unreadable")?
+        .len()
+        > 4096
+    {
+        return Err("voice_settings_invalid".into());
     }
-    serde_json::from_slice(&fs::read(p).map_err(|_| "语音设置不可读取")?)
-        .map_err(|_| "语音设置损坏，文字输入仍可使用".into())
+    serde_json::from_slice(&fs::read(p).map_err(|_| "voice_settings_unreadable")?)
+        .map_err(|_| "voice_settings_invalid".into())
 }
 
 pub(crate) async fn set_enabled(app: &tauri::AppHandle, enabled: bool) -> HostResult<()> {
@@ -1114,9 +1143,9 @@ pub(crate) async fn set_enabled(app: &tauri::AppHandle, enabled: bool) -> HostRe
 pub(crate) async fn clear_model(app: &tauri::AppHandle) -> HostResult<()> {
     let service = app.state::<Voice>().0.clone();
     if service.active() || service.download.load(Ordering::SeqCst) {
-        return Err("请先结束录音、转写或下载".into());
+        return Err("voice_busy".into());
     }
-    if Registry::read(service.root.parent().ok_or("语音目录无效")?)?
+    if Registry::read(service.root.parent().ok_or("voice_directory_invalid")?)?
         .voice
         .source
         == Source::Local
@@ -1124,7 +1153,9 @@ pub(crate) async fn clear_model(app: &tauri::AppHandle) -> HostResult<()> {
         set_enabled(app, false).await?;
     }
     service.engine.lock().unwrap().take();
-    SpeechCache::for_user()?.clear()?;
+    SpeechCache::for_user()
+        .map_err(|_| "voice_cache_unavailable")?
+        .clear()?;
     let mut s = service.state.lock().unwrap();
     s.model = "unloaded".into();
     s.backend = None;

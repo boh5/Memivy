@@ -3,6 +3,50 @@ use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
+
+#[test]
+fn system_reasons_are_codes_and_generated_or_historical_reasons_stay_literal() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = MemoryStore::open(dir.path()).unwrap();
+    let raw = capture(&store, "Original English capture 原始记录");
+    let task = store.claim_organization().unwrap().unwrap();
+    store
+        .fail_organization(&task.attempt_id, "invalid")
+        .unwrap();
+    let failed = &store.organization_jobs(&key(&raw)).unwrap()[0];
+    assert_eq!(failed.reason_code.as_deref(), Some("organization_invalid"));
+    assert_eq!(failed.reason, "");
+    store.retry_organization(&raw.memory_id).unwrap();
+    let task = store.claim_organization().unwrap().unwrap();
+    let mut generated = proposal("keep");
+    generated.reason = "An explanation generated in the source language".into();
+    store.apply_organization(&task, &generated).unwrap();
+    let job = &store.organization_jobs(&key(&raw)).unwrap()[0];
+    assert_eq!(job.reason, generated.reason);
+    assert_eq!(job.reason_code, None);
+
+    // Exercise the ordinary schema upgrade with an old literal explanation.
+    let db = rusqlite::Connection::open(store.database_path()).unwrap();
+    db.execute(
+        "UPDATE organization_jobs SET reason='历史系统提示，不应反推代码'",
+        [],
+    )
+    .unwrap();
+    db.execute_batch(
+        "ALTER TABLE organization_jobs DROP COLUMN reason_code; PRAGMA user_version=14;",
+    )
+    .unwrap();
+    drop(db);
+    drop(store);
+    let reopened = MemoryStore::open(dir.path()).unwrap();
+    let history = &reopened.organization_jobs(&key(&raw)).unwrap()[0];
+    assert_eq!(history.reason, "历史系统提示，不应反推代码");
+    assert_eq!(history.reason_code, None);
+    assert_eq!(
+        reopened.capture_by_id(&raw.capture_id).unwrap().text,
+        "Original English capture 原始记录"
+    );
+}
 fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
     store
         .capture(&CaptureRequest {

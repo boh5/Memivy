@@ -1,3 +1,6 @@
+import { message, type UiMessage } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { call, errorText, uid, type Detail, type Receipt } from "./api";
@@ -12,8 +15,9 @@ type SaveRequest = { request_id: string; snapshot: Snapshot; body: string };
 export default function MemoryCleanup({ detail, toolbar, onClose, onSaved }: {
   detail: Detail; toolbar: HTMLElement; onClose: () => void; onSaved: (receipt: Receipt) => void;
 }) {
+  const { t } = useTranslation("workspace");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [body, setBody] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true), [saving, setSaving] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(true), [saving, setSaving] = useState(false), [error, setError] = useNotice();
   const [view, setView] = useState<"result" | "diff">("result"), [refine, setRefine] = useState(false), [instruction, setInstruction] = useState("");
   const job = useRef(""), alive = useRef(false), lock = useRef(false), saveId = useRef(uid());
   const snapshotRef = useRef<Snapshot | null>(null);
@@ -50,7 +54,7 @@ export default function MemoryCleanup({ detail, toolbar, onClose, onSaved }: {
     try {
       const result = await call<string>("cleanup_generate", { id: job.current, snapshot: original, previous: bodyRef.current, instruction });
       if (alive.current) { bodyRef.current = result; setBody(result); saveId.current = uid(); attemptedSave.current = null; setRetryingSave(false); setView("result"); setRefine(false); }
-    } catch (e) { if (alive.current) setError(errorText(e) + (bodyRef.current !== null ? " 下方保留调整前的审核稿。" : "")); }
+    } catch (e) { if (alive.current) setError(bodyRef.current !== null ? message("errors", "cleanup_draft_preserved", { error: errorText(e) }) : errorText(e)); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
   async function save() {
@@ -74,31 +78,31 @@ export default function MemoryCleanup({ detail, toolbar, onClose, onSaved }: {
   }
   return <div className="memory-cleanup">
     {createPortal(<>
-      {body !== null && <button className="outline-button" disabled={busy || saving || !!conflict} onClick={() => setRefine(v => !v)}>再调整</button>}
-      {body !== null && <button className="send-button" disabled={busy || saving || !body.trim() || (!retryingSave && (!!conflict || unchanged))} onClick={() => void save()}>{saving ? "保存中…" : retryingSave ? "重试保存" : "接受并保存"}</button>}
-      <button className="quiet" disabled={saving} onClick={onClose}>{busy ? "取消整理" : "取消"}</button>
+      {body !== null && <button className="outline-button" disabled={busy || saving || !!conflict} onClick={() => setRefine(v => !v)}>{t("cleanup.refine")}</button>}
+      {body !== null && <button className="send-button" disabled={busy || saving || !body.trim() || (!retryingSave && (!!conflict || unchanged))} onClick={() => void save()}>{saving ? t("cleanup.saving") : retryingSave ? t("cleanup.retrySave") : t("cleanup.acceptSave")}</button>}
+      <button className="quiet" disabled={saving} onClick={onClose}>{busy ? t("cleanup.cancelCleanup") : t("cleanup.cancel")}</button>
     </>, toolbar)}
-    <div className="section-heading"><h2>整理正文</h2><span role="status">{busy ? "正在整理，原文仍保留…" : "审核后保存为新版本"}</span></div>
+    <div className="section-heading"><h2>{t("cleanup.heading")}</h2><span role="status">{busy ? t("cleanup.processing") : t("cleanup.ready")}</span></div>
     <ErrorNotice text={error} />
-    {snapshot && snapshot.title !== detail.title && <p className="field-help">标题沿用编辑草稿：{snapshot.title}</p>}
-    {retryingSave && <p className="field-help">保存结果尚未确认，可重试同一请求；不会重复创建版本或覆盖之后的修改。</p>}
-    {conflict && !retryingSave && <p className="workspace-warning">记忆已有新版本或已被删除。整理稿仍在下方，请复制需要的内容，再取消并重新核对。</p>}
+    {snapshot && snapshot.title !== detail.title && <p className="field-help">{t("cleanup.draftTitle", { title: snapshot.title })}</p>}
+    {retryingSave && <p className="field-help">{t("cleanup.saveUnconfirmed")}</p>}
+    {conflict && !retryingSave && <p className="workspace-warning">{t("cleanup.conflict")}</p>}
     {refine && <form className="cleanup-refine" onSubmit={e => { e.preventDefault(); void generate(); }}>
-      <input autoFocus aria-label="调整整理方式" placeholder="例如：保留口语风格，把步骤列清楚" maxLength={1000} value={instruction} disabled={busy || saving} onChange={e => setInstruction(e.target.value)} />
-      <button className="outline-button" disabled={busy || saving || !instruction.trim() || !!conflict}>调整</button>
+      <input autoFocus aria-label={t("cleanup.refineAria")} placeholder={t("cleanup.refinePlaceholder")} maxLength={1000} value={instruction} disabled={busy || saving} onChange={e => setInstruction(e.target.value)} />
+      <button className="outline-button" disabled={busy || saving || !instruction.trim() || !!conflict}>{t("cleanup.refineButton")}</button>
     </form>}
     {body === null ? <>
-      {!busy && snapshot && <button className="outline-button" onClick={() => void generate()} disabled={!!conflict}>重试整理</button>}
+      {!busy && snapshot && <button className="outline-button" onClick={() => void generate()} disabled={!!conflict}>{t("cleanup.retryCleanup")}</button>}
       <Markdown text={snapshot?.body ?? detail.body} />
     </> : <>
-      <div className="cleanup-view" role="group" aria-label="整理预览方式">
-        <button aria-pressed={view === "result"} onClick={() => setView("result")}>整理结果</button>
-        <button aria-pressed={view === "diff"} onClick={() => setView("diff")}>查看改动</button>
-        {body === snapshot?.body && <span>正文没有变化</span>}
+      <div className="cleanup-view" role="group" aria-label={t("cleanup.previewAria")}>
+        <button aria-pressed={view === "result"} onClick={() => setView("result")}>{t("cleanup.result")}</button>
+        <button aria-pressed={view === "diff"} onClick={() => setView("diff")}>{t("cleanup.changes")}</button>
+        {body === snapshot?.body && <span>{t("cleanup.unchanged")}</span>}
       </div>
-      {view === "result" ? <MarkdownEditor label="审核整理正文" value={body} disabled={busy || saving} onChange={value => { if (value !== bodyRef.current) { attemptedSave.current = null; setRetryingSave(false); saveId.current = uid(); } bodyRef.current = value; setBody(value); }} onSave={() => void save()} /> :
-        <div className="cleanup-diff" aria-label="正文改动，红色删除，蓝色新增">{parts.map((p, i) => p.kind === "remove" ? <del key={i}>{p.text}</del> : p.kind === "add" ? <ins key={i}>{p.text}</ins> : <span key={i}>{p.text}</span>)}</div>}
-      <p className="field-help">可直接修改整理结果。接受后保存完整审核稿；原话、来源和历史保留。取消会放弃这次预览，原编辑草稿仍保留。</p>
+      {view === "result" ? <MarkdownEditor label={t("cleanup.editorLabel")} value={body} disabled={busy || saving} onChange={value => { if (value !== bodyRef.current) { attemptedSave.current = null; setRetryingSave(false); saveId.current = uid(); } bodyRef.current = value; setBody(value); }} onSave={() => void save()} /> :
+        <div className="cleanup-diff" aria-label={t("cleanup.diffAria")}>{parts.map((p, i) => p.kind === "remove" ? <del key={i}>{p.text}</del> : p.kind === "add" ? <ins key={i}>{p.text}</ins> : <span key={i}>{p.text}</span>)}</div>}
+      <p className="field-help">{t("cleanup.help")}</p>
     </>}
   </div>;
 }

@@ -1,5 +1,9 @@
 import { resourceCall } from "./resources";
 import { isTauri } from "@tauri-apps/api/core";
+import i18n from '../i18n';
+import { formatDate, formatFullDate } from '../i18n/format';
+import { message, type UiMessage } from '../i18n/messages';
+import errors from '../../locales/en/errors.json';
 export const native = isTauri();
 export type Source = { kind: "capture" | "version"; id: string };
 export type SourceEvidence = {
@@ -119,14 +123,14 @@ export type Settings = {
 };
 export const keyOf = (key: Key) => `${key.kind}:${key.id}`;
 export const uid = () => crypto.randomUUID();
-export const date = (n: number) =>
-  new Date(n).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
-export const fullDate = (n: number) =>
-  new Date(n).toLocaleString("zh-CN", { hour12: false });
+export const date = formatDate;
+export const fullDate = formatFullDate;
 export const sourceName = (o: Origin | null) =>
-  o?.kind === "conversation" ? "确认的讨论结论" : o?.app || "原始记录";
-export const errorText = (error: unknown) =>
-  typeof error === "string" ? error : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message : "操作未完成，内容仍保留，请重试。";
+  o?.kind === "conversation" ? i18n.t('sourceConclusion') : o?.app || i18n.t('sourceCapture');
+export function errorText(error: unknown): UiMessage {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  return message('errors', typeof code === 'string' && Object.hasOwn(errors, code) ? code as keyof typeof errors : 'operation_failed');
+}
 export const unavailable = (error: unknown) => !!error && typeof error === "object" && "code" in error && error.code === "unavailable";
 const previewId = "00000000-0000-4000-8000-000000000001";
 const previewRaw: Raw = {
@@ -150,7 +154,7 @@ export async function call<T>(
   if (native) return resourceCall<T>(name, args);
   if (name === "models_load") return {revision:"preview",connections:[],llm:null,embedding:{source:"local",connection:"",model:"",dimensions:null,query_prefix:"",disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",connection:"",model:"",dimensions:null,query_prefix:"",disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},auto_organize:true} as T;
   if (name === "embedding_status") return {enabled:false,preparing:false,paused:false,state:"not_downloaded",downloaded:0,bytes:639150592,processed:0,total:1,failed:0,error:null} as T;
-  if (name === "voice_status") return {source:"local",label:"本机识别",local_available:false,enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"模型目录由桌面应用按系统确定",session:null} as T;
+  if (name === "voice_status") return {source:"local",label:"voice_local",local_available:false,enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"",session:null} as T;
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "discussion_targets") return [] as T;
@@ -191,5 +195,5 @@ export async function call<T>(
       has_key: false,
       disable_reasoning: false,
     } as T;
-  throw "浏览器仅预览布局；请在 Mac 应用里保存和编辑真实记忆。";
+  throw { code: 'native_required' };
 }

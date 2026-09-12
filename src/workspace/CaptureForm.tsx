@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../ui";
 import { call, errorText, type Key, type CaptureResult } from "./api";
 import { ErrorNotice } from "./components";
@@ -7,6 +8,7 @@ import { isRecallSubmitKey, isSubmitKey } from "./keyboard";
 import { useVoice } from "./useVoice";
 import { VoiceButton, VoiceFeedback } from "./VoiceInput";
 import DraftConflict from "./DraftConflict";
+import { useNotice } from "../i18n/react";
 export default function CaptureForm({
   onSaved,
   onAsk,
@@ -29,6 +31,7 @@ export default function CaptureForm({
   onDraftChange?: (body: string) => void;
   visible?: boolean;
 }) {
+  const { t } = useTranslation("workspace");
   const draft = useDraft(quick ? (mode === "capture" ? "quick_capture" : "quick_question") : (mode === "capture" ? "capture" : "question"), {
     title: "",
     body: "",
@@ -36,7 +39,7 @@ export default function CaptureForm({
     ...(quick && mode === "capture" ? { origin: { kind: "user" as const, app: sourceApp, project: null, uri: null } } : {}),
   });
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useNotice();
   const input = useRef<HTMLTextAreaElement>(null),
     lock = useRef(false),
     composing = useRef(false);
@@ -102,7 +105,7 @@ export default function CaptureForm({
               disabled={busy || voice.active}
             >
               <Icon name="plus" size={14} />
-              记一下
+              {t("capture.captureMode")}
             </button>
             <button
               aria-pressed={mode === "ask"}
@@ -110,22 +113,22 @@ export default function CaptureForm({
               disabled={busy || voice.active}
             >
               <Icon name="spark" size={14} />
-              问一问
+              {t("capture.askMode")}
             </button>
           </div>
           <span>
-            {mode === "capture" ? "想法不用整理好再来" : "结合记忆，一起接着想"}
+            {mode === "capture" ? t("capture.captureHint") : t("capture.askHint")}
           </span>
         </div>}
         <textarea
           ref={input}
-          aria-label={mode === "capture" ? "记下想法" : presentation === "query" ? "搜索记忆或提问" : "问一问"}
+          aria-label={mode === "capture" ? t("capture.captureAria") : presentation === "query" ? t("capture.queryAria") : t("capture.askAria")}
           rows={presentation === "query" ? 3 : undefined}
-          title={presentation === "query" ? "AI 从当前范围的记忆中查找并回答 · Enter 提问，Shift+Enter 换行" : undefined}
+          title={presentation === "query" ? t("capture.queryTitle") : undefined}
           placeholder={
             mode === "capture"
-              ? "一句想法，一段刚刚说过的话……"
-              : presentation === "query" ? "你想找回什么，或了解什么？" : "关于过去的记录，你想问些什么？"
+              ? t("capture.capturePlaceholder")
+              : presentation === "query" ? t("capture.queryPlaceholder") : t("capture.askPlaceholder")
           }
           value={draft.value.body}
           disabled={!draft.ready || busy}
@@ -150,16 +153,16 @@ export default function CaptureForm({
         />
         <VoiceFeedback voice={voice} />
         {presentation === "query" ? <div className="recall-panel-footer">
-          <span>Enter 提问 · Shift+Enter 换行</span>
+          <span>{t("capture.queryKeyboardHint")}</span>
           <div className="voice-submit-actions"><VoiceButton voice={voice} disabled={!draft.ready || busy} />
-          <button className="recall-submit" aria-label="从记忆中查找并回答" title="查找并回答"
+          <button className="recall-submit" aria-label={t("capture.findAnswerAria")} title={t("capture.findAnswerTitle")}
             disabled={!draft.ready || busy || voice.busy || (!draft.value.body.trim() && !voice.active)} onClick={() => void save()}>
             <Icon name={busy ? "refresh" : "arrow"} size={16} />
           </button></div>
         </div> : <div className="composer-bottom">
           <span>
-            {mode === "capture" ? "原话先保存在本机" : "讨论不会自动存为记忆"}{" "}
-            · ⌘ Enter 提交
+            {mode === "capture" ? t("capture.localRaw") : t("capture.unsavedDiscussion")}{" "}
+            · {t("capture.submitShortcut")}
           </span>
           <div className="voice-submit-actions"><VoiceButton voice={voice} disabled={!draft.ready || busy} />
           <button
@@ -169,20 +172,20 @@ export default function CaptureForm({
           >
             {busy
               ? mode === "capture"
-                ? "保存中…"
-                : "发送中…"
+                ? t("capture.saving")
+                : t("capture.sending")
               : mode === "capture"
-                ? "记下"
-                : "问一问"}
+                ? t("capture.captureButton")
+                : t("capture.askButton")}
             <Icon name="arrow" size={16} />
           </button></div>
         </div>}
       </div>
       {quick && mode === "capture" && <div className="quick-source">
-        <span>来源</span>
-        {draft.value.origin?.app && draft.value.origin.app !== "Memivy" ? <span className="source-chip">{draft.value.origin.app}<button aria-label="移除应用来源" disabled={busy || !draft.ready} onClick={() => draft.update({ origin: { ...draft.value.origin!, app: "Memivy" } })}>×</button></span> : <span>仅这段文字</span>}
-        <details><summary>附带链接或文件路径</summary>
-          <input aria-label="来源链接或文件路径" placeholder="粘贴链接或绝对文件路径" disabled={busy || !draft.ready} value={draft.value.origin?.uri || ""} onChange={e => draft.update({ origin: { kind: "user", app: draft.value.origin?.app || "Memivy", project: null, uri: e.target.value || null } })} />
+        <span>{t("capture.source")}</span>
+        {draft.value.origin?.app && draft.value.origin.app !== "Memivy" ? <span className="source-chip">{draft.value.origin.app}<button aria-label={t("capture.removeAppSource")} disabled={busy || !draft.ready} onClick={() => draft.update({ origin: { ...draft.value.origin!, app: "Memivy" } })}>×</button></span> : <span>{t("capture.onlyThisText")}</span>}
+        <details><summary>{t("capture.attachments")}</summary>
+          <input aria-label={t("capture.sourceUriAria")} placeholder={t("capture.sourceUriPlaceholder")} disabled={busy || !draft.ready} value={draft.value.origin?.uri || ""} onChange={e => draft.update({ origin: { kind: "user", app: draft.value.origin?.app || "Memivy", project: null, uri: e.target.value || null } })} />
         </details>
       </div>}
       <ErrorNotice text={error || draft.error} />

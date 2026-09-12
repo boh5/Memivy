@@ -1,3 +1,4 @@
+use crate::errors::HostError;
 use memivy_core::{memory::*, model::ModelConfig};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,7 +11,7 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
-pub(crate) type HostResult<T> = std::result::Result<T, String>;
+pub(crate) type HostResult<T> = std::result::Result<T, HostError>;
 pub(crate) struct Workspace {
     pub(crate) store: MemoryStore,
     pub(crate) config: PathBuf,
@@ -27,14 +28,14 @@ fn require(window: &tauri::WebviewWindow) -> HostResult<()> {
     if matches!(window.label(), "main" | "capture") {
         Ok(())
     } else {
-        Err("窗口无权执行此操作".into())
+        Err(HostError::new("forbidden"))
     }
 }
 pub(crate) fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("请在主窗口完成此操作".into())
+        Err(HostError::new("main_window_required"))
     }
 }
 pub(crate) async fn blocking<T: Send + 'static>(
@@ -42,8 +43,8 @@ pub(crate) async fn blocking<T: Send + 'static>(
 ) -> HostResult<T> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|_| "本地操作未完成，请重试".to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|_| HostError::new("operation_failed"))?
+        .map_err(HostError::from)
 }
 #[tauri::command]
 async fn discussion_open(
@@ -93,33 +94,32 @@ async fn discussion_ask(
 ) -> HostResult<Conversation> {
     require(&window)?;
     validate_config(&state.config)?;
-    let config = crate::models::read_llm(&state)
-        .map_err(|_| "请先连接模型；问题草稿已保留，记录与搜索仍可使用".to_string())?;
-    config.endpoint().map_err(|e| e.to_string())?;
+    let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
+    config.endpoint().map_err(HostError::from)?;
     if context.len() > 4 {
-        return Err("一次最多选择 4 条记忆".into());
+        return Err(HostError::new("context_limit"));
     }
     let mut tasks = state
         .tasks
         .lock()
-        .map_err(|_| "讨论暂时不可用".to_string())?;
+        .map_err(|_| HostError::new("discussion_unavailable"))?;
     let store = state.store.clone();
     // Retried command delivery reuses the attempt, never starts another request.
     if let Ok(old) = store.turn(&id) {
         let _ = old;
-        let previous = store.conversation(&topic_id).map_err(|e| e.to_string())?;
+        let previous = store.conversation(&topic_id).map_err(HostError::from)?;
         if (collection_id.is_some() || id == topic_id) && previous.collection_id != collection_id {
-            return Err(DataError::RequestConflict.to_string());
+            return Err(DataError::RequestConflict.into());
         }
         store
             .start_turn(&id, &topic_id, &question, &context)
-            .map_err(|e| e.to_string())?;
-        return store.conversation(&topic_id).map_err(|e| e.to_string());
+            .map_err(HostError::from)?;
+        return store.conversation(&topic_id).map_err(HostError::from);
     }
     let topic = match store.conversation(&topic_id) {
         Ok(topic) => {
             if collection_id.is_some() && topic.collection_id != collection_id {
-                return Err(DataError::Conflict.to_string());
+                return Err(DataError::Conflict.into());
             }
             topic
         }
@@ -129,17 +129,18 @@ async fn discussion_ask(
                 &question.chars().take(60).collect::<String>(),
                 collection_id.as_deref(),
             )
-            .map_err(|e| e.to_string())?,
-        Err(e) => return Err(e.to_string()),
+            .map_err(HostError::from)?,
+        Err(e) => return Err(e.into()),
     };
     let turn = store
         .start_turn(&id, &topic_id, &question, &context)
-        .map_err(|e| e.to_string())?;
+        .map_err(HostError::from)?;
     let task_id = id.clone();
     let _ = app.emit("resources-changed", ());
+    let answer_language = crate::i18n::language(&app);
     let task = tokio::spawn(async move {
         if let Err(failure) = store
-            .answer_discussion(&config, &topic_id, &turn, &context)
+            .answer_discussion_with_language(&config, &topic_id, &turn, &context, &answer_language)
             .await
         {
             let _ = store.fail_turn(&task_id, failure);
@@ -160,11 +161,11 @@ fn discussion_cancel(
     id: String,
 ) -> HostResult<()> {
     require(&window)?;
-    state.store.cancel_turn(&id).map_err(|e| e.to_string())?;
+    state.store.cancel_turn(&id).map_err(HostError::from)?;
     if let Some(task) = state
         .tasks
         .lock()
-        .map_err(|_| "讨论暂时不可用".to_string())?
+        .map_err(|_| HostError::new("discussion_unavailable"))?
         .remove(&id)
     {
         task.abort();
@@ -179,10 +180,7 @@ async fn discussion_source(
     source: SourceRef,
     message_id: Option<String>,
 ) -> std::result::Result<Evidence, ReadError> {
-    require(&window).map_err(|message| ReadError {
-        code: "denied",
-        message,
-    })?;
+    require(&window)?;
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || match message_id {
         Some(id) => store.discussion_excerpt(&id, &source),
@@ -212,12 +210,12 @@ async fn discussion_merge(
 ) -> HostResult<String> {
     require(&window)?;
     validate_config(&state.config)?;
-    let config = crate::models::read_llm(&state).map_err(|e| e.to_string())?;
+    let config = crate::models::read_llm(&state)?;
     state
         .store
         .preview_conclusion_merge(&config, &destination, &text)
         .await
-        .map_err(|_| "融合预览未完成，原文与结论仍保留。请检查模型连接或缩短内容后重试。".into())
+        .map_err(|_| HostError::new("integration_failed"))
 }
 #[tauri::command]
 async fn discussion_targets(
@@ -463,14 +461,13 @@ async fn organization_collections(
         return Ok(cached);
     }
     validate_config(&state.config)?;
-    let config =
-        crate::models::read_llm(&state).map_err(|_| "连接模型后可重试专题推荐".to_string())?;
+    let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
     let _guard = state.recommendation_lock.lock().await;
     state
         .store
         .recommend_organization_collections(&config, &receipt)
         .await
-        .map_err(|_| "专题推荐暂未完成，记忆已保存。可重试，或在记忆页手动选择专题。".to_string())
+        .map_err(|_| HostError::new("recommendation_failed"))
 }
 #[tauri::command]
 async fn organization_states(
@@ -518,13 +515,12 @@ async fn navigation_suggest(
 ) -> HostResult<Vec<LibraryRow>> {
     require_main(&window)?;
     validate_config(&state.config)?;
-    let config = crate::models::read_llm(&state)
-        .map_err(|_| "连接模型后即可推荐，专题和记忆保持原样".to_string())?;
+    let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
     state
         .store
         .suggest_collection(&config, &collection)
         .await
-        .map_err(|_| "推荐未完成，请检查模型连接后重试".to_string())
+        .map_err(|_| HostError::new("recommendation_failed"))
 }
 #[tauri::command]
 async fn library_changes(
@@ -546,24 +542,7 @@ async fn library_query(
     let s = state.store.clone();
     blocking(move || s.library(&query)).await
 }
-#[derive(Serialize)]
-struct ReadError {
-    code: &'static str,
-    message: String,
-}
-impl From<DataError> for ReadError {
-    fn from(error: DataError) -> Self {
-        Self {
-            code: match error {
-                DataError::Unavailable => "unavailable",
-                DataError::Busy => "busy",
-                DataError::Conflict => "conflict",
-                _ => "read_failed",
-            },
-            message: error.to_string(),
-        }
-    }
-}
+type ReadError = HostError;
 #[tauri::command]
 async fn library_detail(
     window: tauri::WebviewWindow,
@@ -571,10 +550,7 @@ async fn library_detail(
     key: RecordKey,
     archives: Option<bool>,
 ) -> std::result::Result<LibraryDetail, ReadError> {
-    require(&window).map_err(|message| ReadError {
-        code: "denied",
-        message,
-    })?;
+    require(&window)?;
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || {
         store.library_detail_view(&key, archives.unwrap_or(true))
@@ -692,7 +668,7 @@ async fn library_capture(
 ) -> HostResult<CaptureResult> {
     require(&window)?;
     if !matches!(&request.origin,Origin::User {app, ..} if app=="Memivy") {
-        return Err("主窗口只能保存你主动输入的记录".into());
+        return Err(HostError::new("capture_origin_invalid"));
     }
     let s = state.store.clone();
     blocking(move || s.capture(&request)).await
@@ -872,8 +848,8 @@ async fn memory_export(
         };
         let _ = tx.send(path);
     })
-    .map_err(|_| "无法打开保存窗口".to_string())?;
-    let Some(target) = rx.await.map_err(|_| "文件选择未完成".to_string())? else {
+    .map_err(|_| HostError::new("file_dialog_failed"))?;
+    let Some(target) = rx.await.map_err(|_| HostError::new("file_dialog_failed"))? else {
         return Ok(None);
     };
     let s = state.store.clone();
@@ -885,11 +861,11 @@ async fn memory_export(
 }
 pub(crate) fn read_model(state: &Workspace) -> HostResult<ModelConfig> {
     validate_config(&state.config)?;
-    crate::models::read_llm(state).map_err(|_| "请先在设置中连接模型；原文和草稿已保留".to_string())
+    crate::models::read_llm(state).map_err(|_| HostError::new("model_required"))
 }
 fn validate_config(path: &std::path::Path) -> HostResult<()> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    crate::storage::validate_config_path(path, home.as_deref())
+    crate::storage::validate_config_path(path, home.as_deref()).map_err(HostError::from)
 }
 #[derive(Serialize, Default)]
 struct Settings {
@@ -957,14 +933,14 @@ fn workspace_configure(
     let _lock = state
         .config_lock
         .lock()
-        .map_err(|_| "配置正忙".to_string())?;
+        .map_err(|_| HostError::new("busy"))?;
     let path = &state.config;
     validate_config(path)?;
     let previous = if path.exists() {
         match ModelConfig::read(path) {
             Ok(c) => Some(c),
             Err(_) if replace_unreadable => None,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.into()),
         }
     } else {
         None
@@ -987,7 +963,7 @@ fn workspace_configure(
         output_token_parameter,
     }
     .save(path)
-    .map_err(|e| e.to_string())?;
+    .map_err(HostError::from)?;
     let _ = window.app_handle().emit("settings-changed", ());
     Ok(())
 }
@@ -998,19 +974,21 @@ async fn workspace_test_model(
 ) -> HostResult<memivy_core::model::tools::Capabilities> {
     require_main(&window)?;
     validate_config(&state.config)?;
-    let c = crate::models::read_llm(&state).map_err(|e| e.to_string())?;
+    let c = crate::models::read_llm(&state)?;
     state
         .store
         .test_model_capabilities(&c)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(HostError::from)
 }
 #[tauri::command]
 fn workspace_close(window: tauri::WebviewWindow) -> HostResult<()> {
     if window.label() != "main" {
-        return Err("仅主窗口可以隐藏主窗口".into());
+        return Err(HostError::new("main_window_required"));
     }
-    window.hide().map_err(|_| "主窗口无法隐藏".into())
+    window
+        .hide()
+        .map_err(|_| HostError::new("window_hide_failed"))
 }
 #[tauri::command]
 async fn embedding_status(
@@ -1093,6 +1071,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 tasks: Mutex::new(HashMap::new()),
                 recommendation_lock: tokio::sync::Mutex::new(()),
             });
+            crate::i18n::setup(app.handle());
             crate::desktop::setup(app)?;
             crate::voice::setup(app.handle())?;
             start_organizer(app.handle().clone());
@@ -1106,11 +1085,14 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 let _ = window.emit("workspace-close-request", ());
             }
             if let tauri::WindowEvent::Focused(true) = event {
+                crate::i18n::refresh(window.app_handle());
                 let _ = window.emit("resources-changed", ());
             }
         })
         .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
+            crate::i18n::ui_language_snapshot,
+            crate::i18n::ui_language_set,
             crate::voice::voice_status,
             crate::voice::voice_control,
             crate::voice::voice_start,

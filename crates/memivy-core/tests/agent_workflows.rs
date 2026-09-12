@@ -101,15 +101,16 @@ fn topic(store: &MemoryStore) -> String {
 }
 
 #[tokio::test]
-async fn agent_reads_disjoint_current_windows_and_preserves_protocol_without_saving_answer() {
+async fn agent_english_presentation_preserves_mixed_language_evidence_and_protocol() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let text = format!(
-        "anchor start-fact\n{}\nEND-4792",
+        "anchor start-fact；原始中文证据不翻译\n{}\nEND-4792",
         "ordinary background ".repeat(400)
     );
     let tail = text.chars().count() - 8;
     let saved = capture(&store, &text);
+    let original_memory = serde_json::to_value(store.memory(&saved.memory_id).unwrap()).unwrap();
     let conversation = topic(&store);
     let (config, requests, server) = fixture(6, move |n, _| {
         (
@@ -131,7 +132,7 @@ async fn agent_reads_disjoint_current_windows_and_preserves_protocol_without_sav
                     _ => tool(
                         n,
                         "answer",
-                        json!({"recollections":[{"text":"start-fact and END-4792","sources":["M1"]}],"ideas":"new idea only","conclusion":"review before save"}),
+                        json!({"presentation":{"no_evidence":"I have not found enough memory evidence.","ideas_heading":"Further thoughts","conclusion_heading":"A conclusion to keep"},"recollections":[{"text":"start-fact and END-4792","sources":["M1"]}],"ideas":"new idea only","conclusion":"review before save"}),
                     ),
                 }
             },
@@ -145,24 +146,61 @@ async fn agent_reads_disjoint_current_windows_and_preserves_protocol_without_sav
             .multi_turn
     );
     let turn = store
-        .start_turn(&id(), &conversation, "anchor detail", &[])
+        .start_turn(
+            &id(),
+            &conversation,
+            "关于 anchor 的细节，please answer in English.",
+            &[],
+        )
         .unwrap();
     store
-        .answer_discussion(&config, &conversation, &turn, &[])
+        .answer_discussion_with_language(&config, &conversation, &turn, &[], "zh-CN")
         .await
         .unwrap();
     server.join().unwrap();
     let result = store.turn(&turn.id).unwrap();
     assert_eq!(result.assistant.status, "complete");
+    assert!(result.assistant.text.contains("Further thoughts"));
+    assert!(result.assistant.text.contains("A conclusion to keep"));
+    assert!(!result.assistant.text.contains("接着想"));
+    let persisted = store.turn(&turn.id).unwrap();
+    assert_eq!(persisted.assistant.text, result.assistant.text);
+    assert_eq!(
+        serde_json::to_value(store.memory(&saved.memory_id).unwrap()).unwrap(),
+        original_memory
+    );
+
     let source = SourceRef::Version(saved.version_id);
     let evidence = store
         .discussion_excerpt(&result.assistant.id, &source)
         .unwrap();
     assert!(evidence.text.contains("start-fact"));
+    assert!(evidence.text.contains("原始中文证据不翻译"));
     assert_eq!(evidence.additional_spans.len(), 1);
     assert_eq!(evidence.additional_spans[0].text, "END-4792");
     assert_eq!(store.memories(false, 100).unwrap().len(), 1);
     let requests = requests.lock().unwrap();
+    for request in &requests[3..] {
+        let system = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "system")
+            .filter_map(|m| m["content"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(system.contains("follow the user's explicit language request first"));
+        assert!(system.contains("finally Simplified Chinese"));
+        assert!(
+            system.contains("Evidence language and UI language must not override the question")
+        );
+        assert!(system.contains("presentation"));
+        assert!(
+            request["messages"]
+                .to_string()
+                .contains("please answer in English")
+        );
+    }
     let messages = requests[4]["messages"].as_array().unwrap();
     assert!(
         messages
@@ -198,7 +236,7 @@ async fn missing_multi_turn_uses_fixed_rag_and_capability_cache_follows_configur
         _ => (
             200,
             content(
-                json!({"recollections":[{"text":"fact","sources":["M1"]}],"ideas":"","conclusion":""}),
+                json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"fact","sources":["M1"]}],"ideas":"","conclusion":""}),
             ),
         ),
     });
@@ -353,7 +391,7 @@ async fn unknown_tool_and_changed_evidence_cannot_complete_answers() {
                     tool(
                         n,
                         "answer",
-                        json!({"recollections":[{"text":"old","sources":["M1"]}],"ideas":"","conclusion":""}),
+                        json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"old","sources":["M1"]}],"ideas":"","conclusion":""}),
                     )
                 },
             )
@@ -413,7 +451,7 @@ async fn first_miss_can_rephrase_and_repeated_read_ends_evidence_rounds() {
                         tool(
                             n,
                             "answer",
-                            json!({"recollections":[{"text":"actual fact","sources":["M1"]}],"ideas":"","conclusion":""}),
+                            json!({"presentation":{"no_evidence":"目前没有找到足够的记忆依据。","ideas_heading":"接着想：","conclusion_heading":"可以留下的结论："},"recollections":[{"text":"actual fact","sources":["M1"]}],"ideas":"","conclusion":""}),
                         )
                     }
                 }

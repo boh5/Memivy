@@ -1,7 +1,9 @@
 import { useResourceVersion } from "./resources";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { call, errorText, unavailable, type Key, type Source } from "./api";
 import { ErrorNotice } from "./components";
+import { useNotice } from "../i18n/react";
 
 type Related = { memory_id: string; version_id: string; title: string; snippet: string; source: Source };
 export default function RelatedMemories({ memoryId, versionId, revision: requestedRevision = 0, onOpen, onDiscuss, collectionId, paused = false }: {
@@ -9,11 +11,12 @@ export default function RelatedMemories({ memoryId, versionId, revision: request
   memoryId: string; versionId: string; revision?: number;
   onOpen: (key: Key) => void; onDiscuss: (sources: Source[]) => Promise<void>;
 }) {
+  const { t } = useTranslation("workspace");
   const revision = useResourceVersion([{domain:"memory"},{domain:"collection"},{domain:"navigation"}]) + requestedRevision;
   const [rows, setRows] = useState<Related[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const chosen = useRef<Related[]>([]);
-  const [error, setError] = useState("");
+  const [error, setError] = useNotice();
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const owner = JSON.stringify([memoryId, versionId, collectionId]);
@@ -58,18 +61,18 @@ export default function RelatedMemories({ memoryId, versionId, revision: request
     finally { lock.current = false; setBusy(false); }
   }
   if (!rows.length && !error) return null;
-  return <section className="related-memories" aria-label="相关记忆">
-    <div className="section-heading"><h3>相关记忆</h3><span>来自本地内容的词语关联</span></div>
+  return <section className="related-memories" aria-label={t("related.aria")}>
+    <div className="section-heading"><h3>{t("related.heading")}</h3><span>{t("related.description")}</span></div>
     <ErrorNotice text={error} />
     {rows.map(row => <article className="related-memory" key={row.version_id}>
-      <input type="checkbox" aria-label={`选择相关记忆：${row.title}`} disabled={busy}
+      <input type="checkbox" aria-label={t("related.select", { title: row.title })} disabled={busy}
         checked={selected.includes(row.version_id)} onChange={e => { chosen.current = e.target.checked ? [...chosen.current,row] : chosen.current.filter(value => value.version_id !== row.version_id); setSelected(ids => e.target.checked ? [...ids, row.version_id] : ids.filter(id => id !== row.version_id)); }} />
       <button className="related-memory-link" disabled={busy} onClick={() => onOpen({ kind: "memory", id: row.memory_id })}>
         <strong>{row.title}</strong><span>{row.snippet}</span>
       </button>
     </article>)}
     {selected.length > 0 && <button className="outline-button" disabled={busy} onClick={() => void discuss()}>
-      {busy ? "打开讨论…" : `结合选中的 ${selected.length} 条继续想`}
+      {busy ? t("related.openingDiscussion") : t("related.continue", { count: selected.length })}
     </button>}
   </section>;
 }

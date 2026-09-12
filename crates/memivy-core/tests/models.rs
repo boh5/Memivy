@@ -98,9 +98,9 @@ fn transcription_sends_wav_and_reads_text() {
 fn server_errors_never_echo_credentials_or_response_body() {
     let (url, h) = server(r#"{"error":"test-secret private-memory"}"#, 401);
     let error = models::transcribe(&model(url), &[0.; 160]).unwrap_err();
-    assert!(!error.contains("test-secret"));
-    assert!(!error.contains("private-memory"));
-    assert!(error.contains("认证"));
+    assert!(!error.to_string().contains("test-secret"));
+    assert!(!error.to_string().contains("private-memory"));
+    assert_eq!(error, models::Error::Authentication);
     h.join().unwrap();
     let (url, h) = server(r#"{"text":42}"#, 200);
     assert!(models::transcribe(&model(url), &[0.; 160]).is_err());
@@ -129,7 +129,10 @@ fn registry_preserves_legacy_secrets_and_rejects_stale_writes() {
             & 0o777,
         0o600
     );
-    assert!(r.save(d.path(), "initial").is_err());
+    assert_eq!(
+        r.save(d.path(), "initial").unwrap_err(),
+        models::Error::Conflict
+    );
     let mut copy = Registry::read(d.path()).unwrap();
     copy.llm = None;
     let revision = copy.revision.clone();
@@ -247,14 +250,28 @@ fn oversized_registry_cannot_replace_a_readable_configuration() {
         base_url: format!("http://localhost:1234/v1/{}", "x".repeat(256 * 1024)),
         api_key: None,
     });
-    assert!(
-        candidate
-            .save(dir.path(), &current.revision)
-            .unwrap_err()
-            .contains("过大")
+    assert_eq!(
+        candidate.save(dir.path(), &current.revision).unwrap_err(),
+        models::Error::ConfigurationTooLarge
     );
     assert_eq!(
         Registry::read(dir.path()).unwrap().revision,
         current.revision
     );
+}
+
+#[test]
+fn service_status_codes_are_stable_and_never_contain_server_content() {
+    for (status, expected) in [
+        (403, models::Error::Authentication),
+        (429, models::Error::RateLimit),
+        (503, models::Error::HttpStatus),
+    ] {
+        let (url, h) = server("private-memory secret-key", status);
+        let error =
+            models::embed(&model(url), "query", Some(3), Duration::from_secs(2)).unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!error.to_string().contains("secret-key"));
+        h.join().unwrap();
+    }
 }

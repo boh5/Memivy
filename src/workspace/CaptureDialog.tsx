@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { finishVoiceInputs } from "./useVoice";
 import CaptureForm from "./CaptureForm";
 import { ErrorNotice, Modal } from "./components";
 import { errorText, type Key } from "./api";
 import { flushDraft } from "./useDraft";
+import { useNotice } from "../i18n/react";
 
 export default function CaptureDialog({ quick, sourceApp, focus, onReady, onSaved, onClose }: {
   quick: boolean;
@@ -14,7 +16,8 @@ export default function CaptureDialog({ quick, sourceApp, focus, onReady, onSave
   onClose: () => void;
 }) {
   const busy = useRef(false), closing = useRef(false);
-  const [error, setError] = useState("");
+  const { t } = useTranslation("workspace");
+  const [error, setError] = useNotice();
   async function close() {
     if (busy.current || closing.current) return;
     closing.current = true;
@@ -26,8 +29,8 @@ export default function CaptureDialog({ quick, sourceApp, focus, onReady, onSave
     } catch (e) { setError(errorText(e)); }
     finally { closing.current = false; }
   }
-  return <Modal title="记一下" className="capture-dialog" onClose={() => void close()}>
-    <p className="capture-dialog-intro">想法不用整理好再来。</p>
+  return <Modal title={t("capture.title")} className="capture-dialog" onClose={() => void close()}>
+    <p className="capture-dialog-intro">{t("capture.intro")}</p>
     <CaptureForm quick={quick} sourceApp={sourceApp} focus={focus} onReady={onReady}
       mode="capture" presentation="capture" onMode={() => {}} onAsk={async () => {}}
       onEdit={() => setError("")} onBusy={value => { busy.current = value; }} onSaved={onSaved} />

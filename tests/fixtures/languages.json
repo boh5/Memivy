@@ -1,0 +1,88 @@
+[
+  {
+    "preferences": [],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "fr-FR",
+      "zh-CN"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "en-GB"
+    ],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "zh-Hans-SG"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "zh-Hant",
+      "en-US"
+    ],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "zh-Hant",
+      "zh-CN"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "ZH_hans_CN"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "zh"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "zh-SG"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "zh-TW"
+    ],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "zh-HK",
+      "zh"
+    ],
+    "language": "zh-CN"
+  },
+  {
+    "preferences": [
+      "unknown"
+    ],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "zh-Hant-CN"
+    ],
+    "language": "en"
+  },
+  {
+    "preferences": [
+      "zh-Hans-TW"
+    ],
+    "language": "zh-CN"
+  }
+]

@@ -1,4 +1,5 @@
 //! Main-window cleanup orchestration. One cancellable, read-only model job at a time.
+use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace, blocking, read_model, require_main};
 use memivy_core::memory::{CleanupSave, CleanupSnapshot, Receipt, propose_cleanup};
 use std::sync::Mutex;
@@ -22,10 +23,13 @@ pub(crate) async fn cleanup_prepare(
 ) -> HostResult<CleanupSnapshot> {
     require_main(&window)?;
     if id.is_empty() || id.len() > 64 || !id.is_ascii() {
-        return Err("整理请求无效".into());
+        return Err(HostError::new("invalid"));
     }
     {
-        let mut slot = jobs.0.lock().map_err(|_| "整理暂时不可用".to_string())?;
+        let mut slot = jobs
+            .0
+            .lock()
+            .map_err(|_| HostError::new("cleanup_unavailable"))?;
         if let Some(old) = slot.take().and_then(|j| j.abort) {
             old.abort();
         }
@@ -51,22 +55,25 @@ pub(crate) async fn cleanup_generate(
     let original = snapshot.clone();
     blocking(move || store.check_cleanup(&original)).await?;
     let task = {
-        let mut slot = jobs.0.lock().map_err(|_| "整理暂时不可用".to_string())?;
+        let mut slot = jobs
+            .0
+            .lock()
+            .map_err(|_| HostError::new("cleanup_unavailable"))?;
         let job = slot
             .as_mut()
             .filter(|j| j.id == id && j.abort.is_none())
-            .ok_or("整理已取消或正在运行")?;
+            .ok_or(HostError::new("cleanup_busy"))?;
         let task = tokio::spawn(async move {
             propose_cleanup(&config, &snapshot, previous.as_deref(), &instruction)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(HostError::from)
         });
         job.abort = Some(task.abort_handle());
         task
     };
     let result = task
         .await
-        .map_err(|_| "整理已取消".to_string())
+        .map_err(|_| HostError::new("cancelled"))
         .and_then(|r| r);
     if let Ok(mut slot) = jobs.0.lock()
         && let Some(job) = slot.as_mut().filter(|j| j.id == id)
@@ -83,7 +90,10 @@ pub(crate) fn cleanup_cancel(
     id: String,
 ) -> HostResult<()> {
     require_main(&window)?;
-    let mut slot = jobs.0.lock().map_err(|_| "整理暂时不可用".to_string())?;
+    let mut slot = jobs
+        .0
+        .lock()
+        .map_err(|_| HostError::new("cleanup_unavailable"))?;
     if slot.as_ref().is_some_and(|j| j.id == id)
         && let Some(task) = slot.take().and_then(|j| j.abort)
     {

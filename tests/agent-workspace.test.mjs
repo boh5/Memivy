@@ -6,7 +6,7 @@ test('candidate capability tests explain limitations without activating the mode
  const f=workspaceFixture(t,{native:true});
  let binding={source:'service',connection:'qa',model:'QA',dimensions:null,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1',has_key:false}],llm:binding,embedding:binding,voice:binding,auto_organize:true};
- f.overrides.models_test=async()=>({token:'proof',binding,message:'连接可用：支持基本工具调用，部分增强能力不可用'});
+ f.overrides.models_test=async()=>({token:'proof',binding,message:'model_test_basic',message_params:{}});
  let applied=0;
  const view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,{kind:'llm',models,draft:binding,embedding:null,voice:null,setDraft:b=>{binding=b},onBusy(){},onSaved(){applied++},onRefresh:async()=>{}});await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==='测试连接').props.onClick();await f.settle();
@@ -35,7 +35,7 @@ test('voice settings entry opens the capability and navigation retains model dra
  const capability=()=>f.find(view,n=>typeof n.type==='function'&&n.type.name==='ModelCapability');
  assert.equal(capability().props.kind,'voice');
  capability().props.setDraft({...binding,source:'service',model:'unfinished-model'});await f.settle();
- f.find(view,n=>n.type==='button'&&f.text(n)==='快捷入口').props.onClick();await f.settle();
+ f.find(view,n=>n.type==='button'&&f.text(n)==='通用').props.onClick();await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==='AI 与模型').props.onClick();await f.settle();
  const sections=f.nodes(view.tree).filter(n=>n.type==='section'&&f.text(n).includes('语音输入'));
  const button=f.nodes(sections[0]).find(n=>n.type==='button');button.props.onClick();await f.settle();
@@ -82,7 +82,7 @@ test('failed activation reloads the actual revision and keeps the candidate draf
  const f=workspaceFixture(t,{native:true});
  const binding={source:'service',connection:'qa',model:'draft-model',dimensions:null,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1'}],llm:null,embedding:binding,voice:binding,auto_organize:true};
- f.overrides.models_test=async()=>({token:'proof',binding,message:'测试通过'});
+ f.overrides.models_test=async()=>({token:'proof',binding,message:'model_test_basic',message_params:{}});
  f.overrides.models_apply=async()=>{throw 'activation failed'};
  f.overrides.models_load=async()=>({...models,revision:'rollback-revision'});
  let reconciled,view;const props={kind:'llm',models,draft:binding,embedding:null,voice:null,onBusy(){},onSaved(){assert.fail('must not claim saved')},onReconcile(m){reconciled=m},onRefresh:async()=>{},setDraft(b){props.draft=b;f.render(view,props)}};
@@ -98,7 +98,7 @@ test('changing only an embedding key applies without claiming the index will be 
  const binding={source:'service',connection:'qa',model:'same-model',dimensions:4,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1',has_key:true}],llm:null,embedding:binding,voice:binding,auto_organize:true};
  const tested={...binding,connection:'candidate'};
- f.overrides.models_test=async()=>({token:'proof',binding:tested,message:'测试通过'});
+ f.overrides.models_test=async()=>({token:'proof',binding:tested,message:'model_test_basic',message_params:{}});
  let applied=false;f.overrides.models_apply=async()=>{applied=true;return models};
  let view;const props={kind:'embedding',models,draft:binding,connectionDraft:{id:'qa',name:'QA',base_url:'http://localhost:1234/v1/',api_key:'fixed-key',remove:false},embedding:{enabled:true,preparing:false},voice:null,onBusy(){},onSaved(){},onRefresh:async()=>{},setDraft(b){props.draft=b;f.render(view,props)}};
  view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,props);await f.settle();

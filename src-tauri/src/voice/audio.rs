@@ -47,10 +47,7 @@ where
             },
             None,
         )
-        .map_err(|_| {
-            "无法打开麦克风。请在系统设置 → 隐私与安全性 → 麦克风中允许 Memivy，并检查输入设备。"
-                .into()
-        })
+        .map_err(|_| "microphone_permission".into())
 }
 pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Result<(), String> {
     if stop.load(Ordering::SeqCst) {
@@ -58,15 +55,15 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
     }
     let device = cpal::default_host()
         .default_input_device()
-        .ok_or("未找到麦克风，请连接输入设备")?;
+        .ok_or("microphone_missing")?;
     let supported = device
         .default_input_config()
-        .map_err(|_| "麦克风不可用，请检查系统输入设备")?;
+        .map_err(|_| "microphone_unavailable")?;
     let format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
     let rate = config.sample_rate.0 as usize;
     if !(8000..=192000).contains(&rate) || config.channels == 0 || config.channels > 32 {
-        return Err("麦克风格式不受支持".into());
+        return Err("microphone_format".into());
     }
     let (tx, rx) = mpsc::sync_channel(128);
     let failed = Arc::new(AtomicBool::new(false));
@@ -74,15 +71,13 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
         cpal::SampleFormat::F32 => stream::<f32>(&device, &config, tx, failed.clone()),
         cpal::SampleFormat::I16 => stream::<i16>(&device, &config, tx, failed.clone()),
         cpal::SampleFormat::U16 => stream::<u16>(&device, &config, tx, failed.clone()),
-        _ => Err("麦克风采样格式不受支持".into()),
+        _ => Err("microphone_format".into()),
     }?;
     let mut resampler =
-        FftFixedIn::<f32>::new(rate, 16000, FRAME, 2, 1).map_err(|_| "音频转换初始化失败")?;
+        FftFixedIn::<f32>::new(rate, 16000, FRAME, 2, 1).map_err(|_| "audio_conversion_failed")?;
     let mut pending = Vec::with_capacity(FRAME * 4);
     let mut segment = Segmenter::default();
-    stream
-        .play()
-        .map_err(|_| "麦克风未能开始录音，请检查系统权限")?;
+    stream.play().map_err(|_| "microphone_permission")?;
     service.listening(&id);
     let mut count = 0usize;
     let mut interrupted = false;
@@ -98,7 +93,7 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
                 let input: Vec<f32> = pending.drain(..FRAME).collect();
                 let out = resampler
                     .process(&[input], None)
-                    .map_err(|_| "音频转换失败")?;
+                    .map_err(|_| "audio_conversion_failed")?;
                 feed(&service, &id, &mut segment, &out[0])?;
             }
         }
@@ -112,18 +107,18 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
         let input: Vec<f32> = pending.drain(..n).collect();
         let out = resampler
             .process_partial(Some(&[input]), None)
-            .map_err(|_| "音频末尾转换失败")?;
+            .map_err(|_| "audio_conversion_failed")?;
         feed(&service, &id, &mut segment, &out[0])?;
     }
     let out = resampler
         .process_partial::<Vec<f32>>(None, None)
-        .map_err(|_| "音频末尾转换失败")?;
+        .map_err(|_| "audio_conversion_failed")?;
     feed(&service, &id, &mut segment, &out[0])?;
     if let Some(pcm) = segment.finish() {
         service.enqueue(&id, pcm)?;
     }
     if interrupted {
-        return Err("录音设备中断或处理不及，已保留收到的音频。可重试转写并核对是否缺字。".into());
+        return Err("audio_interrupted".into());
     }
     Ok(())
 }

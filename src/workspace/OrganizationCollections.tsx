@@ -1,7 +1,10 @@
 import { useResourceVersion } from "./resources";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { notify } from "./Toast";
 import { call, errorText, native, type Collection, type Key, type RecordNavigation } from "./api";
+import { message } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
 
 type Suggestion = { collection: Collection; reason: string };
 // A receipt can be visible in both the capture feedback and reading pane. Share
@@ -25,8 +28,9 @@ function load(receipt: string, retry: boolean) {
 export default function OrganizationCollections({ receipt, record, revision: requestedRevision = 0, disabled, onRefresh }: {
   receipt: string; record: Key; revision?: number; disabled: boolean; onRefresh: () => void;
 }) {
+  const { t } = useTranslation("workspace");
   const revision = useResourceVersion([{domain:"navigation",entity:`${record.kind}:${record.id}`},{domain:"collection"}]) + requestedRevision;
-  const [rows, setRows] = useState<Suggestion[] | null>(null), [error, setError] = useState("");
+  const [rows, setRows] = useState<Suggestion[] | null>(null), [error, setError] = useNotice();
   const [hidden, setHidden] = useState(() => dismissed.has(receipt)), [attempt, setAttempt] = useState(0);
   const [members, setMembers] = useState<string[]>([]);
   const [reasonFor, setReasonFor] = useState<string | null>(null);
@@ -58,7 +62,7 @@ export default function OrganizationCollections({ receipt, record, revision: req
       if (!alive.current) return;
       setMembers(v => undo ? v.filter(c => c !== id) : [...new Set([...v, id])]);
       onRefresh();
-      if (!undo) notify(`已加入「${suggestion.collection.name}」`, "撤销", () => {
+      if (!undo) notify(message("workspace", "organization.added", { name: suggestion.collection.name }), message("workspace", "collection.undo"), () => {
         void call("navigation_collect", {collection:id,key:record,included:false}).then(() => { if(alive.current)onRefresh(); }).catch(e => { if(alive.current)setError(errorText(e)); });
       }, 8000);
     } catch (e) { if (alive.current) setError(errorText(e)); }
@@ -73,16 +77,16 @@ export default function OrganizationCollections({ receipt, record, revision: req
   }
   const visible = rows?.filter(s => !members.includes(s.collection.id));
   if (rows && !visible?.length && !error) return null;
-  return <section className="organization-collections" aria-label="专题推荐">
+  return <section className="organization-collections" aria-label={t("organization.aria")}>
     <div className="recommendation-tags">
-      <span className="recommendation-label">{rows?.length ? "建议加入" : error ? "专题推荐" : "正在寻找合适的专题…"}</span>
+      <span className="recommendation-label">{rows?.length ? t("organization.suggested") : error ? t("organization.heading") : t("organization.searching")}</span>
       {visible?.map(s => <div className="recommendation-chip" key={s.collection.id}>
         <button disabled={disabled || busy || !ready} onClick={() => void update(s,false)}>＋ {s.collection.name}</button>
-        <button className="recommendation-why" aria-label={`为什么推荐${s.collection.name}`} aria-expanded={reasonFor===s.collection.id} onClick={() => setReasonFor(v=>v===s.collection.id?null:s.collection.id)}>?</button>
+        <button className="recommendation-why" aria-label={t("organization.why", { name: s.collection.name })} aria-expanded={reasonFor===s.collection.id} onClick={() => setReasonFor(v=>v===s.collection.id?null:s.collection.id)}>?</button>
       </div>)}
-      <button className="quiet dismiss-recommendations" disabled={busy} onClick={() => void dismiss()}>忽略本次建议</button>
+      <button className="quiet dismiss-recommendations" disabled={busy} onClick={() => void dismiss()}>{t("organization.ignore")}</button>
     </div>
     {reasonFor && <p className="recommendation-reason">{visible?.find(s=>s.collection.id===reasonFor)?.reason}</p>}
-    {error && <div className="organization-collections-error"><span role="status">{error}</span><button className="quiet" disabled={busy || disabled} onClick={() => setAttempt(v => v + 1)}>重试推荐</button></div>}
+    {error && <div className="organization-collections-error"><span role="status">{error}</span><button className="quiet" disabled={busy || disabled} onClick={() => setAttempt(v => v + 1)}>{t("organization.retry")}</button></div>}
   </section>;
 }

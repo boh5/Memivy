@@ -162,6 +162,8 @@ fn whole_restore_preserves_latest_library_and_private_configuration() {
     );
     let outcome = restored.last_restore_result().unwrap().unwrap();
     assert!(outcome.restored);
+    assert_eq!(outcome.message_code.as_deref(), Some("restore_completed"));
+    assert!(outcome.error_code.is_none());
     let previous = outcome.previous_backup.unwrap();
     assert!(
         !fs::read(&previous)

@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
+import { message } from '../i18n/messages';
+import { useNotice } from '../i18n/react';
 import type { CrepeBuilder } from "@milkdown/crepe/builder";
 import "@milkdown/crepe/theme/common/prosemirror.css";
 import { createRoot } from "react-dom/client";
@@ -12,12 +16,14 @@ import "./markdown.css";
 type Props = { value: string; onChange: (value: string) => void; label: string; disabled?: boolean; autoFocus?: boolean; onSave?: () => void };
 
 export default function MarkdownEditor(props: Props) {
+  const { t } = useTranslation('editor');
   const { value, label, disabled = false, autoFocus = false } = props;
   const root = useRef<HTMLDivElement>(null), instance = useRef<CrepeBuilder | null>(null);
   const applied = useRef(value), sync = useRef<((value: string) => void) | null>(null), replacing = useRef(false);
   const composing = useRef(false);
   const latest = useRef(props); latest.current = props;
-  const [ready, setReady] = useState(false), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
+  const [ready, setReady] = useState(false), [error, setError] = useNotice(), [attempt, setAttempt] = useState(0);
+  const updateLabels = useRef<(() => void) | null>(null);
   // Typing must never recreate the editor or replace its selection.
   useEffect(() => {
     if (!root.current) return;
@@ -25,6 +31,7 @@ export default function MarkdownEditor(props: Props) {
     const host = root.current;
     let editor: CrepeBuilder | undefined;
     let created = false;
+    let stopLabels: (() => void) | undefined;
     let stage = "resources";
     setReady(false); setError("");
     void (async () => {
@@ -38,12 +45,12 @@ export default function MarkdownEditor(props: Props) {
       stage = "initialize";
       applied.current = latest.current.value;
       editor = new CrepeBuilder({ root: host, defaultValue: latest.current.value })
-        .addFeature(linkTooltip, { inputPlaceholder: "粘贴链接地址" })
+        .addFeature(linkTooltip, { inputPlaceholder: i18n.t('linkPlaceholder', { ns: 'editor' }) })
         .addFeature(table, extensions.tableFeatureConfig);
       editor.editor.use([extensions.underlineSchema, extensions.underlineMarkdown, extensions.taskListInput, extensions.numberedListInput, extensions.tableInput, extensions.editorShortcuts, extensions.editorListView, extensions.safeImageView].flat());
       editor.editor.config(ctx => ctx.update(core.editorViewOptionsCtx, prev => ({
         ...prev,
-        attributes: { role: "textbox", "aria-label": label, "aria-multiline": "true", spellcheck: "false" },
+        attributes: () => ({ role: "textbox", "aria-label": latest.current.label, "aria-multiline": "true", spellcheck: "false" }),
         handlePaste: (_view, event) => Array.from(event.clipboardData?.files || []).length > 0,
         handleDrop: (_view, event) => Array.from(event.dataTransfer?.files || []).length > 0,
         handleClickOn: (_view, _pos, _node, _nodePos, event) => { if ((event.target as Element).closest("a")) { event.preventDefault(); return true; } return false; },
@@ -91,6 +98,22 @@ export default function MarkdownEditor(props: Props) {
       if (cancelled) { await editor.destroy(); return; }
       created = true;
       instance.current = editor;
+      const localize = () => {
+        if (cancelled || !editor) return;
+        editor.editor.action(ctx => {
+          const view = ctx.get(core.editorViewCtx);
+          // Attribute-only updates avoid a transaction during IME composition.
+          view.dom.setAttribute('aria-label', latest.current.label);
+          ctx.update(link.linkTooltipConfig.key, previous => ({ ...previous, inputPlaceholder: i18n.t('linkPlaceholder', { ns: 'editor' }) }));
+        });
+        extensions.localizeEditorDom(host);
+      };
+      updateLabels.current = localize;
+      i18n.on('languageChanged', localize);
+      const observer = new MutationObserver(() => extensions.localizeEditorDom(host));
+      observer.observe(host, { childList: true, subtree: true });
+      stopLabels = () => { i18n.off('languageChanged', localize); observer.disconnect(); };
+      localize();
       sync.current = value => { replacing.current = true; try { editor!.editor.action(replaceAll(value, true)); applied.current = value; } finally { replacing.current = false; } };
       editor.setReadonly(!!latest.current.disabled);
       setReady(true);
@@ -101,14 +124,13 @@ export default function MarkdownEditor(props: Props) {
         setReady(false);
         // Do not log the exception message: parser errors can contain memory text.
         console.warn(`[Memivy editor] ${stage} failed`);
-        setError(stage === "resources"
-          ? "编辑器资源未能加载，正文仍可查看。请重试。"
-          : "编辑器未能打开这段内容，正文与草稿仍然保留。请重试。");
+        setError(message('editor', stage === 'resources' ? 'resourceError' : 'contentError'));
       }
       try { await editor?.destroy(); } catch { /* A partially created editor may already be disposed. */ }
     });
-    return () => { cancelled = true; instance.current = null; sync.current = null; if (created && editor) void editor.destroy(); };
-  }, [attempt, label, autoFocus]);
+    return () => { cancelled = true; stopLabels?.(); updateLabels.current = null; instance.current = null; sync.current = null; if (created && editor) void editor.destroy(); };
+  }, [attempt]);
+  useEffect(() => { updateLabels.current?.(); }, [label, ready]);
   useEffect(() => { if (ready && !composing.current && value !== applied.current) sync.current?.(value); }, [value, ready]);
   useEffect(() => { instance.current?.setReadonly(disabled); }, [disabled, ready]);
   return <div className="markdown-editor" onCompositionStart={() => { composing.current=true; }} onCompositionEnd={() => {
@@ -121,10 +143,10 @@ export default function MarkdownEditor(props: Props) {
     }
   }}>
     <div className="markdown-editor-heading"><span>{label}</span></div>
-    {error && <p className="field-help" role="alert">{error} <button type="button" className="quiet" onClick={() => setAttempt(n => n + 1)}>重新加载</button></p>}
+    {error && <p className="field-help" role="alert">{error} <button type="button" className="quiet" onClick={() => setAttempt(n => n + 1)}>{t('retry')}</button></p>}
     <div key={attempt} ref={root} className="markdown-editor-host" hidden={!!error} aria-busy={!ready && !error} />
-    {error && <section aria-label="保留的正文预览"><Markdown text={value} /></section>}
-    {!ready && !error && <p className="field-help">正在准备编辑器…</p>}
-    <div className="markdown-editor-hint"><span className="markdown-hint-dot" />支持 Markdown 输入 · 选中文字调整格式</div>
+    {error && <section aria-label={t('preview')}><Markdown text={value} /></section>}
+    {!ready && !error && <p className="field-help">{t('preparing')}</p>}
+    <div className="markdown-editor-hint"><span className="markdown-hint-dot" />{t('hint')}</div>
   </div>;
 }

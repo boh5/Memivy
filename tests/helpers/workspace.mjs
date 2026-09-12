@@ -6,8 +6,19 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
 import { randomUUID } from 'node:crypto';
+import { createInstance } from 'i18next';
+import { renderMessage } from '../../src/i18n/messages.ts';
 
 export function workspaceFixture(t, {native = false, modules = {}, timers = {setTimeout, clearTimeout}} = {}) {
+const translation = createInstance();
+const resources = {};
+for (const language of ['en', 'zh-CN']) {
+  resources[language] = {};
+  for (const name of fs.readdirSync(`locales/${language}`).filter(name => name.endsWith('.json'))) {
+    resources[language][name.slice(0, -5)] = JSON.parse(fs.readFileSync(`locales/${language}/${name}`, 'utf8'));
+  }
+}
+translation.init({ resources, lng: 'zh-CN', fallbackLng: 'en', defaultNS: 'common', initImmediate: false, interpolation: { escapeValue: false } });
 let active;
 const fibers = [];
 const hooks = {
@@ -42,7 +53,7 @@ const topic = {id:'topic-a',title:'测试讨论',updated_at:1};
 const keyA={kind:'memory',id:'a'}, keyB={kind:'memory',id:'b'};
 const row = key => ({key,title:key.id,snippet:'test',updated_at:1,origin:null});
 const api = {
-  native, unavailable:error=>error?.code==='unavailable', uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:String,
+  native, unavailable:error=>error?.code==='unavailable', uid:randomUUID, keyOf:k=>`${k.kind}:${k.id}`, errorText:error=>error?.code?{ns:'errors',key:error.code}:String(error),
   date:()=>'',fullDate:()=>'',sourceName:()=>'',
   async call(name,args) {
     calls.push({name,args});
@@ -74,7 +85,16 @@ function load(file) {
   const req = name => {
     if (Object.hasOwn(modules, name)) return modules[name];
     if(name==='./resources')return {useResourceVersion:()=>0,useResourceBridge:()=>{},expireQueries:async()=>{}};
+    if(name==='./Select')return {default:'select'}; // Shared control is exercised separately with real React.
     if(name==='react')return hooks;
+    if(name==='react-i18next')return {useTranslation:ns=>({t:translation.getFixedT(null,ns),i18n:translation})};
+    if(name==='../i18n')return {default:translation,translateCatalog:(key,options={})=>translation.exists(key,options)?translation.t(key,options):translation.t('operation_failed',{ns:'errors'})};
+    if(name==='../i18n/preferences')return {getLanguageSnapshot:()=>({preference:'zh-CN',language:'zh-CN',revision:0}),subscribeLanguage:()=>()=>{},refreshLanguage:async()=>{},setLanguagePreference:async()=>{}};
+    if(name==='../i18n/format')return {formatNumber:(value,maximumFractionDigits=0)=>new Intl.NumberFormat('zh-CN',{maximumFractionDigits}).format(value)};
+    if(name==='../i18n/react')return {useNotice:(initial='')=>{
+      const [value,setValue]=hooks.useState(initial);
+      return [renderMessage(value,(key,options)=>translation.t(key,options)),setValue,value];
+    }};
     if(name==='react-dom')return {createPortal:children=>children};
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
     if(name==='./api')return api;
@@ -131,6 +151,7 @@ function query(app) {
 function find(f,predicate){const node=nodes(f.tree).find(predicate);assert(node,'missing element');return node;}
   t.after(()=>{for(const f of fibers)if(f.alive)unmount(f);});
   return {load,mount,unmount,settle,find,query,nodes,text,db,calls,overrides,topic,keyA,keyB,
+    async language(code){await translation.changeLanguage(code);for(const f of fibers)if(f.alive)f.dirty=true;await settle();},
     focus(){windowEvents.get('focus')?.forEach(fn=>fn());},
     key(event){windowEvents.get('keydown')?.forEach(fn=>fn(event));},
     emit(name,payload){nativeEvents.get(name)?.forEach(fn=>fn({payload}));},

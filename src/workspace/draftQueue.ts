@@ -170,4 +170,4 @@ export class DraftQueue {
     });
   }
 }
-export const DRAFT_CONFLICT = "另一窗口已更新这份草稿。此处文字已保留，请核对后选择继续使用哪一份。";
+export const DRAFT_CONFLICT = Object.freeze({ code: 'draft_conflict' });

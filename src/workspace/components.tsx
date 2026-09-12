@@ -1,6 +1,7 @@
 import { ActionTooltip } from "./IconButton";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Icon } from "../ui";
+import { useTranslation } from "react-i18next";
 
 export function Highlight({ text, query }: { text: string; query: string }) {
   const terms = query
@@ -30,6 +31,7 @@ export function Modal({
   onClose: () => void;
   className?: string;
 }) {
+  const { t } = useTranslation("workspace");
   const dialog = useRef<HTMLDialogElement>(null);
   const backdropPointer = useRef<number | null>(null);
   useEffect(() => {
@@ -101,7 +103,7 @@ export function Modal({
         <h2>{title}</h2>
         <button
           className="icon-button"
-          aria-label={`关闭${title}`}
+          aria-label={t("components.close", { title })}
           onClick={onClose}
         >
           <Icon name="close" />
@@ -138,6 +140,7 @@ export function ErrorNotice({ text }: { text: string }) {
 }
 
 export function MoreMenu({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("workspace");
   const tooltipId = useId();
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -149,7 +152,7 @@ export function MoreMenu({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("pointerdown", close);
   }, []);
   return (
-    <ActionTooltip label="更多操作" tooltipId={tooltipId}><details
+    <ActionTooltip label={t("components.more")} tooltipId={tooltipId}><details
       className="record-more"
       ref={menu}
       onKeyDown={(e) => {
@@ -160,7 +163,7 @@ export function MoreMenu({ children }: { children: ReactNode }) {
         }
       }}
     >
-      <summary aria-label="更多操作" aria-describedby={tooltipId}><Icon name="ellipsis" size={18} /></summary>
+      <summary aria-label={t("components.more")} aria-describedby={tooltipId}><Icon name="ellipsis" size={18} /></summary>
       <div
         className="record-more-actions"
         onClick={(e) => {

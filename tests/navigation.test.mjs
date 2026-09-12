@@ -118,3 +118,11 @@ test('new desktop questions do not inherit the collection open in the main windo
   await f.find(f.query(app),n=>n.type===Form).props.onAsk('全库问题','desktop-question');await f.settle();
   assert.equal(f.calls.find(c=>c.name==='discussion_ask').args.collectionId,null);
 });
+
+test('native initialization errors keep language recovery mounted in the main window',async t=>{
+  const LanguageRecovery = () => null;
+  const f=workspaceFixture(t,{native:true,modules:{'./LanguageRecovery':{default:LanguageRecovery}}}),App=f.load('src/workspace/App.tsx').default;
+  f.overrides.backup_result=async()=>null;f.overrides.desktop_state=async()=>null;
+  const app=f.mount(App);await f.settle();
+  assert(f.nodes(app.tree).some(n=>n.type===LanguageRecovery));
+});

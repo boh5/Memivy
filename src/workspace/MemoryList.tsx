@@ -1,14 +1,18 @@
+import Select from "./Select";
 import { expireQueries, useResourceVersion } from "./resources";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../ui";
 import { call, date, errorText, keyOf, sourceName, native, type Key, type Page, type Query } from "./api";
 import { Empty, ErrorNotice } from "./components";
+import { useNotice } from "../i18n/react";
 
 export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, review = false, collectionId }: {
   review?: boolean; collectionId?: string;
   trash: boolean; active: boolean; selected: Key | null; revision?: number;
   onSelect: (key: Key) => void; onCapture: () => void; onRefresh: () => void;
 }) {
+  const { t } = useTranslation("workspace");
   const [reload, setReload] = useState(0);
   const revision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]) + requestedRevision + reload;
   const statusRevision = useResourceVersion([{domain:"organization"}]);
@@ -19,7 +23,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
   const [result, setResult] = useState<Page>({ items: [], next_offset: null });
-  const [loading, setLoading] = useState(true), [listError, setListError] = useState("");
+  const [loading, setLoading] = useState(true), [listError, setListError] = useNotice();
   const sequence = useRef(0), loadingMore = useRef(false);
   const visibleCount = useRef(40);
   const viewport = useRef<HTMLDivElement>(null);
@@ -100,84 +104,84 @@ export default function MemoryList({ trash, active, selected, revision: requeste
   return (
     <section
       className="library-list-pane"
-      aria-label={trash ? "回收站列表" : "记忆列表"}
+      aria-label={trash ? t("list.trashAria") : t("list.libraryAria")}
     >
       <div className="library-list-heading">
         <div>
           <span className="eyebrow">
             {trash
-              ? "可以恢复，留一份余地"
-              : "留在这里，下次用得上"}
+              ? t("list.trashEyebrow")
+              : t("list.libraryEyebrow")}
           </span>
-          <h1>{trash ? "回收站" : review ? "回顾" : collectionId ? "专题记忆" : "全部记忆"}</h1>
+          <h1>{trash ? t("list.trashTitle") : review ? t("list.reviewTitle") : collectionId ? t("list.collectionTitle") : t("list.libraryTitle")}</h1>
         </div>
         <button
           className="icon-button"
-          aria-label="刷新记忆列表"
+          aria-label={t("list.refresh")}
           onClick={() => { void expireQueries(["library_query","library_projects","organization_states"]).then(() => { setReload(v => v + 1); onRefresh(); }).catch(e => setListError(errorText(e))); }}
         >
           <Icon name="refresh" />
         </button>
       </div>
       <div className="filter-bar">
-        <span>{trash ? "已删除的记忆" : review ? "从较早的记忆开始" : "最近更新"}</span>
+        <span>{trash ? t("list.trashSubtitle") : review ? t("list.reviewSubtitle") : t("list.recentSubtitle")}</span>
         <button
           aria-expanded={filtersOpen}
-          aria-label="筛选记忆列表"
+          aria-label={t("list.filter")}
           onClick={() => setFiltersOpen((v) => !v)}
         >
-          筛选{filtering ? " · 已启用" : ""}
+          {filtering ? t("list.filterActive") : t("list.filter")}
           <Icon name="chevron" size={12} />
         </button>
       </div>
       {filtersOpen && (
         <div className="library-filters">
           <label>
-            来源
-            <select
-              aria-label="来源筛选"
+            {t("list.sourceLabel")}
+            <Select
+              aria-label={t("list.sourceFilterAria")}
               value={origin}
               onChange={(e) => setOrigin(e.target.value)}
             >
-              <option value="">全部来源</option>
-              <option value="user">我的记录</option>
-              <option value="agent">来自 Agent</option>
-              <option value="conversation">确认的结论</option>
-            </select>
+              <option value="">{t("list.allSources")}</option>
+              <option value="user">{t("list.myNotes")}</option>
+              <option value="agent">{t("list.agentSource")}</option>
+              <option value="conversation">{t("list.confirmedConclusion")}</option>
+            </Select>
           </label>
           <label>
-            项目
-            <select
-              aria-label="项目筛选"
+            {t("list.projectLabel")}
+            <Select
+              aria-label={t("list.projectFilterAria")}
               value={project}
               onChange={(e) => setProject(e.target.value)}
             >
-              <option value="">全部项目</option>
+              <option value="">{t("list.allProjects")}</option>
               {projects.map((p) => (
                 <option key={p}>{p}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label>
-            更新于
+            {t("list.updatedLabel")}
             <input
-              aria-label="开始日期"
+              aria-label={t("list.startDateAria")}
               type="date"
               value={since}
               onChange={(e) => setSince(e.target.value)}
             />
           </label>
           <label>
-            至
+            {t("list.endDateLabel")}
             <input
-              aria-label="结束日期"
+              aria-label={t("list.endDateAria")}
               type="date"
               value={until}
               onChange={(e) => setUntil(e.target.value)}
             />
           </label>
           {filtering && (
-            <button onClick={resetFilters}>清除全部条件</button>
+            <button onClick={resetFilters}>{t("list.clearAll")}</button>
           )}
         </div>
       )}
@@ -203,7 +207,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
             <p>
               {r.snippet}
             </p>
-            {!trash && states[keyOf(r.key)] && <span className="row-organization-state">{states[keyOf(r.key)].recommendations ? `${states[keyOf(r.key)].recommendations} 个专题推荐` : states[keyOf(r.key)].status === "pending" ? "等待整理" : states[keyOf(r.key)].status === "processing" ? "整理中…" : ["failed","deferred","paused"].includes(states[keyOf(r.key)].status) ? "整理未完成" : ""}</span>}
+            {!trash && states[keyOf(r.key)] && <span className="row-organization-state">{states[keyOf(r.key)].recommendations ? t("list.recommendations", { count: states[keyOf(r.key)].recommendations }) : states[keyOf(r.key)].status === "pending" ? t("list.pending") : states[keyOf(r.key)].status === "processing" ? t("list.processing") : ["failed","deferred","paused"].includes(states[keyOf(r.key)].status) ? t("list.incomplete") : ""}</span>}
             <div className="row-meta">
               <span>
                 {sourceName(r.origin)}
@@ -216,27 +220,27 @@ export default function MemoryList({ trash, active, selected, revision: requeste
           <Empty
             title={
               filtering
-                ? "没有找到匹配的记忆"
+                ? t("list.emptyFilteredTitle")
                 : trash
-                  ? "回收站是空的"
-                  : collectionId ? "专题里还没有记忆" : "从一句话开始"
+                  ? t("list.emptyTrashTitle")
+                  : collectionId ? t("list.emptyCollectionTitle") : t("list.emptyLibraryTitle")
             }
             text={
               filtering
-                ? "试试调整来源、项目或日期范围。"
+                ? t("list.emptyFilteredText")
                 : trash
-                  ? "删除的记忆会留在这里，直到你明确永久删除。"
-                  : collectionId ? "在记忆正文点击“专题”手动加入，或试试上方的 AI 推荐。" : "记下的内容立即可用，AI 可以稍后整理。"
+                  ? t("list.emptyTrashText")
+                  : collectionId ? t("list.emptyCollectionText") : t("list.emptyLibraryText")
             }
           >
             {filtering ? (
               <button className="outline-button" onClick={resetFilters}>
-                清除筛选
+                {t("list.clearFilters")}
               </button>
             ) : (
               !trash && !collectionId && (
                 <button className="outline-button" onClick={onCapture}>
-                  记下一个想法
+                  {t("list.captureIdea")}
                 </button>
               )
             )}
@@ -244,17 +248,17 @@ export default function MemoryList({ trash, active, selected, revision: requeste
         )}
         {loading && loadedSignature.current !== signature && (
           <p className="list-progress" role="status">
-            正在读取本地记忆…
+            {t("list.loading")}
           </p>
         )}
-        {review && !loading && result.items.length > 0 && <button className="load-more review-next" onClick={() => setReviewOffset(result.next_offset ?? 0)}>{result.next_offset !== null ? "再回顾三条" : "从头回顾"}<Icon name="arrow" size={13} /></button>}
+        {review && !loading && result.items.length > 0 && <button className="load-more review-next" onClick={() => setReviewOffset(result.next_offset ?? 0)}>{result.next_offset !== null ? t("list.reviewMore") : t("list.reviewFromStart")}<Icon name="arrow" size={13} /></button>}
         {!review && result.next_offset !== null && (
           <button
             className="load-more"
             disabled={loading}
             onClick={() => void more()}
           >
-            加载更多
+            {t("list.loadMore")}
           </button>
         )}
       </div>

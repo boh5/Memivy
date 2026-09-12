@@ -1,3 +1,7 @@
+import Select from "./Select";
+import { message as uiMessage } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
+import { useTranslation } from "react-i18next";
 import MarkdownEditor from "./MarkdownEditor";
 import Markdown from "./Markdown";
 import { useEffect, useRef, useState } from "react";
@@ -9,6 +13,7 @@ import DraftConflict from "./DraftConflict";
 export default function SaveConclusion({ message, topic, context, onClose, onSaved }: {
   message: Message; topic: Topic; context: Source[]; onClose: () => void; onSaved: (receipt: Receipt) => void;
 }) {
+  const { t } = useTranslation("workspace");
   const draft = useDraft(`conclusion:${message.id}`, {
     title: topic.title, body: message.answer?.conclusion || message.text,
     expected_version: null, conclusion: { destination: { kind: "new" }, merged_body: null },
@@ -25,7 +30,7 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
   const [query, setQuery] = useState(""), [rows, setRows] = useState<Page["items"]>([]);
   const [target, setTarget] = useState<Detail | null>(null);
   const [needsCheck, setNeedsCheck] = useState(false);
-  const [busy, setBusy] = useState(false), [previewing, setPreviewing] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [previewing, setPreviewing] = useState(false), [error, setError] = useNotice();
   const mergedField = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (merged !== null) mergedField.current?.scrollIntoView({ block: "center" }); }, [merged !== null]);
   const locked = useRef(false), generation = useRef(0), alive = useRef(true);
@@ -51,7 +56,7 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
     void call<Detail>("library_detail", { key: { kind: "memory", id: destination.memory_id } }).then(detail => {
       if (!valid) return;
       if (detail.state !== "active" || detail.current?.id !== expected) {
-        setNeedsCheck(true); setError("保存目标已经变化。审核稿已保留，请重新核对去向和正文。");
+        setNeedsCheck(true); setError(uiMessage("workspace", "saveConclusion.destinationChanged"));
       } else { setTarget(detail); setNeedsCheck(false); }
     }).catch(e => { if (valid) { setNeedsCheck(true); setError(errorText(e)); } });
     return () => { valid = false; };
@@ -66,7 +71,10 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
     setBusy(true);
     try {
       const detail = await call<Detail>("library_detail", { key: { kind: "memory", id } });
-      if (detail.state !== "active" || !detail.current) throw new Error("这条记忆已不可用，请选择其他保存去向。");
+      if (detail.state !== "active" || !detail.current) {
+        setError(uiMessage("workspace", "saveConclusion.destinationUnavailable"));
+        return;
+      }
       if (alive.current && run === generation.current) {
         setTarget(detail); setNeedsCheck(false); setUnresolvedSelection(null);
         draft.update({ title: recheck ? title : detail.title, conclusion: {
@@ -98,7 +106,7 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
       const receipt = await call<Receipt>("discussion_save", { request: { request_id: saved.request_id, message_id: message.id, destination: saved.conclusion!.destination, title: saved.title, text: saved.body }, mergedBody: saved.conclusion!.merged_body });
       if (receipt.status === "needs_review") {
         setNeedsCheck(true);
-        setError("保存目标已经变化。完整审核稿已保存在本机，请重新核对去向和正文。");
+        setError(uiMessage("workspace", "saveConclusion.destinationChanged"));
         return;
       }
       // Core already consumed the exact submitted draft atomically. A local
@@ -106,33 +114,33 @@ export default function SaveConclusion({ message, topic, context, onClose, onSav
       await draft.clear(saved.request_id).catch(() => {});
       onSaved(receipt);
     } catch (e) {
-      setError(`${errorText(e)} ${persisted ? "未能确认保存结果，请保持文字不变并重试。" : "这份审核稿尚未保存，请解决草稿冲突或存储问题后重试。"}`);
+      setError(uiMessage("errors", persisted ? "save_unconfirmed" : "review_unsaved", { error: errorText(e) }));
     }
     finally { locked.current = false; setBusy(false); }
   }
-  return <Modal title="留下这段结论" onClose={() => { if (!busy) onClose(); }}>
-    <p className="field-help">核对文字和去向后确认保存。讨论本身不会进入记忆库。</p>
-    <MarkdownEditor label="要保存的结论" value={text} disabled={busy || !draft.ready} onChange={value => { setText(value); changed(); }} />
-    <label className="discussion-field">保存去向<select aria-label="结论保存去向" value={selection} disabled={busy || !draft.ready} onChange={e => void select(e.target.value)}>
-      <option value="">新建记忆</option>
-      {selection && !target && !rows.some(r => r.key.id === selection) && <option value={selection}>原保存目标 · 待核对</option>}
+  return <Modal title={t("saveConclusion.title")} onClose={() => { if (!busy) onClose(); }}>
+    <p className="field-help">{t("saveConclusion.help")}</p>
+    <MarkdownEditor label={t("saveConclusion.editorLabel")} value={text} disabled={busy || !draft.ready} onChange={value => { setText(value); changed(); }} />
+    <label className="discussion-field">{t("saveConclusion.destinationLabel")}<Select aria-label={t("saveConclusion.destinationAria")} value={selection} disabled={busy || !draft.ready} onChange={e => void select(e.target.value)}>
+      <option value="">{t("saveConclusion.newMemory")}</option>
+      {selection && !target && !rows.some(r => r.key.id === selection) && <option value={selection}>{t("saveConclusion.unresolvedDestination")}</option>}
       {target && !rows.some(r => r.key.id === target.key.id) && <option value={target.key.id}>{target.title}</option>}
-      {suggestions.filter(([id]) => !rows.some(r => r.key.id === id) && id !== target?.key.id).map(([id, name]) => <option key={id} value={id}>{name} · 本次讨论</option>)}
-      {rows.map(row => <option key={row.key.id} value={row.key.id}>{row.title}{suggestions.some(([id]) => id === row.key.id) ? " · 本次讨论" : ""}</option>)}
-    </select></label>
-    <label className="discussion-field">查找已有记忆<input value={query} disabled={busy || !draft.ready} placeholder="输入标题或关键词" onChange={e => setQuery(e.target.value)} /></label>
-    <label className="discussion-field">{target ? "保存后的标题" : "标题"}<input value={title} disabled={busy || !draft.ready} onChange={e => { setTitle(e.target.value); }} /></label>
-    {needsCheck && selection && <button className="outline-button" disabled={busy} onClick={() => void select(selection, true)}>重新读取目标并核对</button>}
+      {suggestions.filter(([id]) => !rows.some(r => r.key.id === id) && id !== target?.key.id).map(([id, name]) => <option key={id} value={id}>{t("saveConclusion.discussionSuggestionOption", { name })}</option>)}
+      {rows.map(row => <option key={row.key.id} value={row.key.id}>{suggestions.some(([id]) => id === row.key.id) ? t("saveConclusion.discussionSuggestionOption", { name: row.title }) : row.title}</option>)}
+    </Select></label>
+    <label className="discussion-field">{t("saveConclusion.searchLabel")}<input value={query} disabled={busy || !draft.ready} placeholder={t("saveConclusion.searchPlaceholder")} onChange={e => setQuery(e.target.value)} /></label>
+    <label className="discussion-field">{target ? t("saveConclusion.savedTitle") : t("saveConclusion.titleLabel")}<input value={title} disabled={busy || !draft.ready} onChange={e => { setTitle(e.target.value); }} /></label>
+    {needsCheck && selection && <button className="outline-button" disabled={busy} onClick={() => void select(selection, true)}>{t("saveConclusion.recheck")}</button>}
     {target && <>
-      <p className="field-help">默认把结论补充到「{target.title}」，保留原有正文。</p>
-      <details><summary>查看当前正文</summary><Markdown text={target.body} /></details>
-      <div className="action-row"><button className="outline-button" disabled={busy || previewing || !text.trim()} onClick={() => void preview()}>{previewing ? "正在生成融合预览…" : "预览融合成文"}</button>
-        {(merged !== null || previewing) && <button className="quiet" disabled={busy || !draft.ready} onClick={changed}>使用默认补充</button>}
+      <p className="field-help">{t("saveConclusion.defaultAdd", { title: target.title })}</p>
+      <details><summary>{t("saveConclusion.currentBody")}</summary><Markdown text={target.body} /></details>
+      <div className="action-row"><button className="outline-button" disabled={busy || previewing || !text.trim()} onClick={() => void preview()}>{previewing ? t("saveConclusion.previewing") : t("saveConclusion.preview")}</button>
+        {(merged !== null || previewing) && <button className="quiet" disabled={busy || !draft.ready} onClick={changed}>{t("saveConclusion.useDefault")}</button>}
       </div>
     </>}
-    {merged !== null && <div ref={mergedField}><MarkdownEditor label="审核融合后的完整正文" value={merged} disabled={busy || !draft.ready} onChange={value => { generation.current++; setPreviewing(false); setMerged(value); }} /><p className="field-help">确认后按这里的文字保存，不再自动改写。</p></div>}
+    {merged !== null && <div ref={mergedField}><MarkdownEditor label={t("saveConclusion.mergedLabel")} value={merged} disabled={busy || !draft.ready} onChange={value => { generation.current++; setPreviewing(false); setMerged(value); }} /><p className="field-help">{t("saveConclusion.mergedHelp")}</p></div>}
     <ErrorNotice text={error || draft.error} />
     <DraftConflict draft={draft} />
-    <div className="action-row"><button className="send-button" disabled={!draft.ready || needsCheck || busy || previewing || !!(selection && !target) || !title.trim() || !text.trim() || merged?.trim() === ""} onClick={() => void save()}>{busy ? "保存中…" : merged !== null ? "确认融合并保存" : target ? "确认补充到记忆" : "确认保存新记忆"}</button><button className="outline-button" disabled={busy || !draft.ready} onClick={onClose}>取消</button></div>
+    <div className="action-row"><button className="send-button" disabled={!draft.ready || needsCheck || busy || previewing || !!(selection && !target) || !title.trim() || !text.trim() || merged?.trim() === ""} onClick={() => void save()}>{busy ? t("saveConclusion.saving") : merged !== null ? t("saveConclusion.confirmMerged") : target ? t("saveConclusion.confirmExisting") : t("saveConclusion.confirmNew")}</button><button className="outline-button" disabled={busy || !draft.ready} onClick={onClose}>{t("saveConclusion.cancel")}</button></div>
   </Modal>;
 }

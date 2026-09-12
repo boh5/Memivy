@@ -7,7 +7,7 @@ test('transcript appends in order and never overwrites another editor',()=>{
  assert.equal(voiceBody('原有文字','原有文字','原有文字','原有文字今天开会'),'原有文字今天开会');
  assert.equal(voiceBody('第一句','第一句','','第一句 第二句'),'第一句 第二句');
  assert.equal(voiceBody('第一句 第二句','第一句','','第一句 第二句'),'第一句 第二句');
- assert.throws(()=>voiceBody('其他窗口的修改','第一句','','第一句 第二句'),/草稿已在其他位置修改/);
+ assert.throws(()=>voiceBody('其他窗口的修改','第一句','','第一句 第二句'),{code:"voice_draft_conflict"});
 });
 const status=session=>({enabled:true,preload:false,shortcut:'',state:'ready',backend:'Metal GPU',error:null,available:true,downloaded:1019141728,bytes:1019141728,cache:'isolated',session});
 const session=patch=>({id:'voice-1',key:'capture',base:'原有文字',body:'原有文字',text:'',recording:true,starting:false,processing:false,complete:false,error:null,seconds:2,level:.1,...patch});

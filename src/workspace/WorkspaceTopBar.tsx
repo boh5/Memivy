@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../ui";
 import { native } from "./api";
 
@@ -14,6 +15,7 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
   children: ReactNode;
   triggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
+  const { t } = useTranslation("workspace");
   const query = useRef<HTMLDivElement>(null), localTrigger = useRef<HTMLButtonElement>(null);
   const trigger = triggerRef || localTrigger;
   const composing = useRef(false);
@@ -27,6 +29,9 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
     return () => window.removeEventListener("pointerdown", outside);
   }, [open, onClose]);
   function dismiss() { onClose(); trigger.current?.focus(); }
+  const triggerLabel = preview.trim()
+    ? scopeLabel ? t("topbar.searchTriggerScopedDraft", { scope: scopeLabel }) : t("topbar.searchTriggerDraft")
+    : scopeLabel ? t("topbar.searchTriggerScoped", { scope: scopeLabel }) : t("topbar.searchTrigger");
   return <header className={`workspace-topbar${native ? " native-titlebar" : ""}`}>
     <div className="titlebar-leading" data-tauri-drag-region aria-hidden="true" />
     <div className="titlebar-center" data-tauri-drag-region>
@@ -41,19 +46,19 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
         onBlur={event => {
           if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) onClose();
         }}>
-        <button className="recall-trigger" ref={trigger} aria-label={`搜索记忆或提问${scopeLabel ? `，仅在${scopeLabel}中查找` : ""}${preview.trim() ? "，有未发送的草稿" : ""}`}
+        <button className="recall-trigger" ref={trigger} aria-label={triggerLabel}
           aria-haspopup="dialog" aria-expanded={open} aria-controls="recall-panel" onClick={onOpen}>
           <Icon name="search" size={16} />
           {scopeLabel && <span className="recall-scope-badge" title={scopeLabel}>{scopeLabel}</span>}
-          <span className="recall-trigger-text">{preview.trim() || "找记忆，或直接问 AI…"}</span>
-          {preview.trim() && <span className="recall-draft-label">草稿</span>}
+          <span className="recall-trigger-text">{preview.trim() || t("topbar.placeholder")}</span>
+          {preview.trim() && <span className="recall-draft-label">{t("topbar.draft")}</span>}
           <kbd>⌘ K</kbd>
         </button>
         {/* Keep the form mounted: dismissal must not interrupt a draft write or submission. */}
-        <div id="recall-panel" className="recall-panel" role="dialog" aria-label="从记忆中查找并回答" hidden={!open}>
+        <div id="recall-panel" className="recall-panel" role="dialog" aria-label={t("topbar.panelAria")} hidden={!open}>
           <div className="recall-panel-heading">
-            <span><Icon name="spark" size={14} />从记忆中找答案</span>
-            <button className="recall-dismiss" onClick={dismiss} aria-label="收起提问面板" title="收起 · Esc"><Icon name="close" size={14} /></button>
+            <span><Icon name="spark" size={14} />{t("topbar.panelHeading")}</span>
+            <button className="recall-dismiss" onClick={dismiss} aria-label={t("topbar.dismiss")} title={t("topbar.dismissTitle")}><Icon name="close" size={14} /></button>
           </div>
           {scope}
           {children}
@@ -62,7 +67,7 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
     </div>
     <div className="titlebar-actions" data-tauri-drag-region>
       <button className="new-capture-button" onClick={onCapture} aria-haspopup="dialog">
-        <Icon name="plus" size={15} />记一下<kbd>⌘ N</kbd>
+        <Icon name="plus" size={15} />{t("topbar.newCapture")}<kbd>⌘ N</kbd>
       </button>
     </div>
   </header>;

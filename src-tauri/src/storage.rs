@@ -1,6 +1,8 @@
 use std::path::Path;
 pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(), String> {
-    let invalid = || "模型配置必须位于仓库以外的本机目录".to_string();
+    // Keep the storage boundary error semantic so the IPC layer can localize it.
+    // Never return translated text from this validation helper.
+    let invalid = || "model_configuration_path".to_string();
     if !path.is_absolute()
         || path.file_name().is_none()
         || path
@@ -39,4 +41,20 @@ pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(
         return Err(invalid());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_config_path;
+
+    #[test]
+    fn rejected_repository_path_uses_a_stable_error_code() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("project");
+        std::fs::create_dir_all(repository.join(".git")).unwrap();
+
+        let error = validate_config_path(&repository.join("model.json"), None).unwrap_err();
+
+        assert_eq!(error, "model_configuration_path");
+    }
 }

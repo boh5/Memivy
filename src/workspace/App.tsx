@@ -1,3 +1,6 @@
+import { message } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
+import { useTranslation } from "react-i18next";
 import { finishVoiceInputs } from "./useVoice";
 import { useResourceBridge, useResourceVersion } from "./resources";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,6 +21,7 @@ import CollectionEditor from "./CollectionEditor";
 import CollectionSuggestions from "./CollectionSuggestions";
 import { Modal, MoreMenu } from "./components";
 import CaptureDialog from "./CaptureDialog";
+import LanguageRecovery from "./LanguageRecovery";
 import Toast, { notify } from "./Toast";
 import { useDesktop, useWindowLifecycle, type MainRoute } from "./desktopApi";
 import "../prototype.css";
@@ -29,6 +33,7 @@ import "./topbar.css";
 type Handoff = { generation: number; target: "capture" | "query" | "topic" | "view" };
 
 export default function App() {
+  const { t } = useTranslation("workspace");
   const [collections, setCollections] = useState<Collection[]>([]), [pins, setPins] = useState<Row[]>([]);
   const [collectionId, setCollectionId] = useState<string | null>(null);
   const [collectionEditor, setCollectionEditor] = useState<Collection | "new" | null>(null);
@@ -39,10 +44,10 @@ export default function App() {
   const [selected, setSelected] = useState<Key | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null), [topics, setTopics] = useState<Topic[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false), [configured, setConfigured] = useState(false);
-  const [settingsInitialPage, setSettingsInitialPage] = useState<"ai"|"voice">("ai");
-  useEffect(() => { if (!settingsOpen) setSettingsInitialPage("ai"); }, [settingsOpen]);
+  const [settingsInitialPage, setSettingsInitialPage] = useState<"general"|"ai"|"voice">("general");
+  useEffect(() => { if (!settingsOpen) setSettingsInitialPage("general"); }, [settingsOpen]);
   useEffect(() => { const open = () => {setSettingsInitialPage("voice"); setSettingsOpen(true);}; window.addEventListener("voice-settings-request", open); return () => window.removeEventListener("voice-settings-request", open); }, []);
-  const [windowError, setWindowError] = useState("");
+  const [windowError, setWindowError] = useNotice();
   const navigationRevision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]);
   const topicsRevision = useResourceVersion([{domain:"discussion"},{domain:"collection"}]);
   const settingsRevision = useResourceVersion([{domain:"settings"}]);
@@ -57,7 +62,7 @@ export default function App() {
 
   const [pendingReceipt, setPendingReceipt] = useState<{ key: string; receipt: Receipt } | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null), handoffRef = useRef<Handoff | null>(null);
-  const [restoreId, setRestoreId] = useState<string | null>(null), [restoreNotice, setRestoreNotice] = useState("");
+  const [restoreId, setRestoreId] = useState<string | null>(null), [restoreNotice, setRestoreNotice] = useNotice();
   const pageRef = useRef(page); pageRef.current = page;
   const desktop = useDesktop();
   useWindowLifecycle(setWindowError);
@@ -77,15 +82,21 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!native) return;
-    void call<{ message: string; previous_backup: string | null } | null>("backup_result")
-      .then(result => { if (result) setRestoreNotice(result.message + (result.previous_backup ? ` 副本：${result.previous_backup}` : "")); })
+    void call<{ message: string; message_code?: "restore_completed" | "restore_rolled_back" | "restore_failed_preserved" | null; error_code?: string | null; previous_backup: string | null } | null>("backup_result")
+      .then(result => {
+        if (!result) return;
+        const notice = result.message_code
+          ? message("errors", result.message_code, { error: result.error_code ? errorText({ code: result.error_code }) : "" })
+          : result.message;
+        setRestoreNotice(result.previous_backup ? message("workspace", "app.restoreBackupWithCopy", { message: notice, path: result.previous_backup }) : notice);
+      })
       .catch(e => setRestoreNotice(errorText(e)));
-    const off = listen("restore-cancelled", () => setRestoreNotice("恢复已取消，当前记忆库保留。请核对窗口提示后重试。"));
+    const off = listen("restore-cancelled", () => setRestoreNotice(message("workspace", "app.restoreCancelled")));
     return () => { void off.then(f => f()); };
   }, []);
   useEffect(() => {
     if (!restoreId) return;
-    setRestoreId(null); setRestoreNotice("正在保存草稿并准备重启恢复…");
+    setRestoreId(null); setRestoreNotice(message("workspace", "app.restorePreparing"));
     void call("backup_restore", { id: restoreId }).catch(e => setRestoreNotice(errorText(e)));
   }, [restoreId]);
   useEffect(() => {
@@ -113,21 +124,21 @@ export default function App() {
         const receipt = e.payload;
         if (receipt.status === "applied" && receipt.action === "merge" && receipt.memory_id) {
           const key: Key = {kind:"memory",id:receipt.memory_id};
-          void call<Detail>("library_detail",{key}).then(d => notify(`已补充到《${d.title}》`,"查看",() => { setSelected(key); setPage("library"); setCollectionId(null); })).catch(() => {});
+          void call<Detail>("library_detail",{key}).then(d => notify(message("workspace", "app.mergedInto", { title: d.title }), message("workspace", "app.view"), () => { setSelected(key); setPage("library"); setCollectionId(null); })).catch(() => {});
         }
       }),
       listen("desktop-settings", () => setSettingsOpen(true)),
       listen("workspace-close-request", () => {
-        if (document.querySelector("dialog[open]")) { setWindowError("请先完成或关闭当前对话框，再关闭主窗口。"); return; }
+        if (document.querySelector("dialog[open]")) { setWindowError(message("workspace", "app.closeDialogBeforeWindow")); return; }
         void finishVoiceInputs().then(() => flushDrafts()).then(() => call("workspace_close")).catch(e => setWindowError(errorText(e)));
       }),
       listen<MainRoute>("desktop-route", e => {
         void flushDrafts().then(() => refreshDrafts()).then(() => {
-          if (document.querySelector("dialog[open]")) throw "请先完成或关闭主窗口中的对话框，再展开快捷窗口。";
+          if (document.querySelector("dialog[open]")) throw { code: "main_dialog_active" };
           const r = e.payload;
           let target: Handoff["target"];
 
-          if (r.settings) { setSettingsOpen(true); target = "view"; }
+          if (r.settings) { setSettingsInitialPage("ai"); setSettingsOpen(true); target = "view"; }
           else if (r.record) { setSelected(r.record); setPage("library"); target = "view"; }
           else if (r.mode === "ask" && r.topic) {
             setTopic(r.topic); setPage("topic"); setTopicFocus(v => v + 1); target = "topic";
@@ -172,7 +183,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", keyboard);
   }, [newCapture, openRecall]);
   async function ask(question: string, id: string) {
-    if (!configured) { recallTrigger.current?.focus(); setRecallOpen(false); setSettingsOpen(true); throw "连接模型后，AI 就能从记忆中查找并回答。你的问题已保留。"; }
+    if (!configured) { recallTrigger.current?.focus(); setRecallOpen(false); setSettingsInitialPage("ai"); setSettingsOpen(true); throw { code: "question_model_required" }; }
     const t = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [], collectionId: queryScope });
     if (recallQuick) await desktop.update({ topic_id: t.id });
     if (pageRef.current === "trash") setSelected(null);
@@ -200,7 +211,7 @@ export default function App() {
     try {
       await call("navigation_archive_collection", { id: value.id, archived: !undo, expected: value.revision });
       setArchiveConfirm(null);
-      notify(undo ? "已恢复专题" : "已移除专题，记忆仍保留", undo ? undefined : "撤销", undo ? undefined : () => void archiveCollection({ ...value, revision: value.revision + 1 }, true), 8000);
+      notify(undo ? message("workspace", "app.restoredCollection") : message("workspace", "app.removedCollectionNotice"), undo ? undefined : message("workspace", "collection.undo"), undo ? undefined : () => void archiveCollection({ ...value, revision: value.revision + 1 }, true), 8000);
       if (undo) showCollection(value.id); else { setPage("library"); setCollectionId(null); setSelected(null); }
       refresh();
     } catch (e) { setWindowError(errorText(e)); }
@@ -215,13 +226,13 @@ export default function App() {
   }
   const collection = collections.find(c => c.id === collectionId);
   const queryScope = page === "collection" ? collectionId : page === "topic" ? topic?.collection_id || null : null;
-  const scopeName = collections.find(c => c.id === queryScope)?.name || "已移除的专题";
+  const scopeName = collections.find(c => c.id === queryScope)?.name || t("app.removedCollection");
   const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
   const reading = page === "topic" || !!selected;
   return <div className="app-shell formal-app recall-workspace">
     <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
       scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onCapture:newCapture,
-      scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>仅在 {scopeName} 中提问</span><button aria-label="改为从全部记忆提问" onClick={showLibrary}>全部记忆</button></div>,
+      scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>{t("app.scopedQuestion", { scope: scopeName })}</span><button aria-label={t("app.allMemoriesAria")} onClick={showLibrary}>{t("app.allMemories")}</button></div>,
     }} form={{ quick:recallQuick, mode:"ask", presentation:"query", focus:recallOpen ? recallFocus : 0,
       onReady:handoff?.target === "query" ? handoffReady : undefined,
       onMode:() => {}, onEdit:() => {}, onSaved:() => {}, onAsk:ask,
@@ -234,17 +245,18 @@ export default function App() {
       onTopic={t => { if (page === "trash") setSelected(null); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); }}
       onDesktop={() => void openDesktop()} onSettings={() => setSettingsOpen(true)} />
     <main className="main-workspace">
-      {!native && <div className="preview-banner">浏览器布局预览 · 固定示例；真实保存和编辑请使用 Mac 应用</div>}
+      {!native && <div className="preview-banner">{t("app.previewBanner")}</div>}
+      <LanguageRecovery />
 
       {page === "collection" && collection && <section className="collection-header">
-        <div><span className="eyebrow">专题 · {collection.count} 条记忆</span><h1>{collection.name}</h1><p>{collection.description || "把相关的记忆汇集在这里，慢慢形成自己的思路。"}</p></div>
-        <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) setSettingsOpen(true); else setSuggestions(collection); }}><Icon name="spark" size={14} />AI 推荐</button>
-          <button onClick={showLibrary}>去挑选记忆</button>
-          <MoreMenu><button onClick={() => setCollectionEditor(collection)}>编辑专题</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>移除专题</button></MoreMenu>
+        <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1><p>{collection.description || t("app.collectionFallbackDescription")}</p></div>
+        <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) {setSettingsInitialPage("ai"); setSettingsOpen(true);} else setSuggestions(collection); }}><Icon name="spark" size={14} />{t("app.recommend")}</button>
+          <button onClick={showLibrary}>{t("app.chooseMemories")}</button>
+          <MoreMenu><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
         </div>
       </section>}
       <Toast />
-      {restoreNotice && <div className="restore-notice" role="status">{restoreNotice}<button aria-label="关闭恢复提示" onClick={() => setRestoreNotice("")}>×</button></div>}
+      {restoreNotice && <div className="restore-notice" role="status">{restoreNotice}<button aria-label={t("app.closeRestoreNotice")} onClick={() => setRestoreNotice("")}>×</button></div>}
       <ErrorNotice text={windowError} />
       <div className={`library-layout ${reading ? "has-selection" : ""}`}>
         <MemoryList key={page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library"}
@@ -252,25 +264,25 @@ export default function App() {
           selected={selected}  onSelect={key => { setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
           onCapture={newCapture} onRefresh={refresh} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
-          <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />返回记忆</button><span>{topic.collection_id ? `专题 · ${collections.find(c => c.id === topic.collection_id)?.name || "已移除"}` : "从记忆中查找 · 有来源的回答"}</span></div>
+          <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : t("app.topicUnscoped")}</span></div>
           <Discussion key={topic.id} topic={topic} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
-             configured={configured} onSettings={() => setSettingsOpen(true)} onRefresh={refresh} onOpenRecord={openRecord} />
+             configured={configured} onSettings={() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}
           collectionId={page === "collection" ? collectionId || undefined : undefined}
           initialReceipt={pendingReceipt?.key === keyOf(selected) ? pendingReceipt.receipt : null}
            query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onBack={() => setSelected(null)} />
           : <section className="memory-detail-pane unselected">
-            <Empty title={page === "trash" ? "留一份余地" : page === "review" ? "和过去的自己，再聊一聊" : page === "collection" ? "让相关的想法，慢慢连起来" : "让留下的想法，再次用得上"}
-              text={page === "trash" ? "选一条已删除的记忆，查看内容或恢复。" : "选一条记忆慢慢读，或在上方问问过去的自己。"} />
+            <Empty title={page === "trash" ? t("app.emptyTrashTitle") : page === "review" ? t("app.emptyReviewTitle") : page === "collection" ? t("app.emptyCollectionTitle") : t("app.emptyLibraryTitle")}
+              text={page === "trash" ? t("app.emptyTrashText") : t("app.emptyDefaultText")} />
           </section>}
       </div>
     </main>
     {captureOpen && <CaptureDialog key={`capture:${captureQuick}`} quick={captureQuick} sourceApp={desktop.state?.source_app}
       focus={captureFocus} onReady={handoff?.target === "capture" ? handoffReady : () => {}}
-      onSaved={key => { notify("已记下", "查看", () => void openCaptured(key)); setCaptureOpen(false); refresh(); }} onClose={() => setCaptureOpen(false)} />}
+      onSaved={key => { notify(message("workspace", "app.captureSaved"), message("workspace", "app.view"), () => void openCaptured(key)); setCaptureOpen(false); refresh(); }} onClose={() => setCaptureOpen(false)} />}
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor} onClose={() => setCollectionEditor(null)} onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} />}
     {suggestions && <CollectionSuggestions collection={suggestions} onClose={() => setSuggestions(null)} onChanged={refresh} />}
-    {archiveConfirm && <Modal title="移除这个专题？" onClose={() => { if (!collectionLock.current) setArchiveConfirm(null); }}><p>“{archiveConfirm.name}”中的记忆和讨论都会保留。专题内的讨论仍限定原专题，不会转为全库问答。</p><ErrorNotice text={windowError} /><div className="action-row"><button className="outline-button" disabled={collectionBusy} onClick={() => setArchiveConfirm(null)}>取消</button><button className="send-button" disabled={collectionBusy} onClick={() => void archiveCollection(archiveConfirm)}>移除专题</button></div></Modal>}
+    {archiveConfirm && <Modal title={t("app.removeCollectionTitle")} onClose={() => { if (!collectionLock.current) setArchiveConfirm(null); }}><p>{t("app.removeCollectionBody", { name: archiveConfirm.name })}</p><ErrorNotice text={windowError} /><div className="action-row"><button className="outline-button" disabled={collectionBusy} onClick={() => setArchiveConfirm(null)}>{t("app.cancel")}</button><button className="send-button" disabled={collectionBusy} onClick={() => void archiveCollection(archiveConfirm)}>{t("app.removeCollection")}</button></div></Modal>}
     {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
   </div>;

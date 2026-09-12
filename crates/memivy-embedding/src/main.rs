@@ -22,6 +22,12 @@ use std::{
 };
 fn main() {
     if let Err(error) = run() {
+        // Keep the bounded startup reason available to Settings, even before a socket exists.
+        if let Some(root) = std::env::args_os().nth(2)
+            && let Ok(dir) = socket_dir(&PathBuf::from(root))
+        {
+            let _ = write_json(&dir.join("startup-error.json"), &error);
+        }
         eprintln!("{error}");
         std::process::exit(1);
     }
@@ -38,19 +44,19 @@ fn run() -> emb::Result<()> {
     let dir = socket_dir(&root)?;
     let _guard = lock(&dir, "worker.lock")?;
     let path = cache::HfModelCache::for_user()?.verify()?;
-    let mut backend = LlamaBackend::init().map_err(|_| "模型后端初始化失败")?;
+    let mut backend = LlamaBackend::init().map_err(|_| "embedding_load_failed")?;
     backend.void_logs();
     if !backend.supports_gpu_offload() {
-        return Err("此设备无法使用 Metal 模型后端".into());
+        return Err("embedding_metal_unavailable".into());
     }
     let model = LlamaModel::load_from_file(
         &backend,
         path,
         &LlamaModelParams::default().with_n_gpu_layers(u32::MAX),
     )
-    .map_err(|_| "模型加载失败")?;
+    .map_err(|_| "embedding_load_failed")?;
     if model.n_embd() != DIMENSIONS as i32 {
-        return Err("模型维度不匹配".into());
+        return Err("embedding_response_invalid".into());
     }
     let params = LlamaContextParams::default()
         .with_n_ctx(NonZeroU32::new(8192))
@@ -60,7 +66,7 @@ fn run() -> emb::Result<()> {
         .with_pooling_type(LlamaPoolingType::Last);
     let mut context = model
         .new_context(&backend, params)
-        .map_err(|_| "模型上下文创建失败")?;
+        .map_err(|_| "embedding_load_failed")?;
     encode(
         &model,
         &mut context,
@@ -68,12 +74,12 @@ fn run() -> emb::Result<()> {
     )?;
     let socket = dir.join("worker.sock");
     if socket.exists() {
-        fs::remove_file(&socket).map_err(|_| "旧模型连接无法清理")?;
+        fs::remove_file(&socket).map_err(|_| "embedding_connection_lost")?;
     }
-    let listener = UnixListener::bind(&socket).map_err(|_| "模型连接无法创建")?;
+    let listener = UnixListener::bind(&socket).map_err(|_| "embedding_connection_lost")?;
     listener
         .set_nonblocking(true)
-        .map_err(|_| "模型连接无法配置")?;
+        .map_err(|_| "embedding_connection_lost")?;
     let mut high = VecDeque::new();
     let mut low = VecDeque::new();
     let mut last = Instant::now();
@@ -98,7 +104,7 @@ fn run() -> emb::Result<()> {
                 continue;
             };
             if high.len() + low.len() >= 32 {
-                reply(stream, &req, Err("模型正在处理其他请求".into()));
+                reply(stream, &req, Err("embedding_busy".into()));
                 continue;
             }
             if req.kind == "query" {
@@ -120,11 +126,11 @@ fn run() -> emb::Result<()> {
                 || req.text.chars().count() > MAX_CHARS
                 || req.deadline_ms <= client::millis()
             {
-                return Err("编码请求过期或无效".into());
+                return Err("embedding_configuration_changed".into());
             }
             let vector = encode(&model, &mut context, &req.text)?;
             if req.deadline_ms <= client::millis() || !Preferences::read(&root)?.wanted() {
-                return Err("编码已取消或超时".into());
+                return Err("embedding_timeout".into());
             }
             Ok(vector)
         })();
@@ -158,23 +164,25 @@ fn encode(
     text: &str,
 ) -> emb::Result<Vec<f32>> {
     if text.contains('\0') {
-        return Err("这条内容含 NUL，模型暂不能编码，字面检索仍可用".into());
+        return Err("embedding_input_invalid".into());
     }
     let mut tokens = model
         .str_to_token(text, AddBos::Never)
-        .map_err(|_| "模型分词失败")?;
+        .map_err(|_| "embedding_input_invalid")?;
     tokens.push(LlamaToken::new(151643));
     context.clear_kv_cache();
     let mut batch = LlamaBatch::new(8192, 1);
     for (i, token) in tokens.iter().enumerate() {
         batch
             .add(*token, i as i32, &[0], i + 1 == tokens.len())
-            .map_err(|_| "模型输入容量不足")?;
+            .map_err(|_| "embedding_input_invalid")?;
     }
-    context.decode(&mut batch).map_err(|_| "模型编码失败")?;
+    context
+        .decode(&mut batch)
+        .map_err(|_| "embedding_response_invalid")?;
     let mut vector = context
         .embeddings_seq_ith(0)
-        .map_err(|_| "模型没有返回向量")?
+        .map_err(|_| "embedding_response_invalid")?
         .to_vec();
     let norm = vector
         .iter()
@@ -182,7 +190,7 @@ fn encode(
         .sum::<f64>()
         .sqrt();
     if !norm.is_finite() || norm == 0.0 {
-        return Err("模型向量无效".into());
+        return Err("embedding_response_invalid".into());
     }
     for v in &mut vector {
         *v = (*v as f64 / norm) as f32;

@@ -1,3 +1,4 @@
+use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace, require_main};
 use memivy_core::{
     model::ModelConfig,
@@ -68,12 +69,15 @@ fn load(state: &Workspace) -> HostResult<Registry> {
     )?;
     crate::storage::validate_config_path(&state.config, home.as_deref())?;
     Registry::with_legacy(state.store.database_path().parent().unwrap(), &state.config)
+        .map_err(HostError::from)
 }
 pub(crate) fn read_llm(state: &Workspace) -> HostResult<ModelConfig> {
     if Registry::exists(state.store.database_path().parent().unwrap()) {
-        Registry::read(state.store.database_path().parent().unwrap())?.llm_config()
+        Registry::read(state.store.database_path().parent().unwrap())?
+            .llm_config()
+            .map_err(HostError::from)
     } else {
-        ModelConfig::read(&state.config).map_err(|e| e.to_string())
+        ModelConfig::read(&state.config).map_err(HostError::from)
     }
 }
 fn changed(window: &tauri::WebviewWindow) {
@@ -100,6 +104,7 @@ pub(crate) struct TestResult {
     token: String,
     binding: Binding,
     message: String,
+    message_params: serde_json::Value,
 }
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -115,11 +120,11 @@ pub(crate) async fn models_test(
     require_main(&window)?;
     let mut r = load(&state)?;
     if r.revision != revision {
-        return Err("设置已变化，请重新加载后测试".into());
+        return Err(HostError::new("configuration_conflict"));
     }
     let candidate = if let Some(edit) = connection {
         if edit.remove {
-            return Err("模型连接草稿无效".into());
+            return Err(HostError::new("model_configuration"));
         }
         let url = edit.base_url.trim().trim_end_matches('/').to_string();
         let previous = r
@@ -150,18 +155,19 @@ pub(crate) async fn models_test(
     };
     let m = r.resolve(&binding)?;
     let mut capabilities = None;
+    let mut message_params = serde_json::json!({});
     let message = match kind.as_str() {
         "llm" => {
             let c = memivy_core::model::tools::probe(&m)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(HostError::from)?;
             capabilities = Some(c.clone());
             if c.multi_turn && c.structured_json {
-                "连接通过：支持增强问答和整理"
+                "model_test_enhanced"
             } else if c.single_tool {
-                "连接可用：支持基本工具调用，部分增强能力不可用"
+                "model_test_basic"
             } else {
-                "连接可用：自动整理所需工具调用未通过"
+                "model_test_no_organization"
             }
             .to_string()
         }
@@ -183,25 +189,31 @@ pub(crate) async fn models_test(
                 Ok::<_, String>(v.len())
             })
             .await
-            .map_err(|_| "模型测试未完成")??;
+            .map_err(|_| HostError::new("model_test_failed"))??;
             binding.dimensions = Some(dimension);
-            format!("连接通过：正文与查询编码可用，{dimension} 维")
+            {
+                message_params = serde_json::json!({"dimension": dimension});
+                "model_test_embedding".into()
+            }
         }
         "voice" => {
             tauri::async_runtime::spawn_blocking(move || {
                 memivy_core::models::transcribe(&m, &vec![0.; 16000])
             })
             .await
-            .map_err(|_| "语音测试未完成")??;
-            "音频请求通过。测试使用合成静音；识别效果请实际试说。".into()
+            .map_err(|_| HostError::new("speech_test_failed"))??;
+            "model_test_speech_silence".into()
         }
-        _ => return Err("未知模型能力".into()),
+        _ => return Err(HostError::new("invalid")),
     };
     if load(&state)?.revision != revision {
-        return Err("测试期间配置已变化，请重新测试".into());
+        return Err(HostError::new("configuration_conflict"));
     }
     let token = uuid::Uuid::new_v4().to_string();
-    let mut proofs = tests.0.lock().map_err(|_| "测试状态不可用")?;
+    let mut proofs = tests
+        .0
+        .lock()
+        .map_err(|_| HostError::new("model_test_unavailable"))?;
     proofs.retain(|p| p.at.elapsed() < Duration::from_secs(600));
     if proofs.len() >= 32 {
         proofs.remove(0);
@@ -210,7 +222,8 @@ pub(crate) async fn models_test(
         token: token.clone(),
         revision,
         kind,
-        binding: serde_json::to_string(&binding).map_err(|_| "配置无效")?,
+        binding: serde_json::to_string(&binding)
+            .map_err(|_| HostError::new("model_configuration"))?,
         at: Instant::now(),
         connection: candidate,
         capabilities,
@@ -219,6 +232,7 @@ pub(crate) async fn models_test(
         token,
         binding,
         message,
+        message_params,
     })
 }
 #[tauri::command]
@@ -236,15 +250,19 @@ pub(crate) async fn models_apply(
     require_main(&window)?;
     let mut r = load(&state)?;
     if r.revision != revision {
-        return Err("设置已变化，请重新加载".into());
+        return Err(HostError::new("configuration_conflict"));
     }
     let previous = r.clone();
     let mut capabilities = None;
     if let Some(b) = &binding
         && b.source == Source::Service
     {
-        let serialized = serde_json::to_string(b).map_err(|_| "配置无效")?;
-        let proofs = tests.0.lock().map_err(|_| "测试状态不可用")?;
+        let serialized =
+            serde_json::to_string(b).map_err(|_| HostError::new("model_configuration"))?;
+        let proofs = tests
+            .0
+            .lock()
+            .map_err(|_| HostError::new("model_test_unavailable"))?;
         let proof = proofs
             .iter()
             .find(|p| {
@@ -254,7 +272,7 @@ pub(crate) async fn models_apply(
                     && p.binding == serialized
                     && p.at.elapsed() < Duration::from_secs(600)
             })
-            .ok_or("请先测试当前模型配置")?;
+            .ok_or(HostError::new("model_test_required"))?;
         capabilities = proof.capabilities.clone();
         if let Some(connection) = &proof.connection {
             r.connections.push(connection.clone());
@@ -264,7 +282,7 @@ pub(crate) async fn models_apply(
     match kind.as_str() {
         "llm" => {
             if binding.as_ref().is_some_and(|b| b.source == Source::Local) {
-                return Err("问答请连接本机或远程模型服务".into());
+                return Err(HostError::new("model_configuration"));
             }
             r.llm = binding;
             prune_unused(&mut r, window.app_handle());
@@ -273,7 +291,7 @@ pub(crate) async fn models_apply(
                 let config = r.llm_config()?;
                 if let Err(e) = memivy_core::model::tools::save_capabilities(&root, &config, &caps)
                 {
-                    let error = rollback_config(&root, &r, previous, e.to_string());
+                    let error = rollback_config(&root, &r, previous, e.into());
                     changed(&window);
                     return Err(error);
                 }
@@ -282,7 +300,7 @@ pub(crate) async fn models_apply(
         "embedding" => {
             if let Some(b) = binding {
                 if !confirmed {
-                    return Err("请先确认索引处理范围".into());
+                    return Err(HostError::new("index_confirmation_required"));
                 }
                 r.embedding = b;
                 prune_unused(&mut r, window.app_handle());
@@ -292,7 +310,7 @@ pub(crate) async fn models_apply(
                     Ok::<_, String>(r)
                 })
                 .await
-                .map_err(|_| "语义检索设置未完成")?;
+                .map_err(|_| HostError::new("embedding_settings_failed"))?;
                 changed(&window);
                 r = result?;
             } else {
@@ -319,7 +337,7 @@ pub(crate) async fn models_apply(
                 crate::voice::set_enabled(window.app_handle(), false).await?;
             }
         }
-        _ => return Err("未知模型能力".into()),
+        _ => return Err(HostError::new("invalid")),
     }
     changed(&window);
     Ok(view(r))
@@ -350,7 +368,7 @@ pub(crate) async fn models_clear(
         return crate::voice::clear_model(window.app_handle()).await;
     }
     if kind != "embedding" {
-        return Err("未知模型".into());
+        return Err(HostError::new("invalid"));
     }
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -359,12 +377,13 @@ pub(crate) async fn models_clear(
         if Registry::read(&root)?.embedding.source == Source::Local {
             store
                 .embedding_control("disable")
-                .map_err(|e| e.to_string())?;
+                .map_err(HostError::from)?;
         }
         memivy_core::embedding::cache::HfModelCache::for_user()?.clear()
     })
     .await
-    .map_err(|_| "清理模型未完成")?
+    .map_err(|_| HostError::new("model_delete_failed"))?
+    .map_err(|_| HostError::new("model_delete_failed"))
 }
 
 fn prune_unused(r: &mut Registry, app: &tauri::AppHandle) {
@@ -384,12 +403,12 @@ fn rollback_config(
     root: &std::path::Path,
     candidate: &Registry,
     mut previous: Registry,
-    error: String,
-) -> String {
+    error: HostError,
+) -> HostError {
     if previous.save(root, &candidate.revision).is_ok() {
         error
     } else {
-        format!("{error}；配置恢复未完成，请重新读取设置后检查")
+        HostError::new("configuration_restore_failed")
     }
 }
 
@@ -409,9 +428,10 @@ mod tests {
                 dir.path(),
                 &candidate,
                 previous.clone(),
-                "activation failed".into()
-            ),
-            "activation failed"
+                HostError::new("model_configuration")
+            )
+            .code,
+            "model_configuration"
         );
         let mut newer = Registry::read(dir.path()).unwrap();
         assert!(newer.auto_organize);
@@ -419,9 +439,15 @@ mod tests {
         let revision = newer.revision.clone();
         newer.auto_organize = false;
         newer.save(dir.path(), &revision).unwrap();
-        assert!(
-            rollback_config(dir.path(), &candidate, previous, "activation failed".into())
-                .contains("恢复未完成")
+        assert_eq!(
+            rollback_config(
+                dir.path(),
+                &candidate,
+                previous,
+                HostError::new("model_configuration")
+            )
+            .code,
+            "configuration_restore_failed"
         );
         assert_eq!(Registry::read(dir.path()).unwrap().revision, newer.revision);
     }

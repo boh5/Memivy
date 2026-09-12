@@ -51,3 +51,43 @@ test('a toast action can publish its result without the old toast clearing it',a
  f.find(view,n=>n.type==='button'&&f.text(n)==='撤销').props.onClick();await f.settle();
  assert(f.text(view.tree).includes('已撤销'));
 });
+
+
+test('language changes update the existing export toast without publishing it again',async t=>{
+ const f=workspaceFixture(t,{native:true}),Detail=f.load('src/workspace/MemoryDetail.tsx').default;
+ const {default:Toast}=f.load('src/workspace/Toast.tsx');
+ const view=f.mount(Detail,{record:f.keyA,onChanged(){},onDiscuss:async()=>{},onBack(){}}),toast=f.mount(Toast);
+ f.overrides.memory_export=async()=>'/tmp/Original.md';
+ await f.settle();
+ f.find(view,n=>n.type==='button'&&f.text(n)==='导出 Markdown').props.onClick();await f.settle();
+ assert(f.text(toast.tree).includes('/tmp/Original.md'));
+ await f.language('en');
+ assert(f.text(toast.tree).includes('exported'));
+ f.find(toast,n=>n.type==='button'&&n.props['aria-label']==='Dismiss notification').props.onClick();await f.settle();
+ await f.language('zh-CN');
+ assert(!f.text(toast.tree).includes('/tmp/Original.md'),'a dismissed export notification must stay dismissed');
+ assert.equal(f.calls.filter(c=>c.name==='memory_export').length,1);
+});
+
+test('discussion failures keep their recovery guidance across languages and preserve existing text',async t=>{
+ const f=workspaceFixture(t),Discussion=f.load('src/workspace/Discussion.tsx').default;
+ const failures=[
+  ['invalid_answer','这次回答缺少有效依据','lacked valid supporting evidence'],
+  ['source_unavailable','请重新选择记忆后提问','Select memories again before asking'],
+  ['interrupted','可以继续提问','You can continue asking questions'],
+ ];
+ const history='Historical answer / 原有回答';
+ f.messages(()=>[
+  ...failures.map(([code],i)=>({id:`failure-${i}`,turn_id:`turn-${i}`,role:'assistant',status:code==='interrupted'?'interrupted':'failed',error_code:code,text:'',citations:[]})),
+  {id:'history',turn_id:'old-turn',role:'assistant',status:'complete',text:history,citations:[]},
+ ]);
+ const view=f.mount(Discussion,{topic:f.topic,configured:true,onSettings(){},onRefresh(){},onOpenRecord(){}});
+ await f.settle();
+ for(const [,zh] of failures) assert(f.text(view.tree).includes(zh));
+ assert(f.text(view.tree).includes(history));
+ const reads=f.calls.filter(c=>c.name==='discussion_messages').length;
+ await f.language('en');
+ for(const [,,en] of failures) assert(f.text(view.tree).includes(en));
+ assert(f.text(view.tree).includes(history));
+ assert.equal(f.calls.filter(c=>c.name==='discussion_messages').length,reads,'translating a failure must not reload the conversation');
+});

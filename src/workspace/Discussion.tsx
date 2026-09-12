@@ -1,3 +1,7 @@
+import { translateCatalog } from "../i18n";
+import { message, renderMessage, type UiMessage } from "../i18n/messages";
+import { useNotice } from "../i18n/react";
+import { useTranslation } from "react-i18next";
 import { useResourceVersion } from "./resources";
 import Markdown from "./Markdown";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -29,8 +33,9 @@ function SourcePreview({
   messageId?: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("workspace");
   const [value, setValue] = useState<SourceEvidence | null>(null),
-    [error, setError] = useState("");
+    [error, setError] = useNotice();
   useEffect(() => {
     let alive = true;
     void call<SourceEvidence>("discussion_source", { source, messageId })
@@ -45,34 +50,30 @@ function SourcePreview({
     };
   }, [source.id, source.kind, messageId]);
   return (
-    <Modal title="讨论依据" onClose={onClose}>
+    <Modal title={t("discussion.sourceTitle")} onClose={onClose}>
       <ErrorNotice text={error} />
       {value ? (
         <>
           <h3>{value.title}</h3>
-          <p className="field-help">
-            {source.kind === "version"
-              ? (value.current ? "当前记忆版本" : "当时使用的历史版本")
-              : "本次讨论使用的原话"} · {fullDate(value.recorded_at)}
-          </p>
+          <p className="field-help">{t("discussion.sourceMeta", { label: source.kind === "version" ? (value.current ? t("discussion.currentVersion") : t("discussion.historicalVersion")) : t("discussion.originalCapture"), date: fullDate(value.recorded_at) })}</p>
           <p className="readable-text">{value.text}</p>
-          {value.additional_spans?.map(span=><div key={span.start}><p className="field-help">同一来源的另一处引用片段</p><p className="readable-text">{span.text}</p></div>)}
+          {value.additional_spans?.map(span=><div key={span.start}><p className="field-help">{t("discussion.additionalSpan")}</p><p className="readable-text">{span.text}</p></div>)}
           {value.truncated && (
-            <p className="field-help">这里只展示来源节选。</p>
+            <p className="field-help">{t("discussion.excerptOnly")}</p>
           )}
         </>
       ) : (
-        !error && <p>正在读取来源…</p>
+        !error && <p>{t("discussion.loadingSource")}</p>
       )}
     </Modal>
   );
 }
-const failures: Record<string, string> = {
-  network: "模型请求未完成，请检查连接后重试。",
-  rate_limit: "模型请求过于频繁，请稍后重试。",
-  invalid_answer: "这次回答缺少有效依据或格式不完整，请重试。",
-  source_unavailable: "本次使用的来源已不可用，请重新选择记忆后提问。",
-  interrupted: "上次退出时回答尚未完成，可以继续提问。",
+const failures: Record<string, UiMessage> = {
+  network: message("errors", "model_network"),
+  rate_limit: message("errors", "model_rate_limit"),
+  invalid_answer: message("errors", "discussion_invalid_answer"),
+  source_unavailable: message("errors", "discussion_source_unavailable"),
+  interrupted: message("errors", "discussion_interrupted"),
 };
 export default function Discussion({
   topic,
@@ -93,6 +94,7 @@ export default function Discussion({
   onReady?: () => void;
   onBusy?: (busy: boolean) => void;
 }) {
+  const { t } = useTranslation("workspace");
   const revision = useResourceVersion([{domain:"discussion",entity:topic.id}]) + requestedRevision;
   const draft = useDraft(`discussion:${topic.id}`, {
     title: "",
@@ -101,14 +103,14 @@ export default function Discussion({
     context: [],
   });
   const [messages, setMessages] = useState<Message[]>([]),
-    [error, setError] = useState(""),
+    [error, setError] = useNotice(),
     [sending, setSending] = useState(false),
     [more, setMore] = useState(false),
     [loadingMore, setLoadingMore] = useState(false),
     [source, setSource] = useState<(Source & { messageId?: string }) | null>(null),
     [review, setReview] = useState<Message | null>(null),
     [receipt, setReceipt] = useState<Receipt | null>(null),
-    [savedNotice, setSavedNotice] = useState("");
+    [savedNotice, setSavedNotice] = useNotice();
   const input = useRef<HTMLTextAreaElement>(null),
     bottom = useRef<HTMLDivElement>(null),
     messageList = useRef<HTMLDivElement>(null),
@@ -161,7 +163,7 @@ export default function Discussion({
     if (lock.current || pending || !draft.ready || !draft.value.body.trim())
       return;
     if (!configured) {
-      setError("先连接一个模型，问题草稿会保留在这里。");
+      setError(message("workspace", "discussion.modelRequired"));
       onSettings();
       return;
     }
@@ -242,7 +244,7 @@ export default function Discussion({
         },
       });
       setReceipt(null);
-      setSavedNotice("已撤销本次整理，确认的原话仍保留。");
+      setSavedNotice(message("workspace", "discussion.undoNotice"));
       onRefresh();
     } catch (e) {
       setError(errorText(e));
@@ -253,11 +255,11 @@ export default function Discussion({
   return (
     <section className={`discussion-page ${compact ? "compact-discussion" : ""}`}>
       <div className="discussion-heading">
-        <span className="eyebrow">接着想</span>
+        <span className="eyebrow">{t("discussion.eyebrow")}</span>
         <h1>{topic.title}</h1>
-        <p>结合自己的记忆，继续想一想。</p>
+        <p>{t("discussion.description")}</p>
       </div>
-      {unreadReply && <button className="quiet" onClick={() => { following.current=true; setUnreadReply(false); bottom.current?.scrollIntoView({block:"nearest"}); }}>有新回复，跳到最新</button>}
+      {unreadReply && <button className="quiet" onClick={() => { following.current=true; setUnreadReply(false); bottom.current?.scrollIntoView({block:"nearest"}); }}>{t("discussion.unreadReply")}</button>}
       <div className="discussion-messages" ref={messageList} onScroll={event => {
         const list = event.currentTarget;
         following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
@@ -269,14 +271,14 @@ export default function Discussion({
             disabled={loadingMore}
             onClick={() => void older()}
           >
-            查看更早的讨论
+            {t("discussion.older")}
           </button>
         )}
         {!messages.length && (
           <div className="discussion-start">
             {draft.value.context?.length
-              ? "这条记忆已放在这里。你想从哪里接着想？"
-              : "从一个问题开始，也可以聊聊新的想法。"}
+              ? t("discussion.startWithContext")
+              : t("discussion.startWithoutContext")}
           </div>
         )}
         {messages.map((m) => (
@@ -284,27 +286,27 @@ export default function Discussion({
             key={m.id}
             className={`discussion-message ${m.role}`}
           >
-            <strong>{m.role === "user" ? "我" : "Memivy"}</strong>
+            <strong>{m.role === "user" ? t("discussion.userLabel") : "Memivy"}</strong>
             {m.status === "processing" ? (
               <p className="thinking-status" role="status">
-                正在查找记忆、组织回答…
+                {t("discussion.processing")}
               </p>
             ) : m.answer ? (
               <div className="answer-content">
-                {!m.answer.recollections.length && <p className="field-help">目前没有找到足够的记忆依据。</p>}
+                {!m.answer.recollections.length && <p className="field-help">{t("discussion.noEvidence")}</p>}
                 {m.answer.recollections.map((claim, index) => <div key={index}><Markdown text={claim.text} /><div className="discussion-citations">{claim.sources.map(ref => {
                   const citation = m.citations.find(c => c.source.kind === ref.kind && c.source.id === ref.id);
-                  return <button key={`${ref.kind}:${ref.id}`} disabled={!citation?.available} onClick={() => setSource({ ...ref, messageId: m.id })}>{citation?.available ? "查看依据" : "来源已删除"}</button>;
+                  return <button key={`${ref.kind}:${ref.id}`} disabled={!citation?.available} onClick={() => setSource({ ...ref, messageId: m.id })}>{citation?.available ? t("discussion.viewCitation") : t("discussion.sourceDeleted")}</button>;
                 })}</div></div>)}
-                {m.answer.ideas && <div><strong className="answer-label">接着想 · 新的分析与建议</strong><Markdown text={m.answer.ideas} /></div>}
-                {m.answer.conclusion && <div><strong className="answer-label">可以留下的结论 · 需确认保存</strong><Markdown text={m.answer.conclusion} /></div>}
+                {m.answer.ideas && <div><strong className="answer-label">{t("discussion.answerIdeas")}</strong><Markdown text={m.answer.ideas} /></div>}
+                {m.answer.conclusion && <div><strong className="answer-label">{t("discussion.answerConclusion")}</strong><Markdown text={m.answer.conclusion} /></div>}
               </div>
             ) : (
               <p className="readable-text">
                 {m.text ||
                   (m.status === "cancelled"
-                    ? "已停止，问题仍保留。"
-                    : failures[m.error_code || ""] || "这次回答未完成。")}
+                    ? t("discussion.cancelled")
+                    : renderMessage(failures[m.error_code || ""] || message("workspace", "discussion.incomplete"), translateCatalog))}
               </p>
             )}
             {!m.answer && !!m.citations.length && (
@@ -315,7 +317,7 @@ export default function Discussion({
                     disabled={!c.available}
                     onClick={() => setSource({ ...c.source, messageId: m.id })}
                   >
-                    {c.available ? `依据 ${i + 1}` : "来源已删除"}
+                    {c.available ? t("discussion.citation", { count: i + 1 }) : t("discussion.sourceDeleted")}
                   </button>
                 ))}
               </div>
@@ -325,7 +327,7 @@ export default function Discussion({
                 className="save-discussion-link"
                 onClick={() => setReview(m)}
               >
-                留下这段结论 <Icon name="plus" size={12} />
+                {t("discussion.leaveConclusion")} <Icon name="plus" size={12} />
               </button>
             )}
             {m.role === "assistant" &&
@@ -343,7 +345,7 @@ export default function Discussion({
                     }
                   }}
                 >
-                  重新提问
+                  {t("discussion.retry")}
                 </button>
               )}
           </article>
@@ -361,9 +363,9 @@ export default function Discussion({
                     })
                   }
                 >
-                  {receipt.status === "needs_review" ? "查看保留稿" : "查看记忆"}
+                  {receipt.status === "needs_review" ? t("discussion.retainedDraft") : t("discussion.viewMemory")}
                 </button>
-                {receipt.status === "applied" && <button onClick={() => void undo()}>撤销</button>}
+                {receipt.status === "applied" && <button onClick={() => void undo()}>{t("discussion.undo")}</button>}
               </>
             )}
           </div>
@@ -377,10 +379,10 @@ export default function Discussion({
               <span key={`${s.kind}:${s.id}`}>
                 <button onClick={() => setSource(s)}>
                   <Icon name="book" size={13} />
-                  已选记忆 {draft.value.context!.length > 1 ? i + 1 : ""}
+                  {t("discussion.selectedMemory", { suffix: draft.value.context!.length > 1 ? ` ${i + 1}` : "" })}
                 </button>
                 <button
-                  aria-label="移除这条讨论依据"
+                  aria-label={t("discussion.removeEvidence")}
                   disabled={!!pending || sending}
                   onClick={() =>
                     draft.update({
@@ -396,8 +398,8 @@ export default function Discussion({
         )}
         <textarea
           ref={input}
-          aria-label="继续讨论"
-          placeholder="从这条思路，继续问下去…"
+          aria-label={t("discussion.composerAria")}
+          placeholder={t("discussion.composerPlaceholder")}
           value={draft.value.body}
           disabled={!draft.ready || sending}
           onChange={(e) => draft.update({ body: e.target.value })}
@@ -416,12 +418,12 @@ export default function Discussion({
         />
         <div className="composer-bottom">
           <span>
-            确认后才存为记忆 · ⌘ Enter 发送
+            {t("discussion.composerHelp")}
           </span>
           {pending ? (
             <button className="outline-button" onClick={() => void cancel()}>
               <Icon name="stop" size={13} />
-              停止
+              {t("discussion.stop")}
             </button>
           ) : (
             <button
@@ -429,14 +431,14 @@ export default function Discussion({
               disabled={!draft.ready || sending || !draft.value.body.trim()}
               onClick={() => void send()}
             >
-              {sending ? "发送中…" : "发送"}
+              {sending ? t("discussion.sending") : t("discussion.send")}
               <Icon name="arrow" size={16} />
             </button>
           )}
         </div>
         {!configured && (
           <button className="connect-model-link" onClick={onSettings}>
-            连接模型后即可讨论
+            {t("discussion.connectModel")}
           </button>
         )}
         <ErrorNotice text={error || draft.error} />
@@ -453,7 +455,7 @@ export default function Discussion({
           onClose={() => setReview(null)}
           onSaved={(r) => {
             setReceipt(r);
-            setSavedNotice(r.status === "needs_review" ? "目标记忆已改变，确认的结论和完整审核稿已保存在本机；请查看保留稿后再决定去向。" : r.before_version ? "结论已存入所选记忆，原话与讨论出处均保留。" : "已保存为一条新记忆，原话与讨论出处均保留。");
+            setSavedNotice(r.status === "needs_review" ? message("workspace", "discussion.savedNeedsReview") : r.before_version ? message("workspace", "discussion.savedExisting") : message("workspace", "discussion.savedNew"));
             undoRequest.current = uid();
             setReview(null);
             onRefresh();

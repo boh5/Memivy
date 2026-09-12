@@ -1,3 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>NSMicrophoneUsageDescription</key><string>Memivy 使用麦克风将你说的话转成文字。语音识别在本机完成。</string></dict></plist>
+<plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
+<key>NSMicrophoneUsageDescription</key><string>Memivy uses the microphone to transcribe your speech. Audio is processed locally or by the speech service you configure.</string>
+</dict></plist>

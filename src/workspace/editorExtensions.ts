@@ -1,3 +1,5 @@
+import i18n from "../i18n";
+import type editorCatalog from '../../locales/en/editor.json';
 import { $inputRule, $markSchema, $prose, $remark, $view } from "@milkdown/kit/utils";
 import { InputRule, wrappingInputRule } from "@milkdown/kit/prose/inputrules";
 import { Plugin, TextSelection, type Command } from "@milkdown/kit/prose/state";
@@ -95,7 +97,7 @@ export const listItemView: NodeViewConstructor = (initial, view, getPos) => {
   let node = initial;
   const dom = document.createElement("li");
   const checkbox = document.createElement("input");
-  checkbox.type = "checkbox"; checkbox.contentEditable = "false"; checkbox.setAttribute("aria-label", "标记完成");
+  checkbox.type = "checkbox"; checkbox.contentEditable = "false"; checkbox.dataset.editorLabel = "complete"; checkbox.setAttribute("aria-label", i18n.t("complete", { ns: "editor" }));
   const contentDOM = document.createElement("div");
   dom.append(checkbox, contentDOM);
   function refresh() {
@@ -121,17 +123,35 @@ export const editorListView = $view(listItemSchema.node, () => listItemView);
 export const safeImageView = $view(imageSchema.node, () => node => {
   const dom = document.createElement("span");
   dom.className = "markdown-image";
-  dom.textContent = `[图片：${node.attrs.alt || "图片链接"}]`;
+  dom.dataset.editorImageAlt = node.attrs.alt || "";
+  dom.textContent = i18n.t("image", { ns: "editor", alt: node.attrs.alt || i18n.t("imageLink", { ns: "editor" }) });
   return { dom };
 });
 
-const tableIcon = (label: string, path: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="${label}"><title>${label}</title><path d="${path}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const tableIcon = (key: keyof typeof editorCatalog, path: string) => { const label = i18n.t(key, { ns: "editor" }); return `<svg data-editor-label="${key}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="${label}"><title>${label}</title><path d="${path}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`; };
 export const tableFeatureConfig = {
-  addRowIcon: tableIcon("新增行", "M5 12h14M12 5v14"),
-  addColIcon: tableIcon("新增列", "M5 12h14M12 5v14"),
-  deleteRowIcon: tableIcon("删除行", "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"),
-  deleteColIcon: tableIcon("删除列", "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"),
-  alignLeftIcon: tableIcon("左对齐", "M4 5h16M4 10h10M4 15h16M4 20h10"),
-  alignCenterIcon: tableIcon("居中对齐", "M4 5h16M7 10h10M4 15h16M7 20h10"),
-  alignRightIcon: tableIcon("右对齐", "M4 5h16M10 10h10M4 15h16M10 20h10"),
+  get addRowIcon() { return tableIcon("addRow", "M5 12h14M12 5v14"); },
+  get addColIcon() { return tableIcon("addCol", "M5 12h14M12 5v14"); },
+  get deleteRowIcon() { return tableIcon("deleteRow", "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"); },
+  get deleteColIcon() { return tableIcon("deleteCol", "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"); },
+  get alignLeftIcon() { return tableIcon("alignLeft", "M4 5h16M4 10h10M4 15h16M4 20h10"); },
+  get alignCenterIcon() { return tableIcon("alignCenter", "M4 5h16M7 10h10M4 15h16M7 20h10"); },
+  get alignRightIcon() { return tableIcon("alignRight", "M4 5h16M10 10h10M4 15h16M10 20h10"); },
 };
+
+/** Update presentation DOM only; never dispatch a document or selection transaction. */
+export function localizeEditorDom(host: HTMLElement) {
+  for (const node of host.querySelectorAll<HTMLElement>('[data-editor-label]')) {
+    const label = i18n.t(node.dataset.editorLabel as keyof typeof editorCatalog, { ns: 'editor' });
+    if (node.getAttribute('aria-label') !== label) node.setAttribute('aria-label', label);
+    const title = node.querySelector('title');
+    if (title && title.textContent !== label) title.textContent = label;
+  }
+  for (const node of host.querySelectorAll<HTMLElement>('[data-editor-image-alt]')) {
+    const text = i18n.t('image', { ns: 'editor', alt: node.dataset.editorImageAlt || i18n.t('imageLink', { ns: 'editor' }) });
+    if (node.textContent !== text) node.textContent = text;
+  }
+  for (const input of host.querySelectorAll<HTMLInputElement>('.milkdown-link-edit input')) {
+    input.placeholder = i18n.t('linkPlaceholder', { ns: 'editor' });
+  }
+}

@@ -1,13 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { call, errorText, native } from "./api";
 import { ErrorNotice } from "./components";
 import { shortcutLabel, useDesktop } from "./desktopApi";
+import {useTranslation} from "react-i18next";
+import {useNotice} from "../i18n/react";
+import {translateCatalog} from "../i18n";
 
-const loginLabels: Record<string, string> = { enabled: "已开启", disabled: "未开启", requires_approval: "等待系统允许", not_found: "当前应用包不可用" };
-export default function DesktopSettings() {
+type LoginLabelKey = "desktop.login.enabled" | "desktop.login.disabled" | "desktop.login.requiresApproval" | "desktop.login.notFound";
+const loginLabels = {
+  enabled: "desktop.login.enabled",
+  disabled: "desktop.login.disabled",
+  requires_approval: "desktop.login.requiresApproval",
+  not_found: "desktop.login.notFound",
+} as const satisfies Record<string, LoginLabelKey>;
+export default function DesktopSettings({focusEntry=false,children}:{focusEntry?:boolean;children?:ReactNode}={}) {
+  const {t}=useTranslation('settings');
+  const entry = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (focusEntry) entry.current?.scrollIntoView({block:'start'}); }, [focusEntry]);
   const desktop = useDesktop(), state = desktop.state;
-  const [recording, setRecording] = useState(false), [candidate, setCandidate] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const [loginStatus, setLoginStatus] = useState<string | null>(native ? null : "disabled"), [loginError, setLoginError] = useState("");
+  const [recording, setRecording] = useState(false), [candidate, setCandidate] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useNotice();
+  const [loginStatus, setLoginStatus] = useState<string | null>(native ? null : "disabled"), [loginError, setLoginError] = useNotice();
   const loginRequest = useRef(0), changingLogin = useRef(false);
   useEffect(() => {
     if (!native) return;
@@ -39,11 +51,23 @@ export default function DesktopSettings() {
     catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
-  return <section className="settings-section desktop-settings">
-    <h3>macOS 快捷入口</h3>
-    <p>随时记一下，或接着上次的话题。关闭主窗口后，菜单栏仍可使用；⌘Q 退出应用。</p>
+  const loginLabel=(status:string|null)=>status?t((loginLabels as Record<string,LoginLabelKey>)[status]||'desktop.login.unknown'):loginError?t('desktop.login.unknown'):t('desktop.login.reading');
+  const translatedDesktopStatusError = desktop.error || (state?.error ? translateCatalog(state.error, {ns: "errors"}) : "");
+  return <>
+    <section className="settings-section startup-settings">
+      <h3>{t('desktop.startupTitle')}</h3>
+      <div className="setting-line"><div><strong>{t('desktop.login.title')}</strong><p>{t('desktop.login.description',{status:loginLabel(loginStatus)})}</p></div>
+        <button className="outline-button" disabled={busy || !native || !loginStatus} onClick={() => void run(() => updateLogin(!(loginStatus === "enabled" || loginStatus === "requires_approval")))}>{loginStatus === "enabled" || loginStatus === "requires_approval" ? t('actions.disable') : t('actions.enable')}</button>
+      </div>
+      {loginStatus === "requires_approval" && <button className="connect-model-link" onClick={() => void run(() => updateLogin(null))}>{t('desktop.login.allowInSystem')}</button>}
+      {loginStatus === "not_found" && <p className="field-help">{t('desktop.login.notFoundHelp')}</p>}
+      <ErrorNotice text={loginError}/>
+    </section>
+    <section ref={entry} className="settings-section desktop-settings">
+    <h3>{t('desktop.title')}</h3>
+    <p>{t('desktop.description')}</p>
     {state && <>
-      <div className="setting-line"><div><strong>全局快捷键</strong><p>按一下打开，再按一下收起。首次设置后，请切到其他应用试按一次。</p></div>
+      <div className="setting-line"><div><strong>{t('desktop.shortcutTitle')}</strong><p>{t('desktop.shortcutDescription')}</p></div>
         <button className={`shortcut-recorder outline-button ${recording ? "recording" : ""}`} disabled={busy || !native} onClick={() => setRecording(true)}
           onBlur={() => setRecording(false)} onKeyDown={e => {
             if (!recording) return;
@@ -52,18 +76,14 @@ export default function DesktopSettings() {
             if (e.repeat || ["Meta", "Shift", "Control", "Alt"].includes(e.key) || e.nativeEvent.isComposing) return;
             const text = [...(e.ctrlKey ? ["Control"] : []), ...(e.altKey ? ["Alt"] : []), ...(e.shiftKey ? ["Shift"] : []), ...(e.metaKey ? ["Super"] : []), e.code].join("+");
             setCandidate(text); setRecording(false);
-          }}>{recording ? "请按快捷键…" : shortcutLabel(candidate || state.shortcut)}</button>
+          }}>{recording ? t('desktop.pressShortcut') : shortcutLabel(candidate || state.shortcut)}</button>
       </div>
-      {candidate && <div className="action-row"><button className="send-button" disabled={busy} onClick={() => void run(async () => { await desktop.update({ shortcut: candidate }); setCandidate(""); })}>保存快捷键</button><button className="outline-button" onClick={() => setCandidate("")}>取消修改</button></div>}
-      <label className="checkbox-label"><input type="checkbox" checked={state.visible} disabled={busy || !native} onChange={e => void run(() => desktop.update({ visible: e.target.checked }))} />显示桌面助手 <small>可以拖到顺手的位置</small></label>
-      <label className="checkbox-label"><input type="checkbox" checked={state.paused} disabled={busy || !native} onChange={e => void run(() => desktop.update({ paused: e.target.checked }))} />暂停快捷入口 <small>暂时停用快捷键和桌面助手</small></label>
-      <div className="setting-line"><div><strong>登录时启动</strong><p>安静启动，保留菜单栏入口。当前：{loginStatus ? loginLabels[loginStatus] || "状态未知" : loginError ? "状态未知" : "读取中…"}。</p></div>
-        <button className="outline-button" disabled={busy || !native || !loginStatus} onClick={() => void run(() => updateLogin(!(loginStatus === "enabled" || loginStatus === "requires_approval")))}>{loginStatus === "enabled" || loginStatus === "requires_approval" ? "关闭" : "开启"}</button>
-      </div>
-      {loginStatus === "requires_approval" && <button className="connect-model-link" onClick={() => void run(() => updateLogin(null))}>在系统登录项中允许 Memivy</button>}
-      {loginStatus === "not_found" && <p className="field-help">请将正式的 Memivy 应用放入“应用程序”目录，再开启登录启动。</p>}
-      <p className="field-help">只在唤起时读取前台应用名称。网页链接或文件路径由你主动附带；原话保存不依赖模型。</p>
-      <ErrorNotice text={error || loginError || desktop.error || state.error || ""} />
+      {candidate && <div className="action-row"><button className="send-button" disabled={busy} onClick={() => void run(async () => { await desktop.update({ shortcut: candidate }); setCandidate(""); })}>{t('desktop.saveShortcut')}</button><button className="outline-button" onClick={() => setCandidate("")}>{t('actions.cancelEdit')}</button></div>}
+      <label className="checkbox-label"><input type="checkbox" checked={state.visible} disabled={busy || !native} onChange={e => void run(() => desktop.update({ visible: e.target.checked }))} />{t('desktop.showAssistant')} <small>{t('desktop.showAssistantHint')}</small></label>
+      <label className="checkbox-label"><input type="checkbox" checked={state.paused} disabled={busy || !native} onChange={e => void run(() => desktop.update({ paused: e.target.checked }))} />{t('desktop.pauseEntry')} <small>{t('desktop.pauseEntryHint')}</small></label>
+      <p className="field-help">{t('desktop.foregroundPrivacy')}</p>
+      <ErrorNotice text={error || translatedDesktopStatusError} />
     </>}
-  </section>;
+    {children}
+  </section></>;
 }

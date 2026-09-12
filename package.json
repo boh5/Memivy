@@ -13,15 +13,18 @@
     "test:ui": "node --experimental-strip-types --test tests/*.test.mjs",
     "build:mcp": "node scripts/prepare-mcp.mjs --debug",
     "build:beta": "node scripts/build-beta.mjs",
-    "test:core-assets": "python3 scripts/verify_core_assets.py"
+    "test:core-assets": "python3 scripts/verify_core_assets.py",
+    "i18n:check": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@milkdown/crepe": "7.22.1",
     "@milkdown/kit": "7.22.1",
     "@tanstack/react-query": "5.102.8",
     "@tauri-apps/api": "^2.11.1",
+    "i18next": "26.4.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-i18next": "17.0.13",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1"
   },

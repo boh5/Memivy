@@ -1,3 +1,6 @@
+import { translateCatalog } from "../i18n";
+import { useNotice } from "../i18n/react";
+import { useTranslation } from "react-i18next";
 import { useResourceBridge } from "./resources";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -11,13 +14,15 @@ import { flushDrafts } from "./useDraft";
 import CaptureForm from "./CaptureForm";
 import Discussion from "./Discussion";
 import { installClickRecovery } from "./clickRecovery";
+import LanguageRecovery from "./LanguageRecovery";
 import "../prototype.css";
 import "./workspace.css";
 import "./desktop.css";
 
 export default function Desktop() {
+  const { t } = useTranslation("workspace");
   const desktop = useDesktop(), state = desktop.state;
-  const [error, setError] = useState(""), [saved, setSaved] = useState<Key | null>(null);
+  const [error, setError] = useNotice(), [saved, setSaved] = useState<Key | null>(null);
   const busy = useRef(false), current = useRef(state), root = useRef<HTMLDivElement>(null), composing = useRef(false);
   const drag = useRef<{ x: number; y: number; moved: boolean; tail: Promise<unknown> } | null>(null);
   const dragEnd = useRef<Promise<unknown>>(Promise.resolve()), suppressLeafClick = useRef(false);
@@ -92,7 +97,7 @@ export default function Desktop() {
     catch (e) { setError(errorText(e)); }
   }
   async function ask(question: string, id: string) {
-    if (!current.current?.configured) throw "先在主窗口连接一个模型，问题草稿会保留。";
+    if (!current.current?.configured) throw { code: "desktop_model_required" };
     const topic = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [] });
     await desktop.update({ topic_id: topic.id });
   }
@@ -126,28 +131,29 @@ export default function Desktop() {
   return <div ref={root} className={`formal-desktop ${state?.expanded ? "is-open" : ""}`}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={e => { if (e.key === "Escape" && !e.repeat && !e.nativeEvent.isComposing && !composing.current && e.keyCode !== 229 && !document.querySelector("dialog[open]")) { e.preventDefault(); void dismiss("explicit"); } }}>
-    {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>已存到本机</span><button onClick={() => void expand(state.last_memory ? { kind: "memory", id: state.last_memory } : null)}>查看</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? "已存到本机，打开 Memivy 快捷入口" : "打开 Memivy 快捷入口"}
+    {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>{t("desktop.saved")}</span><button onClick={() => void expand(state.last_memory ? { kind: "memory", id: state.last_memory } : null)}>{t("desktop.view")}</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? t("desktop.leafSavedAria", { saved: t("desktop.saved"), product: "Memivy" }) : t("desktop.leafAria", { product: "Memivy" })}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
       onClick={() => { if (!suppressLeafClick.current) void dragEnd.current.then(() => call("desktop_open")).catch(e => setError(errorText(e))); suppressLeafClick.current = false; }}>
       <img src={icon} alt="" draggable={false} />{saved && <span className="leaf-check"><Icon name="check" size={11} /></span>}
-    </button></div> : <section className="desktop-panel" aria-label="Memivy 快捷入口">
+    </button></div> : <section className="desktop-panel" aria-label={t("desktop.panelAria", { product: "Memivy" })}>
       <header className="desktop-toolbar" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
         <img src={icon} alt="" draggable={false} /><strong>Memivy</strong><span className="desktop-drag-space" />
-        <button className={`icon-button ${state.pinned ? "selected" : ""}`} aria-label={state.pinned ? "取消固定窗口" : "固定窗口"} aria-pressed={state.pinned} title={state.pinned ? "已固定 · 点击外部仍保留" : "固定窗口"} onClick={() => void change({ pinned: !state.pinned })}><Icon name="pin" size={15} /></button>
-        <button className="icon-button" aria-label="在主窗口继续" title="在主窗口继续" onClick={() => void expand()}><Icon name="expand" size={15} /></button>
-        <button className="icon-button" aria-label="收起快捷窗口" title="收起 · Esc" onClick={() => void dismiss("explicit")}><Icon name="close" size={16} /></button>
+        <button className={`icon-button ${state.pinned ? "selected" : ""}`} aria-label={state.pinned ? t("desktop.unpinAria") : t("desktop.pinAria")} aria-pressed={state.pinned} title={state.pinned ? t("desktop.pinnedTitle") : t("desktop.pinTitle")} onClick={() => void change({ pinned: !state.pinned })}><Icon name="pin" size={15} /></button>
+        <button className="icon-button" aria-label={t("desktop.continueInMainAria")} title={t("desktop.continueInMainTitle")} onClick={() => void expand()}><Icon name="expand" size={15} /></button>
+        <button className="icon-button" aria-label={t("desktop.collapseAria")} title={t("desktop.collapseTitle")} onClick={() => void dismiss("explicit")}><Icon name="close" size={16} /></button>
       </header>
       <div className="desktop-content">
+        <LanguageRecovery />
         <div ref={composerContent} className={state.mode === "ask" && state.topic ? "desktop-discussion-content" : "desktop-capture-content"}>
         {state.mode === "ask" && state.topic ? <>
-          <div className="desktop-topic-nav"><button onClick={() => void change({ mode: "capture" })}>记一下</button><span>问一问</span><button onClick={() => void change({ clear_topic: true })}>新话题</button></div>
+          <div className="desktop-topic-nav"><button onClick={() => void change({ mode: "capture" })}>{t("desktop.capture")}</button><span>{t("desktop.ask")}</span><button onClick={() => void change({ clear_topic: true })}>{t("desktop.newTopic")}</button></div>
           <Discussion key={state.topic.id} compact topic={state.topic} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => {}} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
         </> : <CaptureForm key={state.mode} quick sourceApp={state.source_app} mode={state.mode} focus={state.generation} onMode={mode => void change({ mode })} onAsk={ask}
           onBusy={changeBusy} onReady={reportReady} onEdit={() => setSaved(null)}
           onSaved={key => { setSaved(key); setTimeout(() => void dismiss("saved"), 0); }} />}
-        {saved && <div className="desktop-saved" role="status"><Icon name="check" size={13} /><span>已存到本机</span><button onClick={() => void expand(saved)}>查看</button></div>}
-        {state.mode === "ask" && !state.configured && !state.topic && <button className="connect-model-link" onClick={() => void expand(null, true)}>连接模型后即可提问</button>}
-        <ErrorNotice text={error || desktop.error || state.error || ""} />
+        {saved && <div className="desktop-saved" role="status"><Icon name="check" size={13} /><span>{t("desktop.saved")}</span><button onClick={() => void expand(saved)}>{t("desktop.view")}</button></div>}
+        {state.mode === "ask" && !state.configured && !state.topic && <button className="connect-model-link" onClick={() => void expand(null, true)}>{t("desktop.connectModel")}</button>}
+        <ErrorNotice text={error || desktop.error || (state.error ? translateCatalog(state.error, { ns: "errors" }) : "")} />
         </div>
       </div>
     </section>}

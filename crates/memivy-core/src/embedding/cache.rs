@@ -3,11 +3,11 @@ use super::*;
 use std::io::{Read, Seek, SeekFrom};
 // A stable product namespace keeps dev, installed apps and libraries on one cache.
 pub fn model_cache_root() -> Result<PathBuf> {
-    cache_root_at(&dirs::cache_dir().ok_or("无法确定用户模型缓存目录")?)
+    cache_root_at(&dirs::cache_dir().ok_or("model_cache_path")?)
 }
 fn cache_root_at(base: &Path) -> Result<PathBuf> {
     if !base.is_absolute() {
-        return Err("用户模型缓存目录必须为绝对路径".into());
+        return Err("model_cache_path".into());
     }
     Ok(base.join("com.memivy.app/models"))
 }
@@ -49,7 +49,7 @@ impl HfModelCache {
         verify(&self.blob(), &MODEL)?;
         let p = fs::canonicalize(self.model_path()).map_err(io)?;
         if p != fs::canonicalize(self.blob()).map_err(io)? {
-            return Err("模型快照不匹配".into());
+            return Err("model_cache_mismatch".into());
         }
         Ok(p)
     }
@@ -98,7 +98,7 @@ impl HfModelCache {
 pub fn verify(p: &Path, m: &ModelDescriptor) -> Result<()> {
     let mut f = File::open(p).map_err(io)?;
     if f.metadata().map_err(io)?.len() != m.bytes {
-        return Err("模型文件长度不符，请继续下载".into());
+        return Err("model_download_incomplete".into());
     }
     let mut sha = Sha256::new();
     let mut bytes = [0u8; 1024 * 1024];
@@ -110,7 +110,7 @@ pub fn verify(p: &Path, m: &ModelDescriptor) -> Result<()> {
         sha.update(&bytes[..n]);
     }
     if format!("{:x}", sha.finalize()) != m.sha256 {
-        return Err("模型校验失败，请重新下载".into());
+        return Err("model_cache_mismatch".into());
     }
     Ok(())
 }
@@ -141,7 +141,7 @@ pub async fn download_file(
         at = 0;
     }
     if !keep_going() {
-        return Err("下载已暂停".into());
+        return Err("model_download_paused".into());
     }
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(20))
@@ -153,7 +153,7 @@ pub async fn download_file(
         .header(reqwest::header::RANGE, format!("bytes={at}-"))
         .send()
         .await
-        .map_err(|_| "模型下载连接失败，可继续重试".to_string())?;
+        .map_err(|_| "model_download_network".to_string())?;
     match response.status().as_u16() {
         206 => {
             let expected = format!("bytes {at}-{} /{}", m.bytes - 1, m.bytes).replace(" /", "/");
@@ -163,7 +163,7 @@ pub async fn download_file(
                 .and_then(|v| v.to_str().ok())
                 != Some(expected.as_str())
             {
-                return Err("下载断点响应不匹配，已保留断点".into());
+                return Err("model_download_range".into());
             }
         }
         200 => {
@@ -171,20 +171,20 @@ pub async fn download_file(
             at = 0;
         }
         416 => return verify(p, m),
-        _ => return Err("模型服务器暂不可用，可继续重试".into()),
+        _ => return Err("model_download_network".into()),
     }
     file.seek(SeekFrom::Start(at)).map_err(io)?;
     while let Some(bytes) = response
         .chunk()
         .await
-        .map_err(|_| "模型下载中断，可继续重试".to_string())?
+        .map_err(|_| "model_download_network".to_string())?
     {
         if !keep_going() {
             file.sync_all().map_err(io)?;
-            return Err("下载已暂停".into());
+            return Err("model_download_paused".into());
         }
         if at + bytes.len() as u64 > m.bytes {
-            return Err("模型下载长度超出清单".into());
+            return Err("model_download_size".into());
         }
         file.write_all(&bytes).map_err(io)?;
         at += bytes.len() as u64;
@@ -295,7 +295,10 @@ mod tests {
         let (url, t) = server(
             "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 1-4/5\r\nContent-Length: 4\r\nConnection: close\r\n\r\nello",
         );
-        assert!(download_file(&url, &p, &SMALL, || true).await.is_err());
+        assert_eq!(
+            download_file(&url, &p, &SMALL, || true).await.unwrap_err(),
+            "model_download_range"
+        );
         assert_eq!(fs::read(&p).unwrap(), b"he");
         t.join().unwrap();
     }
@@ -322,7 +325,10 @@ mod tests {
         let (url, t) = server(
             "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         );
-        assert!(download_file(&url, &p, &SMALL, || true).await.is_err());
+        assert_eq!(
+            download_file(&url, &p, &SMALL, || true).await.unwrap_err(),
+            "model_download_incomplete"
+        );
         assert_eq!(fs::read(&p).unwrap(), b"he");
         t.join().unwrap();
     }

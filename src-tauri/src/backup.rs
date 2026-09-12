@@ -1,4 +1,5 @@
 //! Native file selection and restart coordination; database rules stay in core.
+use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace, blocking};
 use memivy_core::memory::{PreparedRestore, RestoreResult};
 use std::{path::PathBuf, sync::atomic::Ordering};
@@ -13,11 +14,12 @@ fn main_only(window: &tauri::WebviewWindow) -> HostResult<()> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("请在主窗口完成此操作".into())
+        Err(HostError::new("main_window_required"))
     }
 }
 async fn select_file(app: &tauri::AppHandle, save: bool) -> HostResult<Option<PathBuf>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
     app.run_on_main_thread(move || {
         use objc2_app_kit::{NSModalResponseOK, NSOpenPanel, NSSavePanel};
         use objc2_foundation::{NSArray, NSString};
@@ -32,9 +34,10 @@ async fn select_file(app: &tauri::AppHandle, save: bool) -> HostResult<Option<Pa
             panel.setNameFieldStringValue(&NSString::from_str(&format!(
                 "Memivy-backup-{timestamp}.db"
             )));
-            panel.setMessage(Some(&NSString::from_str(
-                "备份记忆、原话、历史、讨论和草稿，不包含模型密钥。请选择新的文件名。",
-            )));
+            panel.setMessage(Some(&NSString::from_str(&crate::i18n::text(
+                &handle,
+                "backupSave",
+            ))));
             if panel.runModal() == NSModalResponseOK {
                 panel
                     .URL()
@@ -52,9 +55,10 @@ async fn select_file(app: &tauri::AppHandle, save: bool) -> HostResult<Option<Pa
             panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&[NSString::from_str(
                 "db",
             )])));
-            panel.setMessage(Some(&NSString::from_str(
-                "选择 Memivy 备份；校验后可确认整库恢复。",
-            )));
+            panel.setMessage(Some(&NSString::from_str(&crate::i18n::text(
+                &handle,
+                "backupOpen",
+            ))));
             if panel.runModal() == NSModalResponseOK {
                 panel
                     .URL()
@@ -66,8 +70,8 @@ async fn select_file(app: &tauri::AppHandle, save: bool) -> HostResult<Option<Pa
         };
         let _ = tx.send(path);
     })
-    .map_err(|_| "无法打开文件选择窗口")?;
-    rx.await.map_err(|_| "文件选择未完成".into())
+    .map_err(|_| HostError::new("file_dialog_failed"))?;
+    rx.await.map_err(|_| HostError::new("file_dialog_failed"))
 }
 #[tauri::command]
 pub async fn backup_create(
@@ -120,7 +124,7 @@ pub async fn backup_restore(
         let state = app.state::<Workspace>();
         let mut request = state.restore_request.lock().unwrap();
         if request.is_some() {
-            return Err("恢复正在准备中".into());
+            return Err(HostError::new("restore_busy"));
         }
         *request = Some(RestartRequest {
             id,
@@ -186,7 +190,7 @@ pub(crate) fn finish_restart(app: &tauri::AppHandle) -> bool {
                 let store = app.state::<Workspace>().store.clone();
                 let _ = blocking(move || store.discard_prepared_restore(&id)).await;
                 let _ = app.emit("restore-cancelled", ());
-                crate::desktop::set_error(&app, message);
+                crate::desktop::set_error(&app, message.to_string());
             }
         }
     });

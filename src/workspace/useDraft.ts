@@ -1,3 +1,4 @@
+import { useNotice } from "../i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { call, errorText, uid, type Draft } from "./api";
 import { DraftQueue } from "./draftQueue";
@@ -17,7 +18,7 @@ export function useDraft(
   empty.current = { ...initial, key, request_id: empty.current.request_id };
   const [draft, setDraft] = useState<Draft | null>(null);
   const [ready, setReady] = useState(false),
-    [error, setError] = useState("");
+    [error, setError, errorMessage] = useNotice();
   const current = useRef<Draft | null>(null);
   useEffect(() => {
     let alive = true;
@@ -60,6 +61,7 @@ export function useDraft(
       : null;
     return drafts.consume(key, requestId, replacement);
   }
-  return { value: draft || empty.current, ready, error, update, flush, clear,
+  return { value: draft || empty.current, ready, error,
+    conflicted: typeof errorMessage === 'object' && errorMessage.ns === 'errors' && errorMessage.key === 'draft_conflict', update, flush, clear,
     resolve: (keepLocal: boolean, expected: string | null) => drafts.resolve(key, keepLocal, expected) };
 }
