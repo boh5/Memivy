@@ -1,4 +1,4 @@
-import { message, type UiMessage } from "../i18n/messages";
+import { message } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState } from "react";

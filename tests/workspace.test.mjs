@@ -75,10 +75,10 @@ test('a receipt is shown only for its record and undo targets that record', asyn
   f.find(app,n=>n.type===Detail).props.onChanged(f.keyA,receipt);await f.settle();
   await select('b');
   const b=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
-  f.find(b,n=>n.props.role==='tab'&&f.text(n).startsWith('版本历史')).props.onClick();await f.settle();
+  f.find(b,n=>n.props.role==='tab'&&f.text(n).startsWith('历史')).props.onClick();await f.settle();
   assert(!f.nodes(b.tree).some(n=>n.type==='button'&&f.text(n)==='撤销这次修改'));f.unmount(b);
   await select('a');const a=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
-  f.find(a,n=>n.props.role==='tab'&&f.text(n).startsWith('版本历史')).props.onClick();await f.settle();
+  f.find(a,n=>n.props.role==='tab'&&f.text(n).startsWith('历史')).props.onClick();await f.settle();
   f.find(a,n=>n.type==='button'&&f.text(n)==='撤销这次修改').props.onClick();await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='library_action').at(-1).args.action.original_request,'edit-a');
   await select('b');await select('a');assert.equal(f.find(app,n=>n.type===Detail).props.initialReceipt,null);

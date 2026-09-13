@@ -50,7 +50,7 @@ export default function Desktop() {
     let disposed = false, previous = 0, tail = Promise.resolve();
     const measure = () => {
       // Measure intrinsic content; the outer panel adds toolbar, padding and borders.
-      const height = Math.max(310, Math.min(620, Math.ceil(content.getBoundingClientRect().height + 92)));
+      const height = Math.max(260, Math.min(620, Math.ceil(content.getBoundingClientRect().height + 92)));
       if (height === previous) return;
       previous = height;
       tail = tail.then(async () => {
@@ -61,7 +61,7 @@ export default function Desktop() {
     observer.observe(content);
     measure();
     return () => { disposed = true; observer.disconnect(); };
-  }, [state?.expanded, state?.generation, state?.topic?.id, state?.pinned]);
+  }, [state?.expanded, state?.generation, state?.topic?.id]);
   const dismiss = useCallback(async (reason: string, generation = current.current?.generation) => {
     const requestedAt = Date.now();
     if (generation === undefined || dismissing.current || document.querySelector("dialog[open]")) return;

@@ -25,7 +25,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
       });
     };
     if (native) { refresh(); window.addEventListener("focus", refresh); }
-    else setState({ enabled: false, executable_available: false, configuration: null });
+    else setState({ enabled: true, executable_available: false, configuration: null });
     return () => { active = false; reads.current++; window.removeEventListener("focus", refresh); };
   }, []);
   async function run(work: () => Promise<void>) {
@@ -50,11 +50,11 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
   return <section className="settings-section desktop-settings">
     <h3>{t('mcp.title')}</h3>
     <p>{t('mcp.description')}</p>
-    <label className="checkbox-label">
-      <input type="checkbox" checked={state?.enabled ?? false} disabled={!native || !state || busy}
-        onChange={event => { const enabled = event.target.checked; void run(() => updateEnabled(enabled)); }} />
-      <span>{t('mcp.allowAccess')} <small>{state ? (state.enabled ? t('status.enabled') : t('status.disabled')) : error ? t('mcp.statusUnknown') : t('status.reading')}</small></span>
-    </label>
+    <div className="setting-line">
+      <div><strong>{t('mcp.allowAccess')}</strong>{!state&&<p>{error?t('mcp.statusUnknown'):t('status.reading')}</p>}</div>
+      <input type="checkbox" role="switch" className="settings-switch" aria-label={t('mcp.allowAccess')} checked={state?.enabled??false} disabled={!native||!state||busy}
+        onChange={event=>{const enabled=event.target.checked;void run(()=>updateEnabled(enabled));}}/>
+    </div>
     {!native && <p>{t('preview.mcpReadOnly')}</p>}
     {native && state && !state.executable_available && <p>{t('mcp.executableMissing')}</p>}
     <div className="action-row mcp-actions">
@@ -75,7 +75,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
       <p>{t('mcp.tryConnection')}</p>
     </details>}
     {diagnostic && <div className="settings-result" role="status">
-      {t('mcp.diagnosticPassed',{version:diagnostic.server_version,protocol:diagnostic.protocol_version,count:diagnostic.tools.length})}
+      {t('mcp.diagnosticPassed',{count:diagnostic.tools.length})}
       <p>{t('mcp.diagnosticScope')}{diagnostic.enabled ? t('mcp.diagnosticEnabled') : t('mcp.diagnosticDisabled')}</p>
     </div>}
     {notice && <p className="settings-result" role="status">{notice}</p>}

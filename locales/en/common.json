@@ -3,7 +3,7 @@
   "languageDescription": "Choose the language for menus and interface text. Your content stays as written.",
   "system": "Follow system",
   "languageReadError": "Language settings could not be read. Your saved preference has not been changed.",
-  "languageMenuError": "Language saved. The native menu could not update; try again.",
+  "languageMenuError": "Language saved, but menus could not be updated. Try again.",
   "languageSaveError": "Language could not be saved. Your previous choice is preserved.",
   "retry": "Retry",
   "closeNotice": "Dismiss notification",

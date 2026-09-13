@@ -38,10 +38,12 @@ export function Modal({
     const previous = document.activeElement;
     const element = dialog.current;
     element?.showModal();
+    // Focus only after entering the top layer; React's child autoFocus runs too early.
+    element?.querySelector<HTMLElement>("[data-modal-autofocus]:not(:disabled)")?.focus({ preventScroll: true });
     return () => {
       element?.close();
       if (previous instanceof HTMLElement && previous.isConnected)
-        previous.focus();
+        previous.focus({ preventScroll: true });
     };
   }, []);
   return (

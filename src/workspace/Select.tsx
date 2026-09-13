@@ -20,6 +20,14 @@ export default function Select({value, onChange, children, disabled=false, 'aria
     return {value:props.value??String(props.children),label:String(props.children)};
   });
   function close(){menu.current?.hidePopover();setOpen(false);}
+  function reveal(index:number){
+    const popup=menu.current,option=popup?.children[index];
+    if(!popup||!option)return;
+    const bounds=popup.getBoundingClientRect(),row=option.getBoundingClientRect();
+    const top=row.top-bounds.top-popup.clientTop,bottom=row.bottom-bounds.top-popup.clientTop-popup.clientHeight;
+    if(top<0)popup.scrollTop+=top;
+    else if(bottom>0)popup.scrollTop+=bottom;
+  }
   function show(){
     if(disabled||!options.length)return;
     const button=trigger.current, popup=menu.current;
@@ -28,11 +36,12 @@ export default function Select({value, onChange, children, disabled=false, 'aria
     const r=button.getBoundingClientRect(),below=window.innerHeight-r.bottom-12,above=r.top-12;
     const height=Math.min(280,Math.max(below,above)), width=Math.min(Math.max(r.width,180),window.innerWidth-24);
     Object.assign(popup.style,{left:`${Math.max(12,Math.min(r.left,window.innerWidth-width-12))}px`,width:`${width}px`,maxHeight:`${height}px`,top:below>=Math.min(280,above)?`${r.bottom+5}px`:'auto',bottom:below>=Math.min(280,above)?'auto':`${window.innerHeight-r.top+5}px`});
-    setActive(Math.max(0,options.findIndex(option=>option.value===value)));
-    popup.showPopover();setOpen(true);
+    const index=Math.max(0,options.findIndex(option=>option.value===value));
+    setActive(index);
+    popup.showPopover();reveal(index);setOpen(true);
   }
-  function choose(index:number){const option=options[index];if(!option)return;close();trigger.current?.focus();onChange({target:{value:option.value}});}
-  function move(index:number){const next=(index+options.length)%options.length;setActive(next);menu.current?.children[next]?.scrollIntoView({block:'nearest'});}
+  function choose(index:number){const option=options[index];if(!option)return;close();trigger.current?.focus({preventScroll:true});onChange({target:{value:option.value}});}
+  function move(index:number){const next=(index+options.length)%options.length;setActive(next);reveal(next);}
   return <span className="workspace-select">
     <button type="button" role="combobox" ref={trigger} className="workspace-select-trigger" disabled={disabled} aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={id} aria-activedescendant={open?`${id}-${active}`:undefined}
       onClick={()=>open?close():show()} onKeyDown={event=>{

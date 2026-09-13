@@ -536,10 +536,9 @@ impl MemoryStore {
             request.query.clone()
         };
         let vector = if remote {
-            let input = format!("{}{}", registry.embedding.query_prefix, text);
             crate::models::bytes(&crate::models::embed(
                 &registry.resolve(&registry.embedding)?,
-                &input,
+                &text,
                 registry.embedding.dimensions,
                 Duration::from_secs(3),
             )?)

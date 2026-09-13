@@ -170,18 +170,11 @@ pub(crate) async fn models_test(
             .to_string()
         }
         "embedding" => {
-            let prefix = binding.query_prefix.clone();
             let dimension = tauri::async_runtime::spawn_blocking(move || {
                 let v = memivy_core::models::embed(
                     &m,
                     "Memivy connection test: a personal note.",
                     None,
-                    Duration::from_secs(15),
-                )?;
-                memivy_core::models::embed(
-                    &m,
-                    &format!("{prefix}Find a personal note."),
-                    Some(v.len()),
                     Duration::from_secs(15),
                 )?;
                 Ok::<_, String>(v.len())

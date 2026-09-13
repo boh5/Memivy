@@ -27,7 +27,7 @@ export default function BackupSettings({ disabled, onBusyChange, onRestore }: {
     <p>{t('backup.description')}</p>
     <ErrorNotice text={error} />
     {notice && <p className="workspace-notice" role="status">{notice}</p>}
-    <div className="setting-line"><div><strong>{t('backup.createTitle')}</strong><p>{t('backup.createDescription')}</p></div>
+    <div className="setting-line"><div><strong>{t('backup.createTitle')}</strong></div>
       <button className="outline-button" disabled={disabled || busy || !!prepared} onClick={() => void run(async () => {
         const path = await call<string | null>("backup_create");
         if (path) setNotice(message('settings','backup.saved',{path}));

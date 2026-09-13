@@ -233,7 +233,7 @@ export default function App() {
       onReady:handoff?.target === "query" ? handoffReady : undefined,
       configured, onSettings:() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}, onSubmit:submit,
     }} />
-    <WorkspaceSidebar page={page} topic={topic} topics={topics} configured={configured}
+    <WorkspaceSidebar page={page} topic={topic} topics={topics}
       selected={selected} pins={pins} collections={collections} collectionId={collectionId}
       onReview={() => { setRecallQuick(false); setSelected(null); setPage("review"); setCollectionId(null); }} onPin={openRecord}
       onCollection={showCollection} onNewCollection={() => setCollectionEditor("new")}
@@ -245,7 +245,7 @@ export default function App() {
       <LanguageRecovery />
 
       {page === "collection" && collection && <section className="collection-header">
-        <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1><p>{collection.description || t("app.collectionFallbackDescription")}</p></div>
+        <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1>{collection.description && <p>{collection.description}</p>}</div>
         <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) {setSettingsInitialPage("ai"); setSettingsOpen(true);} else setSuggestions(collection); }}><Icon name="spark" size={14} />{t("app.recommend")}</button>
           <button onClick={showLibrary}>{t("app.chooseMemories")}</button>
           <MoreMenu><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
@@ -260,7 +260,7 @@ export default function App() {
           selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
           onCapture={newDiscussion} onRefresh={refresh} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
-          <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : t("app.topicUnscoped")}</span></div>
+          <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : null}</span></div>
           <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
              configured={configured} onSettings={() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}

@@ -27,7 +27,7 @@ fn prefix(title: &str, heading: &str, header: &str) -> String {
         .collect()
 }
 pub fn query(text: &str) -> Result<String> {
-    let s = normalized(&format!("{QUERY_PREFIX}{text}"));
+    let s = normalized(text);
     if s.chars().count() > MAX_CHARS {
         return Err("问题过长，本次使用字面检索".into());
     }
@@ -202,7 +202,8 @@ mod tests {
                 .iter()
                 .all(|c| c.end <= boundary || c.start >= boundary)
         );
-        assert!(query(&"a".repeat(1000)).is_err());
-        assert_eq!(query("e\u{301}").unwrap(), format!("{QUERY_PREFIX}é"));
+        assert_eq!(query(&"a".repeat(MAX_CHARS)).unwrap().len(), MAX_CHARS);
+        assert!(query(&"a".repeat(MAX_CHARS + 1)).is_err());
+        assert_eq!(query("e\u{301}").unwrap(), "é");
     }
 }

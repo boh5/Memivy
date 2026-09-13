@@ -1,5 +1,5 @@
 [package]
-name = "memivy-phase1"
+name = "memivy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

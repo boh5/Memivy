@@ -10,34 +10,8 @@
 .formal-app .sidebar nav button {
   min-height: 42px;
 }
-.formal-app .sidebar-bottom > button .settings-label {
-  display: grid;
-  gap: 4px;
-  margin-left: 0;
-  padding: 0;
-  font-size: 13px;
-  color: inherit;
-}
-.settings-label small {
-  font-size: 10px;
-  color: #93969e;
-}
 .formal-app .home-heading h1 {
   font-size: 32px;
-}
-.local-storage-label {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: #83868d;
-  font-size: 11px;
-  padding: 16px 12px 4px;
-}
-.local-storage-label i {
-  width: 5px;
-  height: 5px;
-  background: #ffd02f;
-  border-radius: 50%;
 }
 .workspace-composer {
   border: 1px solid #dedfe3;
@@ -170,6 +144,9 @@
   gap: 3px;
   color: #777981;
   padding: 4px 0 4px 10px;
+}
+.filter-bar button[aria-expanded="true"] svg {
+  transform: rotate(90deg);
 }
 .library-filters {
   margin: 0 18px 12px;
@@ -784,11 +761,6 @@ mark {
   line-height: 1.5;
   margin-top: 8px;
   overflow-wrap: anywhere;
-}
-.discussion-heading > p {
-  color: #9698a0;
-  font-size: 12px;
-  margin-top: 6px;
 }
 .discussion-timeline {
   position: relative;

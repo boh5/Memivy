@@ -13,7 +13,6 @@ use std::{
 
 pub const DIMENSIONS: usize = 1024;
 pub const MAX_CHARS: usize = 1000;
-pub const QUERY_PREFIX: &str = "Instruct: Given a question, retrieve relevant personal notes that answer the question\nQuery: ";
 #[derive(Clone, Debug, Serialize)]
 pub struct ModelDescriptor {
     pub repo: &'static str,
@@ -30,7 +29,13 @@ pub const MODEL: ModelDescriptor = ModelDescriptor {
     sha256: "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
 };
 pub fn fingerprint() -> String {
-    hash(format!("{}:qwen-last-eos151643-no-bos-nfc-l2-1024-ctx8192:chunk-v1-1000-200-100:{QUERY_PREFIX}",MODEL.sha256).as_bytes())
+    hash(
+        format!(
+            "{}:qwen-last-eos151643-no-bos-nfc-l2-1024-ctx8192:chunk-v1-1000-200-100",
+            MODEL.sha256
+        )
+        .as_bytes(),
+    )
 }
 pub fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -107,10 +112,12 @@ impl Preferences {
 }
 pub fn socket_dir(root: &Path) -> Result<PathBuf> {
     let canonical = fs::canonicalize(root).map_err(io)?;
-    let d = std::env::temp_dir().join(format!(
-        "memivy-emb-{}",
-        &hash(canonical.as_os_str().as_encoded_bytes())[..24]
-    ));
+    // A previous app's worker can outlive its parent. Keep its socket and locks
+    // separate when the encoding contract changes, without moving model files.
+    let mut identity = canonical.as_os_str().as_encoded_bytes().to_vec();
+    identity.push(0);
+    identity.extend_from_slice(fingerprint().as_bytes());
+    let d = std::env::temp_dir().join(format!("memivy-emb-{}", &hash(&identity)[..24]));
     private_dir(&d)?;
     Ok(d)
 }
@@ -127,4 +134,34 @@ pub fn vector_bytes(vector: &[f32]) -> Result<Vec<u8>> {
         return Err("embedding_response_invalid".into());
     }
     Ok(vector.iter().flat_map(|v| v.to_le_bytes()).collect())
+}
+
+#[cfg(test)]
+mod worker_namespace_tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn an_old_worker_socket_does_not_make_the_current_encoder_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical = fs::canonicalize(root.path()).unwrap();
+        // The previous encoder addressed workers by library alone.
+        let old = std::env::temp_dir().join(format!(
+            "memivy-emb-{}",
+            &hash(canonical.as_os_str().as_encoded_bytes())[..24]
+        ));
+        private_dir(&old).unwrap();
+        let old_listener = UnixListener::bind(old.join("worker.sock")).unwrap();
+        assert!(!client::ready(root.path()));
+
+        let current = socket_dir(root.path()).unwrap();
+        assert_eq!(current, socket_dir(&root.path().join(".")).unwrap());
+        let current_listener = UnixListener::bind(current.join("worker.sock")).unwrap();
+        assert!(client::ready(root.path()));
+
+        drop(current_listener);
+        drop(old_listener);
+        fs::remove_dir_all(current).unwrap();
+        fs::remove_dir_all(old).unwrap();
+    }
 }

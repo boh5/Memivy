@@ -61,8 +61,10 @@ impl MemoryStore {
     }
     pub fn mcp_enabled(&self) -> bool {
         let path = self.root.join("mcp.json");
-        if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= 1024) {
-            return false;
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Ok(metadata) if metadata.is_file() && metadata.len() <= 1024 => {}
+            _ => return false,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]

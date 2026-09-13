@@ -62,7 +62,7 @@ export default function RelatedMemories({ memoryId, versionId, revision: request
   }
   if (!rows.length && !error) return null;
   return <section className="related-memories" aria-label={t("related.aria")}>
-    <div className="section-heading"><h3>{t("related.heading")}</h3><span>{t("related.description")}</span></div>
+    <div className="section-heading"><h3>{t("related.heading")}</h3></div>
     <ErrorNotice text={error} />
     {rows.map(row => <article className="related-memory" key={row.version_id}>
       <input type="checkbox" aria-label={t("related.select", { title: row.title })} disabled={busy}

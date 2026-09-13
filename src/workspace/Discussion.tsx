@@ -165,7 +165,7 @@ export default function Discussion({ topic, revision: requestedRevision = 0, con
     finally { olderLock.current = false; setLoadingMore(false); }
   }
   return <section className={`discussion-page ${compact ? "compact-discussion" : ""}`}>
-    <div className="discussion-heading"><span className="eyebrow">{t("discussion.eyebrow")}</span><h1>{topic.title}</h1><p>{t("input.discussionHelp")}</p></div>
+    <div className="discussion-heading"><h1>{topic.title}</h1></div>
     <div className="discussion-timeline">
     <div className="discussion-messages" ref={messageList} onScroll={e => { const list = e.currentTarget; following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 48; setUnreadReply(!following.current); }}>
       {more && <button className="outline-button" disabled={loadingMore} onClick={() => void older()}>{t("discussion.older")}</button>}

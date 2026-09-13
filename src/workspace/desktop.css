@@ -17,25 +17,21 @@
 .desktop-capture-content > .workspace-composer { border: 0; box-shadow: none; padding: 0; border-radius: 0; flex: none; min-height: 154px; display: flex; flex-direction: column; }
 .desktop-content .composer-top { min-height: 30px; }
 .desktop-content .composer-top > span { display: none; }
-.desktop-content .workspace-composer textarea { flex: none; height: 96px; min-height: 96px; resize: none; width: 100%; margin: 12px 0 8px; padding: 0; font-size: 15px; line-height: 1.65; }
+.desktop-content .workspace-composer textarea { flex: none; height: 96px; min-height: 96px; resize: none; width: 100%; margin: 4px 0 8px; padding: 0; font-size: 15px; line-height: 1.65; }
 .desktop-content .composer-bottom { gap: 8px; padding: 0; }
 .desktop-content .composer-bottom > span { font-size: 10px; line-height: 1.5; }
 .desktop-content .send-button { padding: 7px 12px; min-height: 31px; font-size: 12px; white-space: nowrap; }
-.quick-source { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: #85857f; font-size: 11px; }
-.quick-source > details { margin-left: auto; max-width: 100%; }
-.quick-source summary { cursor: pointer; }
-.quick-source details[open] { flex: 1 0 100%; }
+.quick-source { display: grid; gap: 8px; margin-top: 10px; color: #777a75; font-size: 12px; }
+.quick-source > details { width: 100%; min-width: 0; }
+.quick-source summary { cursor: pointer; width: fit-content; max-width: 100%; line-height: 20px; }
 .quick-source input { width: 100%; margin-top: 6px; padding: 7px 9px; font-size: 12px; border: 1px solid #deded7; border-radius: 7px; }
-.source-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f0; border-radius: 5px; padding: 2px 6px; color: #5d6057; max-width: 45%; overflow-wrap: anywhere; }
+.source-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f0; border-radius: 5px; padding: 2px 6px; color: #5d6057; width: fit-content; max-width: 100%; overflow-wrap: anywhere; }
 .source-chip button { padding: 0 1px; line-height: 15px; font-size: 13px; }
-.desktop-saved { display: flex; gap: 5px; align-items: center; color: #386b47; font-size: 11px; margin-top: 8px; flex-shrink: 0; }
-.desktop-saved button { margin-left: auto; text-decoration: underline; }
 .desktop-topic-nav { display: flex; align-items: center; gap: 16px; color: #81817a; font-size: 12px; flex-shrink: 0; margin-bottom: 8px; }
 .desktop-topic-nav > span { color: #262622; font-weight: 650; }
 .desktop-topic-nav > button:last-child { margin-left: auto; font-size: 11px; }
 .desktop-content .compact-discussion { --discussion-gutter: 0px; padding: 0; flex: 1; min-height: 0; width: 100%; }
 .compact-discussion .discussion-heading { padding: 0 0 8px; flex-shrink: 0; }
-.compact-discussion .discussion-heading .eyebrow, .compact-discussion .discussion-heading > p { display: none; }
 .compact-discussion .discussion-heading h1 { font-size: 14px; line-height: 1.5; margin: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .compact-discussion .discussion-messages { padding: 8px 4px 12px 0; }
 .compact-discussion .discussion-message { font-size: 13px; margin-bottom: 18px; }
@@ -47,8 +43,6 @@
 .formal-desktop .workspace-dialog textarea { min-height: 65px; max-height: 180px; }
 .desktop-settings .checkbox-label { margin: 15px 0; }
 .desktop-settings .checkbox-label small { font-size: 11px; color: #84857c; }
-.desktop-settings .shortcut-recorder { min-width: 104px; flex-shrink: 0; font-size: 15px; }
-.shortcut-recorder.recording { border-color: #b7a64c; background: #fff9db; font-size: 12px; }
 .desktop-settings .setting-line { gap: 20px; }
 @media (prefers-reduced-motion: no-preference) { .desktop-leaf.has-saved .leaf-check { animation: leaf-receipt .25s ease-out; } }
 @keyframes leaf-receipt { from { transform: scale(.6); } to { transform: scale(1); } }

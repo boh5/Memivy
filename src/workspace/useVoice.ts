@@ -1,4 +1,4 @@
-import { message, type UiMessage } from "../i18n/messages";
+import { message } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";

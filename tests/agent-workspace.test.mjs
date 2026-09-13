@@ -4,17 +4,17 @@ import {workspaceFixture} from './helpers/workspace.mjs';
 
 test('a failed Agent capability check blocks model activation',async t=>{
  const f=workspaceFixture(t,{native:true});
- let binding={source:'service',connection:'qa',model:'QA',dimensions:null,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ let binding={source:'service',connection:'qa',model:'QA',dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1',has_key:false}],llm:binding,embedding:binding,voice:binding,auto_organize:true};
  f.overrides.models_test=async()=>({token:'proof',binding,message:'model_test_agent_unsupported',message_params:{}});
  let applied=0;
  const view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,{kind:'llm',models,draft:binding,embedding:null,voice:null,setDraft:b=>{binding=b},onBusy(){},onSaved(){applied++},onRefresh:async()=>{}});await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==='测试连接').props.onClick();await f.settle();
- assert(f.text(view.tree).includes('Agent 能力未通过'));assert.equal(applied,0);
+ assert(f.text(view.tree).includes('此模型未通过问答功能测试'));assert.equal(applied,0);
  assert(f.find(view,n=>n.type==='button'&&n.props.className==='send-button').props.disabled);
  assert(!f.calls.some(c=>c.name==='models_apply'||c.name==='workspace_configure'));
  f.find(view,n=>n.type==='input'&&n.props.placeholder==='填写对话模型 ID').props.onChange({target:{value:'another'}});await f.settle();
- assert(!f.text(view.tree).includes('Agent 能力未通过'));
+ assert(!f.text(view.tree).includes('此模型未通过问答功能测试'));
 });
 
 test('a citation shows disjoint source windows separately without invented intervening text',async t=>{
@@ -30,7 +30,7 @@ test('a citation shows disjoint source windows separately without invented inter
 
 test('voice settings entry opens the capability and navigation retains model drafts',async t=>{
  const f=workspaceFixture(t,{native:true,timers:{setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){}}});
- const binding={source:'local',connection:'',model:'',dimensions:null,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ const binding={source:'local',connection:'',model:'',dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  f.overrides.models_load=async()=>({revision:'r1',connections:[],llm:null,embedding:binding,voice:binding,auto_organize:true});
  const view=f.mount(f.load('src/workspace/Settings.tsx').default,{initialPage:'voice',onClose(){},onChanged(){},onRestore(){}});await f.settle();
  const capability=()=>f.find(view,n=>typeof n.type==='function'&&n.type.name==='ModelCapability');
@@ -38,15 +38,16 @@ test('voice settings entry opens the capability and navigation retains model dra
  capability().props.setDraft({...binding,source:'service',model:'unfinished-model'});await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==='通用').props.onClick();await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==='AI 与模型').props.onClick();await f.settle();
- const sections=f.nodes(view.tree).filter(n=>n.type==='section'&&f.text(n).includes('语音输入'));
- const button=f.nodes(sections[0]).find(n=>n.type==='button');button.props.onClick();await f.settle();
+ const Overview=f.load('src/workspace/ModelOverview.tsx').default;
+ const overview=f.mount(Overview,f.find(view,n=>n.type===Overview).props);
+ f.find(overview,n=>n.type==='button'&&n.props['aria-label']?.endsWith('语音输入')).props.onClick();await f.settle();
  assert.equal(capability().props.draft.model,'unfinished-model');
  assert(!f.calls.some(c=>c.name==='models_apply'));
 });
 
 test('each capability configures its own endpoint directly and failed tests never save it',async t=>{
  const f=workspaceFixture(t,{native:true});
- const original={source:'service',connection:'active',model:'active-model',dimensions:4,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ const original={source:'service',connection:'active',model:'active-model',dimensions:4,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'active',name:'Existing',base_url:'http://localhost:1234/v1',has_key:true}],llm:original,embedding:original,voice:original,auto_organize:true};
  for(const kind of ['llm','embedding','voice']){
   let sent;f.overrides.models_test=async args=>{sent=args;throw '测试连接失败';};
@@ -63,9 +64,9 @@ test('each capability configures its own endpoint directly and failed tests neve
  }
 });
 
-test('source buttons preserve remote model and query drafts, including repeated selection',async t=>{
+test('source buttons preserve remote model drafts, including repeated selection',async t=>{
  const f=workspaceFixture(t,{native:true});
- const binding={source:'service',connection:'qa',model:'draft-model',dimensions:4,query_prefix:'query: ',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ const binding={source:'service',connection:'qa',model:'draft-model',dimensions:4,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[],llm:null,embedding:binding,voice:binding,auto_organize:true};
  for(const kind of ['embedding','voice']){
   let edits=0,view;const props={kind,models,draft:{...binding},connectionDraft:{id:'',base_url:'http://localhost:1234/v1',api_key:'draft-key'},embedding:null,voice:null,onBusy(){},setDraft(b){edits++;props.draft=b;f.render(view,props)}};
@@ -74,14 +75,14 @@ test('source buttons preserve remote model and query drafts, including repeated 
   button('连接模型服务').props.onClick();await f.settle();assert.equal(edits,0);
   button('内置本地模型').props.onClick();await f.settle();
   button('连接模型服务').props.onClick();await f.settle();
-  assert.equal(props.draft.model,'draft-model');assert.equal(props.draft.query_prefix,'query: ');
+  assert.equal(props.draft.model,'draft-model');
   assert.equal(props.connectionDraft.api_key,'draft-key');f.unmount(view);
  }
 });
 
 test('failed activation reloads the actual revision and keeps the candidate draft',async t=>{
  const f=workspaceFixture(t,{native:true});
- const binding={source:'service',connection:'qa',model:'draft-model',dimensions:null,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ const binding={source:'service',connection:'qa',model:'draft-model',dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1'}],llm:null,embedding:binding,voice:binding,auto_organize:true};
  f.overrides.models_test=async()=>({token:'proof',binding,message:'model_test_agent',message_params:{}});
  f.overrides.models_apply=async()=>{throw 'activation failed'};
@@ -96,7 +97,7 @@ test('failed activation reloads the actual revision and keeps the candidate draf
 
 test('changing only an embedding key applies without claiming the index will be rebuilt',async t=>{
  const f=workspaceFixture(t,{native:true});
- const binding={source:'service',connection:'qa',model:'same-model',dimensions:4,query_prefix:'',disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
+ const binding={source:'service',connection:'qa',model:'same-model',dimensions:4,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',connections:[{id:'qa',name:'QA',base_url:'http://localhost:1234/v1',has_key:true}],llm:null,embedding:binding,voice:binding,auto_organize:true};
  const tested={...binding,connection:'candidate'};
  f.overrides.models_test=async()=>({token:'proof',binding:tested,message:'model_test_agent',message_params:{}});

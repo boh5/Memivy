@@ -22,8 +22,7 @@ export default function CollectionEditor({ value, onSaved, onClose }: {
     finally { lock.current = false; setBusy(false); }
   }
   return <Modal title={value ? t("collection.editTitle") : t("collection.newTitle")} onClose={() => { if (!lock.current) onClose(); }} className="collection-dialog">
-    <p className="field-help">{t("collection.description")}</p>
-    <label>{t("collection.nameLabel")}<input autoFocus aria-label={t("collection.nameAria")} maxLength={80} value={name} disabled={busy} placeholder={t("collection.namePlaceholder")} onChange={e => setName(e.target.value)} /></label>
+    <label>{t("collection.nameLabel")}<input data-modal-autofocus aria-label={t("collection.nameAria")} maxLength={80} value={name} disabled={busy} placeholder={t("collection.namePlaceholder")} onChange={e => setName(e.target.value)} /></label>
     <label>{t("collection.focusLabel")}<textarea aria-label={t("collection.focusAria")} maxLength={800} value={description} disabled={busy} placeholder={t("collection.focusPlaceholder")} onChange={e => setDescription(e.target.value)} /></label>
     <ErrorNotice text={error} />
     <div className="action-row"><button className="outline-button" disabled={busy} onClick={onClose}>{t("collection.cancel")}</button><button className="send-button" disabled={busy || !name.trim()} onClick={() => void save()}>{busy ? t("collection.saving") : value ? t("collection.save") : t("collection.create")}</button></div>

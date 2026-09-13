@@ -26,7 +26,6 @@ import {
   uid,
   type Detail,
   type Source,
-  type Draft,
   type Key,
   type Receipt,
   type Version,
@@ -102,10 +101,11 @@ function Editor({
       </label>
       {draft.ready && <MarkdownEditor label={t("detail.bodyLabel")} value={draft.value.body} disabled={busy} autoFocus
         onChange={body => draft.update({ body })} onSave={() => void save()} />}
-      <p className="field-help">{t("detail.saveHelp")}</p>
       <div className="action-row">
         <button
           className="send-button"
+          title={t("detail.saveHelp")}
+          aria-keyshortcuts="Meta+s"
           disabled={
             busy ||
             !draft.ready ||
@@ -202,7 +202,7 @@ export default function MemoryDetail({
     [receipt, setReceipt] = useState<Receipt | null>(
       initialReceipt?.action === "undo" ? null : initialReceipt,
     ),
-    [notice, setNotice, noticeMessage] = useNotice(
+    [, setNotice, noticeMessage] = useNotice(
       initialReceipt?.action === "undo"
         ? message("workspace", "detail.undoNotice")
         : initialReceipt
@@ -349,7 +349,7 @@ export default function MemoryDetail({
           {t("detail.backToList")}
         </button>
         <span>
-          {trashed ? t("detail.trashStatus") : detail?.current ? t("detail.currentStatus") : t("detail.originalStatus")}
+          {trashed ? t("detail.trashStatus") : detail && !detail.current ? t("detail.originalStatus") : null}
         </span>
         {pendingDetail && <button className="quiet" onClick={() => { setDetail(pendingDetail); setPendingDetail(null); }}>{t("detail.newVersion")}</button>}
         <div className="toolbar-actions" hidden={cleaning}>
@@ -432,11 +432,7 @@ export default function MemoryDetail({
               <h1>
                 <Highlight text={detail.title} query={query} />
               </h1>
-              <p>
-                {detail.current
-                  ? t("detail.archiveCount", { count: detail.current.capture_ids.length })
-                  : t("detail.archiveOnly")}
-              </p>
+              {!detail.current && <p>{t("detail.archiveOnly")}</p>}
               {!trashed && <OrganizationReceipt presentation="status" record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
             {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} onRefresh={() => onChanged()} />}
@@ -628,7 +624,7 @@ export default function MemoryDetail({
             <button
               className="outline-button"
               disabled={busy}
-              autoFocus
+              data-modal-autofocus
               onClick={() => setConfirmation(null)}
             >
               {t("detail.cancel")}

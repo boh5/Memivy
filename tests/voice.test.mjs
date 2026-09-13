@@ -9,7 +9,7 @@ test('transcript appends in order and never overwrites another editor',()=>{
  assert.equal(voiceBody('第一句 第二句','第一句','','第一句 第二句'),'第一句 第二句');
  assert.throws(()=>voiceBody('其他窗口的修改','第一句','','第一句 第二句'),{code:"voice_draft_conflict"});
 });
-const status=session=>({enabled:true,preload:false,shortcut:'',state:'ready',backend:'Metal GPU',error:null,available:true,downloaded:1019141728,bytes:1019141728,cache:'isolated',session});
+const status=session=>({enabled:true,preload:false,shortcut:'',state:'ready',source:'local',local_available:true,backend:'Metal GPU',error:null,available:true,downloaded:1019141728,bytes:1019141728,cache:'isolated',session});
 const session=patch=>({id:'voice-1',key:'input',base:'原有文字',body:'原有文字',text:'',recording:true,starting:false,processing:false,complete:false,error:null,seconds:2,level:.1,...patch});
 
 test('submit waits for the final transcript and durable draft before capture',async t=>{

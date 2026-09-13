@@ -52,7 +52,7 @@ function MemoryPicker({ selected, onSelect, onClose }: { selected: Source[]; onS
   }
   return <Modal title={t("input.addMemory")} onClose={onClose}>
     <p className="field-help">{t("input.memoryFocusHelp")}</p>
-    <input className="memory-picker-query" autoFocus aria-label={t("input.searchMemory")} value={query} onChange={e => setQuery(e.target.value)} />
+    <input className="memory-picker-query" data-modal-autofocus aria-label={t("input.searchMemory")} value={query} onChange={e => setQuery(e.target.value)} />
     <div className="memory-picker-list" aria-busy={loading}>
       {loading && !page ? <p className="field-help" role="status">{t("list.loading")}</p> : page?.items.map(row => <button key={`${row.key.kind}:${row.key.id}`} disabled={busy || loading} onClick={() => void select(row)}><strong>{row.title}</strong><span>{row.snippet}</span></button>)}
       {!loading && page?.items.length === 0 && <p className="field-help" role="status">{t("list.emptyFilteredTitle")}</p>}
@@ -141,8 +141,8 @@ export default function CaptureForm({
             </button>}
         </div>
       </div>
-      {quick && <div className="quick-source"><span>{t("capture.source")}</span>
-        {draft.value.origin?.app && draft.value.origin.app !== "Memivy" ? <span className="source-chip">{draft.value.origin.app}<button aria-label={t("capture.removeAppSource")} disabled={busy || !draft.ready} onClick={() => draft.update({ origin: { ...draft.value.origin!, app: "Memivy" } })}>×</button></span> : <span>{t("capture.onlyThisText")}</span>}
+      {quick && <div className="quick-source">
+        {draft.value.origin?.app && draft.value.origin.app !== "Memivy" ? <span className="source-chip">{draft.value.origin.app}<button aria-label={t("capture.removeAppSource")} disabled={busy || !draft.ready} onClick={() => draft.update({ origin: { ...draft.value.origin!, app: "Memivy" } })}>×</button></span> : null}
         <details><summary>{t("capture.attachments")}</summary><input aria-label={t("capture.sourceUriAria")} placeholder={t("capture.sourceUriPlaceholder")} disabled={busy || !draft.ready} value={draft.value.origin?.uri || ""} onChange={e => draft.update({ origin: { ...draft.value.origin!, uri: e.target.value || null } })} /></details>
       </div>}
       {!configured && onSettings && <button className="connect-model-link" onClick={onSettings}>{t("input.connectModel")}</button>}

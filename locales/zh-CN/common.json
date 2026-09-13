@@ -3,7 +3,7 @@
   "languageDescription": "设置界面与菜单的语言，内容保留原文。",
   "system": "跟随系统",
   "languageReadError": "无法读取语言设置，已保存的选择未被更改。",
-  "languageMenuError": "语言已保存，原生菜单未能更新，请重试。",
+  "languageMenuError": "语言已保存，菜单未能更新，请重试。",
   "languageSaveError": "语言未能保存，已保留原选择。",
   "retry": "重试",
   "closeNotice": "关闭提示",

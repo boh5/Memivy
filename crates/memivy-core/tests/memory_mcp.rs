@@ -28,6 +28,9 @@ fn setup() -> (tempfile::TempDir, MemoryStore) {
 #[test]
 fn off_and_corrupt_configuration_fail_closed_with_no_capture() {
     let (dir, s) = setup();
+    assert!(s.mcp_enabled());
+    s.set_mcp_enabled(false).unwrap();
+    assert!(!MemoryStore::open(dir.path()).unwrap().mcp_enabled());
     let req = request("关闭测试");
     assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::McpDisabled);
     assert_eq!(

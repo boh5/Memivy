@@ -5,6 +5,7 @@ use crate::{
 };
 use memivy_core::memory::{Conversation, RecordKey};
 use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::Instant};
 use tauri::{
@@ -46,21 +47,25 @@ mod panel_events {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
 struct Preferences {
+    #[serde(default = "login_already_initialized")]
+    login_initialized: bool,
     shortcut: String,
     visible: bool,
-    paused: bool,
     pinned: bool,
     topic_id: Option<String>,
     source_app: String,
     position: Option<(i32, i32)>,
     last_memory: Option<String>,
 }
+fn login_already_initialized() -> bool {
+    true
+}
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            shortcut: "Control+Super+KeyM".into(),
+            login_initialized: false,
+            shortcut: "Alt+KeyM".into(),
             visible: true,
-            paused: false,
             pinned: false,
             topic_id: None,
             source_app: "Memivy".into(),
@@ -70,6 +75,7 @@ impl Default for Preferences {
     }
 }
 pub struct Desktop {
+    login_operation: Mutex<()>,
     path: PathBuf,
     inner: Mutex<State>,
 }
@@ -101,7 +107,6 @@ pub struct Snapshot {
     pub generation: u64,
     pub pinned: bool,
     pub visible: bool,
-    pub paused: bool,
     pub shortcut: String,
     pub configured: bool,
     pub topic: Option<Conversation>,
@@ -140,17 +145,24 @@ impl Desktop {
             Ok(bytes) => match serde_json::from_slice::<Preferences>(&bytes) {
                 Ok(p) => (p, None),
                 Err(_) => (
-                    Preferences::default(),
+                    Preferences {
+                        login_initialized: true,
+                        ..Default::default()
+                    },
                     Some("desktop_settings_invalid".into()),
                 ),
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Preferences::default(), None),
             Err(_) => (
-                Preferences::default(),
+                Preferences {
+                    login_initialized: true,
+                    ..Default::default()
+                },
                 Some("desktop_settings_unreadable".into()),
             ),
         };
         Self {
+            login_operation: Mutex::new(()),
             path,
             inner: Mutex::new(State {
                 sequence: 0,
@@ -263,7 +275,6 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
         generation: s.generation,
         pinned: p.pinned,
         visible: p.visible,
-        paused: p.paused,
         shortcut: p.shortcut.clone(),
         configured: s.configured,
         topic: s.topic.clone(),
@@ -368,6 +379,7 @@ pub fn clamp_position(
 #[derive(Clone, Copy)]
 enum Placement {
     KeepAnchor,
+    KeepTop,
     Cursor,
     SavedLeaf,
 }
@@ -385,6 +397,7 @@ fn panel_frame(
     )
     .to_physical::<u32>(scale);
     let (x, y) = match placement {
+        Placement::KeepTop => (current.position.x, current.position.y),
         Placement::KeepAnchor => (
             current.position.x + current.size.width as i32 - size.width as i32,
             current.position.y + current.size.height as i32 - size.height as i32,
@@ -406,8 +419,8 @@ fn panel_frame(
         size,
     }
 }
-// Main thread only. Tao queues macOS frame changes, so calculate the complete
-// destination before scheduling either mutation; never read back a pending size.
+// Main thread only. Commit size and position together; Tao's separate setters
+// queue two AppKit updates and expose an intermediate frame on this clear panel.
 fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement) -> HostResult<()> {
     let w = app
         .get_webview_window("capture")
@@ -416,27 +429,59 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
     let destination = match placement {
         Placement::Cursor => w.cursor_position().ok().map(|p| (p.x, p.y)),
         Placement::SavedLeaf => saved.map(|(x, y)| (x as f64, y as f64)),
-        Placement::KeepAnchor => None,
+        Placement::KeepAnchor | Placement::KeepTop => None,
     };
     let m = destination
         .and_then(|(x, y)| w.monitor_from_point(x, y).ok().flatten())
         .or_else(|| w.current_monitor().ok().flatten())
         .or_else(|| w.primary_monitor().ok().flatten())
         .ok_or("display_unavailable")?;
+    let current_scale = w.scale_factor().map_err(|_| "window_geometry_failed")?;
+    let current = tauri::PhysicalRect {
+        position: w.outer_position().map_err(|_| "window_geometry_failed")?,
+        size: w.outer_size().map_err(|_| "window_geometry_failed")?,
+    };
+    let target_scale = m.scale_factor();
+    // The destination monitor's physical coordinate space can have another scale.
+    let target_current = tauri::PhysicalRect {
+        position: current
+            .position
+            .to_logical::<f64>(current_scale)
+            .to_physical(target_scale),
+        size: current
+            .size
+            .to_logical::<f64>(current_scale)
+            .to_physical(target_scale),
+    };
     let frame = panel_frame(
         tauri::LogicalSize::new(width, height),
         placement,
-        tauri::PhysicalRect {
-            position: w.outer_position().map_err(|_| "window_geometry_failed")?,
-            size: w.outer_size().map_err(|_| "window_geometry_failed")?,
-        },
+        target_current,
         saved,
         m.work_area(),
-        m.scale_factor(),
+        target_scale,
     );
-    w.set_size(frame.size.to_logical::<f64>(m.scale_factor()))
-        .and_then(|_| w.set_position(frame.position))
-        .map_err(|_| "window_geometry_failed".into())
+    let panel = app
+        .get_webview_panel("capture")
+        .map_err(|_| "capture_window_unavailable")?;
+    let native = panel.as_panel();
+    let previous = native.frame();
+    let from = current.position.to_logical::<f64>(current_scale);
+    let to = frame.position.to_logical::<f64>(target_scale);
+    let size = frame.size.to_logical::<f64>(target_scale);
+    // Use the existing AppKit frame as the origin reference; screen focus and
+    // different display scales must not change the global coordinate baseline.
+    let next = NSRect::new(
+        NSPoint::new(
+            previous.origin.x + to.x - from.x,
+            previous.origin.y + previous.size.height - size.height - (to.y - from.y),
+        ),
+        NSSize::new(size.width, size.height),
+    );
+    if next != previous {
+        native.setFrame_display_animate(next, true, false);
+    }
+    Ok(())
 }
 pub fn open(app: &tauri::AppHandle, at_cursor: bool) -> HostResult<()> {
     let started = Instant::now();
@@ -485,7 +530,7 @@ pub fn open(app: &tauri::AppHandle, at_cursor: bool) -> HostResult<()> {
     layout(
         app,
         500.0,
-        if discussion { 620.0 } else { 310.0 },
+        if discussion { 620.0 } else { 260.0 },
         if !was_expanded && at_cursor {
             Placement::Cursor
         } else {
@@ -514,11 +559,7 @@ fn collapse(app: &tauri::AppHandle, restore: bool) -> HostResult<()> {
         s.handoff = None;
         s.generation += 1;
         s.drag = None;
-        (
-            s.previous_pid,
-            s.prefs.visible && !s.prefs.paused,
-            s.receipt.is_some(),
-        )
+        (s.previous_pid, s.prefs.visible, s.receipt.is_some())
     };
     panel.hide();
     capture_panel::set_accepts_keyboard(false);
@@ -577,15 +618,33 @@ pub(crate) fn parse_shortcut(text: &str) -> HostResult<Shortcut> {
     Ok(shortcut)
 }
 
+fn optional_shortcut(text: &str) -> HostResult<Option<Shortcut>> {
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        parse_shortcut(text).map(Some)
+    }
+}
+
 fn register(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
+    let Some(shortcut) = optional_shortcut(text)? else {
+        return Ok(());
+    };
+    if app.global_shortcut().is_registered(shortcut) {
+        return Err("shortcut_taken".into());
+    }
     app.global_shortcut()
-        .on_shortcut(parse_shortcut(text)?, |app, _, e| {
+        .on_shortcut(shortcut, |app, shortcut, e| {
+            let shortcut = *shortcut;
             let app = app.clone();
             let h = app.clone();
             let _ = app.run_on_main_thread(move || {
                 {
                     let d = h.state::<Desktop>();
                     let mut s = d.inner.lock().unwrap();
+                    if optional_shortcut(&s.prefs.shortcut).ok().flatten() != Some(shortcut) {
+                        return;
+                    }
                     if e.state == ShortcutState::Released {
                         s.shortcut_down = false;
                         return;
@@ -621,11 +680,7 @@ pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let status = MenuItem::with_id(
         app,
         "status",
-        if p.paused {
-            crate::i18n::text(app, "statusPaused")
-        } else {
-            crate::i18n::text(app, "statusReady")
-        },
+        crate::i18n::text(app, "statusReady"),
         false,
         None::<&str>,
     )?;
@@ -654,17 +709,6 @@ pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let pause = MenuItem::with_id(
-        app,
-        "pause",
-        if p.paused {
-            crate::i18n::text(app, "resume")
-        } else {
-            crate::i18n::text(app, "pause")
-        },
-        true,
-        None::<&str>,
-    )?;
     let settings = MenuItem::with_id(
         app,
         "settings",
@@ -684,7 +728,7 @@ pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &status, &sep, &input, &open, &visible, &pause, &settings, &sep2, &quit,
+            &status, &sep, &input, &open, &visible, &settings, &sep2, &quit,
         ],
     )?;
     if let Some(tray) = app.tray_by_id("memivy") {
@@ -731,16 +775,6 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                             },
                         )
                     }
-                    "pause" => {
-                        let p = snapshot(&h);
-                        change(
-                            &h,
-                            Patch {
-                                paused: Some(!p.paused),
-                                ..Default::default()
-                            },
-                        )
-                    }
                     "quit" => {
                         request_quit(&h);
                         Ok(())
@@ -755,13 +789,21 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
     crate::i18n::update_native(app.handle());
     let p = app.state::<Desktop>().inner.lock().unwrap().prefs.clone();
-    if !p.paused
-        && let Err(e) = register(app.handle(), &p.shortcut)
-    {
+    if let Err(e) = register(app.handle(), &p.shortcut) {
         set_error(app.handle(), e.to_string());
     }
+    if !p.login_initialized {
+        let handle = app.handle().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) =
+                objc2::rc::autoreleasepool(|_| set_login_enabled(&handle, true, true))
+            {
+                set_error(&handle, error.to_string());
+            }
+        });
+    }
     layout(app.handle(), 72.0, 76.0, Placement::SavedLeaf)?;
-    if p.visible && !p.paused {
+    if p.visible {
         app.get_webview_panel("capture")
             .unwrap()
             .order_front_regardless();
@@ -776,7 +818,6 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub struct Patch {
     shortcut: Option<String>,
     visible: Option<bool>,
-    paused: Option<bool>,
     pinned: Option<bool>,
     topic_id: Option<String>,
     clear_topic: Option<bool>,
@@ -791,15 +832,13 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     let old = desktop.inner.lock().unwrap().prefs.clone();
     let mut p = old.clone();
     let mut next_topic = None;
+    let shortcut_requested = patch.shortcut.is_some();
     if let Some(v) = patch.shortcut {
-        parse_shortcut(&v)?;
+        optional_shortcut(&v)?;
         p.shortcut = v;
     }
     if let Some(v) = patch.visible {
         p.visible = v;
-    }
-    if let Some(v) = patch.paused {
-        p.paused = v;
     }
     if let Some(v) = patch.pinned {
         p.pinned = v;
@@ -817,38 +856,48 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
         next_topic = Some(None);
         p.topic_id = None;
     }
-    let changed = old.shortcut != p.shortcut || old.paused != p.paused;
-    if changed && !p.paused {
+    let changed = old.shortcut != p.shortcut;
+    let retry = shortcut_requested
+        && !changed
+        && optional_shortcut(&p.shortcut)?
+            .is_some_and(|shortcut| !app.global_shortcut().is_registered(shortcut));
+    if retry {
         register(app, &p.shortcut)?;
     }
+    if changed {
+        register(app, &p.shortcut)?;
+        if let Some(shortcut) = optional_shortcut(&old.shortcut)?
+            && app.global_shortcut().unregister(shortcut).is_err()
+        {
+            if let Some(shortcut) = optional_shortcut(&p.shortcut)? {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
+            return Err("shortcut_remove_failed".into());
+        }
+    }
+    let mut s = desktop.inner.lock().unwrap();
+    p.login_initialized = s.prefs.login_initialized;
     if let Err(e) = desktop.persist(&p) {
-        if changed && !p.paused {
-            let _ = app
-                .global_shortcut()
-                .unregister(parse_shortcut(&p.shortcut)?);
+        if changed {
+            if let Some(shortcut) = optional_shortcut(&p.shortcut)? {
+                let _ = app.global_shortcut().unregister(shortcut);
+            }
+            let _ = register(app, &old.shortcut);
         }
         return Err(e);
     }
-    if changed && !old.paused && (old.shortcut != p.shortcut || p.paused) {
-        let _ = app
-            .global_shortcut()
-            .unregister(parse_shortcut(&old.shortcut)?);
-    }
     {
-        let mut s = desktop.inner.lock().unwrap();
         s.prefs = p.clone();
+        if changed {
+            s.shortcut_down = false;
+        }
         if let Some(topic) = next_topic {
             s.topic = topic;
         }
         s.error = None;
     }
-    if p.paused && snapshot(app).expanded {
-        let _ = app.emit_to(
-            "capture",
-            "desktop-dismiss-request",
-            snapshot(app).generation,
-        );
-    } else if p.paused || !p.visible && !snapshot(app).expanded {
+    drop(s);
+    if !p.visible && !snapshot(app).expanded {
         collapse(app, false)?;
     } else if !snapshot(app).expanded {
         let receipt = desktop.inner.lock().unwrap().receipt.is_some();
@@ -862,11 +911,11 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
             .map_err(|_| "capture_window_unavailable")?
             .order_front_regardless();
     }
-    if snapshot(app).expanded {
+    if snapshot(app).expanded && p.topic_id != old.topic_id {
         layout(
             app,
             500.0,
-            if p.topic_id.is_some() { 620.0 } else { 310.0 },
+            if p.topic_id.is_some() { 620.0 } else { 260.0 },
             Placement::KeepAnchor,
         )?;
     }
@@ -998,7 +1047,7 @@ pub async fn desktop_composer_resize(
             return Ok(());
         }
         drop(s);
-        layout(&h, 500.0, height.clamp(310.0, 620.0), Placement::KeepAnchor)
+        layout(&h, 500.0, height.clamp(260.0, 620.0), Placement::KeepTop)
     })
     .await
 }
@@ -1230,27 +1279,51 @@ pub async fn desktop_login(
     if window.label() != "main" {
         return Err("main_window_required".into());
     }
-    on_main(&app, move |_| {
-        unsafe {
-            if let Some(enabled) = enabled {
-                let service: Retained<AnyObject> = msg_send![class!(SMAppService), mainAppService];
-                let mut error: Option<Retained<objc2_foundation::NSError>> = None;
-                let ok: bool = if enabled {
-                    msg_send![&*service,registerAndReturnError:&mut error]
-                } else {
-                    msg_send![&*service,unregisterAndReturnError:&mut error]
-                };
-                if !ok {
-                    return Err("login_update_failed".into());
-                }
-            } else {
+    if let Some(enabled) = enabled {
+        tauri::async_runtime::spawn_blocking(move || {
+            objc2::rc::autoreleasepool(|_| set_login_enabled(&app, enabled, false))
+        })
+        .await
+        .map_err(|_| "login_update_failed")?
+    } else {
+        on_main(&app, move |_| {
+            unsafe {
                 let _: () = msg_send![class!(SMAppService), openSystemSettingsLoginItems];
             }
-        }
-        Ok(login_status())
-    })
-    .await
+            Ok(login_status())
+        })
+        .await
+    }
 }
+fn set_login_enabled(app: &tauri::AppHandle, enabled: bool, initial: bool) -> HostResult<String> {
+    let desktop = app.state::<Desktop>();
+    let _operation = desktop.login_operation.lock().unwrap();
+    if initial && desktop.inner.lock().unwrap().prefs.login_initialized {
+        return Ok(login_status());
+    }
+    unsafe {
+        let service: Retained<AnyObject> = msg_send![class!(SMAppService), mainAppService];
+        let mut error: Option<Retained<objc2_foundation::NSError>> = None;
+        let ok: bool = if enabled {
+            msg_send![&*service,registerAndReturnError:&mut error]
+        } else {
+            msg_send![&*service,unregisterAndReturnError:&mut error]
+        };
+        if !ok {
+            return Err("login_update_failed".into());
+        }
+    }
+    let mut state = desktop.inner.lock().unwrap();
+    let mut prefs = state.prefs.clone();
+    prefs.login_initialized = true;
+    desktop.persist(&prefs)?;
+    state.prefs = prefs;
+    drop(state);
+    let status = login_status();
+    let _ = app.emit("desktop-login-changed", &status);
+    Ok(status)
+}
+
 pub fn request_quit(app: &tauri::AppHandle) {
     let (id, windows) = {
         let d = app.state::<Desktop>();
@@ -1316,6 +1389,52 @@ fn finish_quit(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn content_resize_keeps_the_top_until_the_work_area_requires_clamping() {
+        for scale in [1.0, 2.0] {
+            let area = tauri::PhysicalRect {
+                position: tauri::PhysicalPosition::new(-2000, 30),
+                size: tauri::PhysicalSize::new(2000, 1400),
+            };
+            let current = tauri::PhysicalRect {
+                position: tauri::PhysicalPosition::new(-1500, 150),
+                size: tauri::LogicalSize::new(500.0, 300.0).to_physical(scale),
+            };
+            let expanded = panel_frame(
+                tauri::LogicalSize::new(500.0, 337.0),
+                Placement::KeepTop,
+                current,
+                None,
+                &area,
+                scale,
+            );
+            assert_eq!(expanded.position, current.position);
+            let collapsed = panel_frame(
+                tauri::LogicalSize::new(500.0, 300.0),
+                Placement::KeepTop,
+                expanded,
+                None,
+                &area,
+                scale,
+            );
+            assert_eq!(collapsed.position, current.position);
+            assert_eq!(collapsed.size, current.size);
+            let at_bottom = tauri::PhysicalRect {
+                position: tauri::PhysicalPosition::new(-1500, 1422 - current.size.height as i32),
+                ..current
+            };
+            let clamped = panel_frame(
+                tauri::LogicalSize::new(500.0, 337.0),
+                Placement::KeepTop,
+                at_bottom,
+                None,
+                &area,
+                scale,
+            );
+            assert_eq!(clamped.position.x, at_bottom.position.x);
+            assert_eq!(clamped.position.y + clamped.size.height as i32, 1422);
+        }
+    }
     #[test]
     fn open_and_collapse_use_destination_size_regardless_of_previous_frame() {
         let area = tauri::PhysicalRect {
@@ -1413,6 +1532,9 @@ mod tests {
     }
     #[test]
     fn shortcut_validation_handles_modifier_order_and_system_combinations() {
+        assert!(optional_shortcut("").unwrap().is_none());
+        assert!(optional_shortcut(" ").is_err());
+        assert!(optional_shortcut("Control+Super+KeyM").unwrap().is_some());
         assert!(parse_shortcut("Control+Super+KeyM").is_ok());
         assert!(parse_shortcut("Super+Shift+KeyM").is_ok());
         for reserved in [
@@ -1439,13 +1561,46 @@ mod tests {
         assert_eq!(clamp_position(1, 1, 4000, 3000, &area), (-1912, 38));
     }
     #[test]
-    fn preferences_roundtrip_without_losing_visibility_pause_or_anchor() {
+    fn new_install_enables_login_once_and_existing_preferences_keep_system_choice() {
+        let fresh = Preferences::default();
+        assert!(!fresh.login_initialized);
+        assert!(fresh.visible);
+        assert_eq!(fresh.shortcut, "Alt+KeyM");
+        let existing: Preferences =
+            serde_json::from_str(r#"{"shortcut":"","visible":false}"#).unwrap();
+        assert!(existing.login_initialized);
+        assert!(existing.shortcut.is_empty());
+        assert!(!existing.visible);
+    }
+    #[test]
+    fn failed_preferences_read_does_not_schedule_login_initialization() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("desktop.json");
+        let fresh = Desktop::new(path.clone());
+        assert!(!fresh.inner.lock().unwrap().prefs.login_initialized);
+
+        fs::write(&path, "{").unwrap();
+        let corrupt = Desktop::new(path.clone());
+        let state = corrupt.inner.lock().unwrap();
+        assert!(state.prefs.login_initialized);
+        assert_eq!(state.error.as_deref(), Some("desktop_settings_invalid"));
+        assert_eq!(fs::read(&path).unwrap(), b"{");
+        drop(state);
+
+        // A directory exercises a read failure without relying on user permissions.
+        let unreadable = Desktop::new(dir.path().to_path_buf());
+        let state = unreadable.inner.lock().unwrap();
+        assert!(state.prefs.login_initialized);
+        assert_eq!(state.error.as_deref(), Some("desktop_settings_unreadable"));
+    }
+    #[test]
+    fn preferences_roundtrip_preserves_unset_shortcut_visibility_and_anchor() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("desktop.json");
         let desktop = Desktop::new(path.clone());
         let prefs = Preferences {
             visible: false,
-            paused: true,
+            shortcut: String::new(),
             pinned: true,
             position: Some((-500, 400)),
             ..Default::default()
@@ -1454,7 +1609,8 @@ mod tests {
         let loaded = Desktop::new(path.clone());
         let s = loaded.inner.lock().unwrap();
         assert!(!s.prefs.visible);
-        assert!(s.prefs.paused && s.prefs.pinned);
+        assert!(s.prefs.shortcut.is_empty());
+        assert!(s.prefs.pinned);
         assert_eq!(s.prefs.position, Some((-500, 400)));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(

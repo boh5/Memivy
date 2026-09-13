@@ -145,7 +145,7 @@ test('source provenance opens a live conversation and labels a deleted one witho
   const f=workspaceFixture(t);let opened;
   f.overrides.library_detail=async()=>({key:f.keyA,state:'active',title:'散步计划',body:'计划',current:{id:'v-a',capture_ids:['raw'],created_at:1,actor:'ai'},history:[],sources:[{id:'raw',conversation_available:available,capture:{id:'raw',text:'原话：预算不超过80元。',created_at:1,origin:{kind:'discussion',conversation_id:'original-topic',message_id:'user-message',app:'Memivy'}}}]});
   const view=f.mount(f.load('src/workspace/MemoryDetail.tsx').default,{record:f.keyA,initialReceipt:null,query:'',onChanged(){},onBack(){},onDiscuss:async()=>{},onOpenDiscussion:async id=>{opened=id;}});await f.settle();
-  f.find(view,n=>n.type==='button'&&n.props.role==='tab'&&f.text(n).startsWith('输入归档与来源')).props.onClick();await f.settle();
+  f.find(view,n=>n.type==='button'&&n.props.role==='tab'&&f.text(n).startsWith('来源')).props.onClick();await f.settle();
   assert(f.nodes(view.tree).some(n=>n.props?.text==='原话：预算不超过80元。'));
   if(available){f.find(view,n=>n.type==='button'&&f.text(n)==='查看原会话').props.onClick();await f.settle();assert.equal(opened,'original-topic');}
   else assert(f.text(view.tree).includes('原会话已不可用'));

@@ -96,7 +96,7 @@ export async function call<T>(
   };
   if (name === "memory_source") return previewNotes[0] as T;
   if (name in reads) return reads[name] as T;
-  throw "浏览器仅预览布局，请在 Mac 样机中体验真实操作。";
+  throw "此处仅供预览，请在 Memivy 桌面应用中操作。";
 }
 const paths: Record<string, string> = {
   plus: "M12 5v14M5 12h14",

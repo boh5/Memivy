@@ -18,7 +18,6 @@ pub enum Error {
     ModelRequired,
     ConnectionLimit,
     ConnectionInvalid,
-    QueryPrefixTooLong,
     DimensionsRequired,
     Endpoint,
     Network,
@@ -45,7 +44,6 @@ impl Error {
             Self::ModelRequired => "model_required",
             Self::ConnectionLimit => "model_connection_limit",
             Self::ConnectionInvalid => "model_connection_invalid",
-            Self::QueryPrefixTooLong => "model_query_prefix_too_long",
             Self::DimensionsRequired => "model_dimensions_required",
             Self::Endpoint => "model_endpoint",
             Self::Network => "model_network",
@@ -111,7 +109,6 @@ pub struct Binding {
     pub connection: String,
     pub model: String,
     pub dimensions: Option<usize>,
-    pub query_prefix: String,
     pub disable_reasoning: bool,
     pub max_output_tokens: Option<u32>,
     pub output_token_parameter: OutputTokenParameter,
@@ -224,11 +221,10 @@ impl Registry {
         let m = self.resolve(&self.embedding)?;
         Ok(embedding::hash(
             format!(
-                "api-v1:{}:{}:{:?}:{}:nfc-l2-chunk-v1",
+                "api-v2:{}:{}:{:?}:nfc-l2-chunk-v1",
                 m.base_url.trim_end_matches('/'),
                 m.model,
-                self.embedding.dimensions,
-                self.embedding.query_prefix
+                self.embedding.dimensions
             )
             .as_bytes(),
         ))
@@ -261,9 +257,6 @@ impl Registry {
         {
             if b.source == Source::Service {
                 self.resolve(b)?;
-            }
-            if b.query_prefix.chars().count() > 500 {
-                return Err(Error::QueryPrefixTooLong);
             }
         }
         if self.embedding.source == Source::Service

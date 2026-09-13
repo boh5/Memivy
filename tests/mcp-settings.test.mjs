@@ -23,9 +23,11 @@ test('local diagnostic does not claim an Agent connection and switch changes inv
   const view=f.mount(f.load('src/workspace/McpSettings.tsx').default);await f.settle();
   f.find(view,n=>n.type==='button'&&f.text(n)==='检查本地 MCP').props.onClick();await f.settle();
   assert(f.text(view.tree).includes('不代表外部 Agent 已连接'));
-  assert(f.text(view.tree).includes('数据调用仍会被拒绝'));
+  assert(f.text(view.tree).includes('无法保存或搜索记忆'));
+  const diagnostic=f.find(view,n=>n.props.role==='status'&&f.text(n).includes('MCP 检查通过'));
+  const diagnosticText=f.text(diagnostic);
   f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
-  assert(!f.text(view.tree).includes('本地 stdio 检查通过'));
+  assert(!f.nodes(view.tree).some(n=>n.props.role==='status'&&f.text(n)===diagnosticText));
 });
 
 test('the settings modal cannot close while the MCP section has an unfinished request', async t => {

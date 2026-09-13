@@ -159,7 +159,7 @@ fn embedding_identity_excludes_key_and_name_but_includes_encoding() {
     r.connections[0].api_key = Some("new-secret".into());
     r.connections[0].name = "Renamed".into();
     assert_eq!(r.fingerprint().unwrap(), first);
-    r.embedding.query_prefix = "query: ".into();
+    r.embedding.model = "second".into();
     assert_ne!(r.fingerprint().unwrap(), first);
 }
 #[test]
@@ -196,7 +196,7 @@ fn embedding_activation_rejects_busy_or_clearing_state_before_publishing() {
     let mut current = Registry::default();
     current.save(dir.path(), "initial").unwrap();
     let mut candidate = current.clone();
-    candidate.embedding.query_prefix = "candidate marker".into();
+    candidate.embedding.model = "candidate marker".into();
     {
         let lock = embedding::lock(dir.path(), "embedding-control.lock").unwrap();
         assert!(
@@ -232,7 +232,7 @@ fn embedding_activation_rejects_busy_or_clearing_state_before_publishing() {
         .apply_embedding_model(&mut candidate, &current.revision)
         .unwrap();
     assert_eq!(
-        Registry::read(dir.path()).unwrap().embedding.query_prefix,
+        Registry::read(dir.path()).unwrap().embedding.model,
         "candidate marker"
     );
     assert!(Preferences::read(dir.path()).unwrap().preparing);

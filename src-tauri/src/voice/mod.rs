@@ -17,12 +17,21 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct Preferences {
     enabled: bool,
     preload: bool,
     shortcut: String,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            preload: false,
+            shortcut: "Alt+KeyR".into(),
+        }
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Part {
@@ -883,6 +892,7 @@ fn configure(
             }
             let old = std::mem::replace(&mut s.prefs, next).shortcut;
             s.shortcut_down = false;
+            s.shortcut_pending = false;
             if s.prefs.enabled && !old.is_empty() {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 let _ = app
@@ -901,12 +911,16 @@ fn register_shortcut(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
         return Err("shortcut_taken".into());
     }
     app.global_shortcut()
-        .on_shortcut(shortcut, |app, _, event| {
+        .on_shortcut(shortcut, |app, shortcut, event| {
+            let shortcut = *shortcut;
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || {
                 let voice = handle.state::<Voice>();
                 {
                     let mut s = voice.0.state.lock().unwrap();
+                    if crate::desktop::parse_shortcut(&s.prefs.shortcut).ok() != Some(shortcut) {
+                        return;
+                    }
                     if event.state == ShortcutState::Released {
                         s.shortcut_down = false;
                         return;
@@ -986,6 +1000,12 @@ mod tests {
             download_cancel: AtomicBool::new(false),
         };
         (dir, service)
+    }
+    #[test]
+    fn default_shortcut_preserves_an_explicitly_cleared_binding() {
+        assert_eq!(Preferences::default().shortcut, "Alt+KeyR");
+        let prefs: Preferences = serde_json::from_str(r#"{"shortcut":""}"#).unwrap();
+        assert!(prefs.shortcut.is_empty());
     }
     #[test]
     fn stalled_device_start_times_out_without_losing_text_or_spawning_more_workers() {

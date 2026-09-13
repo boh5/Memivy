@@ -27,7 +27,7 @@ function fixture(t) {
 const supported=process.platform==='darwin'&&process.arch==='arm64';
 function betaBuildFixture(t,{entitlement='<true/>',tamper=false}={}) {
   const f=fixture(t);
-  f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
+  f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
   f.command('npm',`
     const fs=require('fs'),p=require('path'),{spawnSync}=require('child_process');
     const args=process.argv.slice(2),i=args.indexOf('--target');
@@ -76,7 +76,7 @@ test('DMG packaging rejects a bundle modified after signing even with audio-inpu
 });
 test('a mixed app and MCP version is rejected before running the native build', {skip:!supported}, async t=>{
   const f=fixture(t);
-  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.2.0'}]}));`);
+  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-mcp',version:'0.2.0'}]}));`);
   await f.command('npm',`require('fs').writeFileSync('native-build-started','yes');`);
   const result=f.run('build-beta.mjs');assert.notEqual(result.status,0);
   assert.match(result.stderr,/versions differ/);
