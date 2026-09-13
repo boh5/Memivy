@@ -37,7 +37,7 @@ def main():
     out.mkdir(exist_ok=False)
     env = os.environ.copy()
     # Never allow inherited data/config overrides to select the user's library.
-    for key in ['MEMIVY_DATA_DIR', 'MEMIVY_MODEL_CONFIG', 'MEMIVY_PHASE1_DATA_DIR', 'MEMIVY_PHASE1_MODEL_CONFIG']:
+    for key in ['MEMIVY_DATA_DIR', 'MEMIVY_MODEL_CONFIG']:
         env.pop(key, None)
     env['PATH'] = str(Path.home()/'.cargo/bin') + os.pathsep + env.get('PATH', '')
     report = {'started_utc': datetime.now(timezone.utc).isoformat(), 'platform': platform.platform(),

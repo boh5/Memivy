@@ -87,15 +87,17 @@ async fn validates_exact_schema_and_categorizes_failures_without_leaking() {
 #[tokio::test]
 async fn timeout_does_not_prevent_capture_or_search() {
     let dir = tempfile::tempdir().unwrap();
-    let store =
-        memivy_core::Store::open(memivy_core::DataPaths::new(dir.path().into()).unwrap()).unwrap();
+    use memivy_core::memory::{CaptureRequest, MemoryStore, Origin, SearchRequest};
+    let store = MemoryStore::open(dir.path()).unwrap();
     store
-        .capture(memivy_core::CaptureInput {
+        .capture(&CaptureRequest {
             request_id: uuid::Uuid::new_v4().to_string(),
             text: "模型失败也保留原话".into(),
-            source_app: "test".into(),
-            project: None,
-            session_uri: None,
+            origin: Origin::User {
+                app: "test".into(),
+                project: None,
+                uri: None,
+            },
         })
         .unwrap();
     let (url, thread) = endpoint(200, "{}".into(), 200);
@@ -106,7 +108,14 @@ async fn timeout_does_not_prevent_capture_or_search() {
         ProbeError::Network
     );
     thread.join().unwrap();
-    assert_eq!(store.search("保留原话", 10).unwrap().items.len(), 1);
+    assert_eq!(
+        store
+            .search(&SearchRequest::text("保留原话", 10))
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
 }
 #[tokio::test]
 async fn rejects_insecure_remote_or_credentials_in_url() {

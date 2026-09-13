@@ -15,7 +15,7 @@ import CaptureForm, { type InputSubmission } from "./CaptureForm";
 import Discussion from "./Discussion";
 import { installClickRecovery } from "./clickRecovery";
 import LanguageRecovery from "./LanguageRecovery";
-import "../prototype.css";
+import "../base.css";
 import "./workspace.css";
 import "./desktop.css";
 

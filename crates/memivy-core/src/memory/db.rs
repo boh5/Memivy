@@ -51,10 +51,6 @@ pub(super) fn private_dir(root: &Path) -> Result<()> {
     if !root.is_absolute() {
         return Err(DataError::Invalid);
     }
-    // Avoid accidentally reusing the accepted prototype, even with an explicit path.
-    if root.join("phase1.sqlite3").exists() {
-        return Err(DataError::Schema);
-    }
     fs::create_dir_all(root)?;
     if !fs::symlink_metadata(root)?.is_dir() {
         return Err(DataError::Invalid);

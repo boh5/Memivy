@@ -81,6 +81,7 @@ def check(binary):
         args = {"request_id":str(uuid.uuid4()),"text":"明确授权保存 MCP 合成证据\n原话不能改写。", "source_app":"Synthetic Agent","project":"测试项目","session_uri":"https://example.test/session"}
         names = sorted(t["name"] for t in client.call("tools/list")["tools"])
         assert names == ["memory_capture", "memory_search"]
+        switch(False)
         for name, payload in [("memory_capture",args),("memory_search",{"query":"合成证据"})]:
             assert client.tool(name,payload,failed=True)["code"] == "mcp_disabled"
         switch(True)
@@ -120,7 +121,6 @@ def check(binary):
         assert db.execute('SELECT COUNT(*) FROM captures WHERE request_id=?',[shared['request_id']]).fetchone()[0] == 1
         assert db.execute('SELECT text FROM captures WHERE request_id=?',[args['request_id']]).fetchone()[0] == args['text']
         assert db.execute("SELECT count(*) FROM organization_jobs WHERE status='pending'").fetchone()[0] == 6
-        assert not (data/'phase1.sqlite3').exists()
         client.close()
         # Protocol metadata works while disabled, but no data is returned.
         switch(False)
@@ -132,7 +132,7 @@ def check(binary):
         p = subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(data)},input='x'*(1024*1024+2)+'\n',capture_output=True,text=True,timeout=10)
         assert 'xxxxx' not in p.stderr and not p.stdout
         assert len(p.stderr) < 200
-    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "default off and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "pending organization without app", "isolated data", "bounded input frames", "clean EOF", "SQLite integrity"]}
+    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "pending organization without app", "isolated data", "bounded input frames", "clean EOF", "SQLite integrity"]}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

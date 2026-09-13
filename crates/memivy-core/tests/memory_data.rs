@@ -1203,7 +1203,7 @@ fn lock_timeout_and_database_errors_do_not_expose_content_or_leave_partial_versi
 }
 
 #[test]
-fn formal_migration_preserves_v1_and_rejects_prototype_future_and_partial_migrations() {
+fn formal_migration_preserves_v1_and_rejects_unrelated_future_and_partial_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("memivy.db");
     let db = Connection::open(&path).unwrap();
@@ -1249,13 +1249,6 @@ fn formal_migration_preserves_v1_and_rejects_prototype_future_and_partial_migrat
         store.capture(&capture_request("不能写新版库")).unwrap_err(),
         DataError::Schema
     );
-    let prototype = tempfile::tempdir().unwrap();
-    std::fs::write(prototype.path().join("phase1.sqlite3"), "do not touch").unwrap();
-    assert_eq!(
-        MemoryStore::open(prototype.path()).unwrap_err(),
-        DataError::Schema
-    );
-    assert!(!prototype.path().join("memivy.db").exists());
     let unrelated = tempfile::tempdir().unwrap();
     let db = Connection::open(unrelated.path().join("memivy.db")).unwrap();
     db.execute_batch("CREATE TABLE other (id TEXT)").unwrap();

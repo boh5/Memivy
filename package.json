@@ -9,7 +9,6 @@
     "tauri": "node scripts/tauri.mjs",
     "check": "tsc --noEmit",
     "dev:app": "npm run build:mcp && npm run tauri -- dev",
-    "dev:prototype": "MEMIVY_PHASE1_PROTOTYPE=1 npm run tauri -- dev --config src-tauri/tauri.prototype.conf.json",
     "test:ui": "node --experimental-strip-types --test tests/*.test.mjs",
     "build:mcp": "node scripts/prepare-mcp.mjs --debug",
     "build:beta": "node scripts/build-beta.mjs",

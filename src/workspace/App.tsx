@@ -23,7 +23,7 @@ import { Modal, MoreMenu } from "./components";
 import LanguageRecovery from "./LanguageRecovery";
 import Toast, { notify } from "./Toast";
 import { useDesktop, useWindowLifecycle, type MainRoute } from "./desktopApi";
-import "../prototype.css";
+import "../base.css";
 import "./workspace.css";
 import "./desktop.css";
 import "./navigation.css";

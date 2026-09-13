@@ -1,6 +1,6 @@
 # Memivy 技术栈与架构方案
 
-状态：沿用已验证技术基础；2026-09-06 阶段 3 首页与记忆库已接入正式数据层，实际验证见开发计划
+状态：2026-09-13 已移除旧交互样机运行代码，当前入口只使用正式 MemoryStore。以下阶段 1 内容为历史架构记录，已不提供旧样机启动命令；实际验证见开发计划
 依据：[PRD.md](PRD.md)，技术选型研究日期 2026-09-04，产品方向同步日期 2026-09-06
 
 原阶段 1 于 2026-09-06 验收通过。此后用户另行授权在现有样机中实现悬浮助手和最小记忆讨论闭环，作为阶段 1 第二版；原验收结论保留。模型配置与原生焦点问题修复后，用户于同日确认所给检查清单全部通过，第二版完成用户手工验收。实际测试范围、后续实施顺序与授权状态见 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)。
@@ -9,9 +9,9 @@
 
 悬浮拖动实验覆盖整个图标及展开后的标题区；WebView 使用 pointer capture 区分点击与拖动，Rust 读取系统鼠标和窗口的物理坐标来移动原生窗口，不依赖跨 WebView IPC 后的旧鼠标事件。拖动不触发展开，短点击才进入输入状态；实际手感和跨屏行为仍按原生验收记录核对。
 
-阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。已验收样机保留在 `prototype.rs` / `Prototype.tsx`，用 `npm run dev:prototype` 启动，继续与显式的 `memivy-mcp-prototype` 使用独立 Phase 1 Store。没有自动迁移样机数据。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。2026-09-07 用户授权阶段 4，正式桌面快捷入口已接入；阶段 5 已接入自动 AI 整理；2026-09-07 用户授权阶段 6，默认 `memivy-mcp` 已切换到正式 MemoryStore。
+阶段 2 的正式接口为 `memivy_core::memory::MemoryStore`，位于 `crates/memivy-core/src/memory/`。默认数据目录为 `~/Library/Application Support/com.memivy.app/`，事实库为 `memivy.db`；通过显式绝对目录进行测试。默认原生入口 `src-tauri/src/workspace.rs` 与 `src/workspace/` 已接入正式接口；`npm run dev:app` 启动正式界面。旧样机及其独立 Store、MCP 和启动命令已于 2026-09-13 移除。正式记录、编辑和搜索不调用模型，模型配置/固定文字连接测试单独提供；用户随后要求保留已有可用体验：正式界面现接回问答、从记忆开始讨论、引用、取消/重试及确认保存。2026-09-07 用户授权阶段 4，正式桌面快捷入口已接入；阶段 5 已接入自动 AI 整理；2026-09-07 用户授权阶段 6，默认 `memivy-mcp` 已切换到正式 MemoryStore。
 
-2026-09-12 当前正式讨论按[第二 Memory Agent 计划](docs/goals/second-memory-agent-plan-goal.md)重构：`begin_agent_input` 先持久化原话，`run_discussion` 准备全局记忆与会话上下文，共享工具循环输出自然文本并按需维护记忆。执行与实际验收见[实施进度](docs/goals/second-memory-agent-progress.md)。本轮没有旧 RAG、结构化三段回答或结论融合运行备用路径；历史样机仍是隔离产品实验。
+2026-09-12 当前正式讨论按[第二 Memory Agent 计划](docs/goals/second-memory-agent-plan-goal.md)重构：`begin_agent_input` 先持久化原话，`run_discussion` 准备全局记忆与会话上下文，共享工具循环输出自然文本并按需维护记忆。执行与实际验收见[实施进度](docs/goals/second-memory-agent-progress.md)。本轮没有旧 RAG、结构化三段回答或结论融合运行备用路径；旧样机运行代码已移除。
 
 ## 1. 结论
 
@@ -352,7 +352,7 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 
 打包前校验 Tauri 应用版本、原生 Cargo 包版本与 MCP 包版本一致；MCP 协议版本信息中的服务版本由 Cargo 包版本生成。sidecar 使用 Cargo 返回的实际可执行产物，应用使用 Cargo metadata 的目标目录及显式 `aarch64-apple-darwin` 构建目标，支持自定义 Cargo 输出目录并避免复用旧产物。默认应用输出为 `target/aarch64-apple-darwin/release/bundle/macos/Memivy.app`；DMG 和校验文件固定输出到仓库的 `target/release/bundle/dmg/`。
 
-开发环境用 `npm run build:mcp` 构建 sidecar，`npm run dev:app` 自动执行此步。发布测试包用 `npm run build:beta`；开发用的普通 debug app 不自动带 sidecar，如需完整 debug 包，使用 `npm run tauri -- build --debug --config src-tauri/tauri.beta.conf.json --bundles app`。协议验证运行 `python3 scripts/verify_phase6.py --binary /absolute/path/to/Memivy.app/Contents/MacOS/memivy-mcp`，先构建 `memory_probe`。历史阶段 1 脚本改为显式运行 `memivy-mcp-prototype`，原有协议和数据不变。
+开发环境用 `npm run build:mcp` 构建 sidecar，`npm run dev:app` 自动执行此步。发布测试包用 `npm run build:beta`；开发用的普通 debug app 不自动带 sidecar，如需完整 debug 包，使用 `npm run tauri -- build --debug --config src-tauri/tauri.beta.conf.json --bundles app`。协议验证运行 `python3 scripts/verify_phase6.py --binary /absolute/path/to/Memivy.app/Contents/MacOS/memivy-mcp`，先构建 `memory_probe`。旧样机专用协议脚本已随样机移除。
 
 安装：将应用移入固定位置后首次启动，再从设置复制 MCP 配置。未公证包可能被 Gatekeeper 拦截；按系统“隐私与安全性”提供的允许打开流程处理，不要求用户关闭系统安全保护。是否能在另一台 Mac 顺利安装需要实际验证。[Tauri 分发](https://v2.tauri.app/distribute/)
 

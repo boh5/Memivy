@@ -1185,22 +1185,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 .unwrap_or_else(|| store.model_config_path());
             store.recover_interrupted_turns()?;
             store.recover_organization()?;
-            // Carry forward an existing local setup only for the normal app,
-            // never for an isolated QA directory or an explicit config override.
-            if !config.exists()
-                && std::env::var_os("MEMIVY_DATA_DIR").is_none()
-                && std::env::var_os("MEMIVY_MODEL_CONFIG").is_none()
-                && let Some(home) = std::env::var_os("HOME")
-            {
-                let previous = PathBuf::from(home)
-                    .join("Library/Application Support/com.memivy.phase1/model.json");
-                if validate_config(&previous).is_ok()
-                    && validate_config(&config).is_ok()
-                    && let Ok(settings) = ModelConfig::read(&previous)
-                {
-                    let _ = settings.save(&config);
-                }
-            }
             app.manage(Workspace {
                 store,
                 config,

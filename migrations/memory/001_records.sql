@@ -1,4 +1,4 @@
--- Formal data only. Never apply these migrations to a Phase 1 database.
+-- Memory database schema. Apply only after validating the database identity.
 CREATE TABLE captures (
     id TEXT PRIMARY KEY NOT NULL,
     request_id TEXT NOT NULL UNIQUE,
