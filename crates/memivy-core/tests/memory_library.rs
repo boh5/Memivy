@@ -169,7 +169,7 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
     let (_d, s) = setup();
     let raw = capture(&s, " \n原文要逐字保留\n ", "user", None);
     let mut draft = WorkspaceDraft {
-        conclusion: None,
+        destination: None,
         context: vec![],
         key: format!("memory:{}", raw.memory_id),
         request_id: id(),
@@ -217,7 +217,7 @@ fn drafts_are_private_to_editing_and_survive_restart() {
     let (d, s) = setup();
     let raw = capture(&s, "可搜索记录", "user", None);
     let draft = WorkspaceDraft {
-        conclusion: None,
+        destination: None,
         context: vec![],
         key: format!("memory:{}", raw.memory_id),
         request_id: id(),
@@ -392,7 +392,7 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
         .unwrap();
     let selected = key(&current);
     s.save_workspace_draft(&WorkspaceDraft {
-        conclusion: None,
+        destination: None,
         context: vec![],
         key: format!("memory:{}", selected.id),
         request_id: id(),

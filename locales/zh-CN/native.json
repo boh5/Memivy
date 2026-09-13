@@ -12,5 +12,6 @@
   "quit": "退出 Memivy",
   "captureWindow": "Memivy · 快捷入口",
   "backupSave": "备份记忆、原话、历史、讨论和草稿，不包含模型密钥。请选择新的文件名。",
-  "backupOpen": "选择 Memivy 备份；校验后可确认整库恢复。"
+  "backupOpen": "选择 Memivy 备份；校验后可确认整库恢复。",
+  "quickInput": "记下想法或提问"
 }

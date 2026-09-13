@@ -25,6 +25,29 @@ function fixture(t) {
   return {root,put,target,command,run(name){return spawnSync(process.execPath,[path.join(root,'scripts',name)],{cwd:root,env,encoding:'utf8'});}};
 }
 const supported=process.platform==='darwin'&&process.arch==='arm64';
+function betaBuildFixture(t,{entitlement='<true/>',tamper=false}={}) {
+  const f=fixture(t);
+  f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
+  f.command('npm',`
+    const fs=require('fs'),p=require('path'),{spawnSync}=require('child_process');
+    const args=process.argv.slice(2),i=args.indexOf('--target');
+    const app=p.join(process.env.CARGO_TARGET_DIR,...(i>=0?[args[i+1]]:[]),'release/bundle/macos/Memivy.app');
+    const executable=p.join(app,'Contents/MacOS/Memivy');fs.mkdirSync(p.dirname(executable),{recursive:true});
+    fs.mkdirSync(p.join(app,'Contents/Resources'),{recursive:true});
+    fs.writeFileSync(p.join(app,'Contents/Resources/build-marker'),'FRESH APP');
+    fs.writeFileSync(p.join(app,'Contents/Info.plist'),'<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.memivy.packaging.test</string><key>CFBundleExecutable</key><string>Memivy</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>');
+    const compile=spawnSync('/usr/bin/clang',['-x','c','-o',executable,'-'],{input:'int main(void) { return 0; }',encoding:'utf8'});
+    if(compile.status!==0)throw Error(compile.stderr);
+    const signedValue=${JSON.stringify(entitlement)};
+    const entitlements=p.join(process.cwd(),'test-entitlements.plist');
+    if(signedValue!==null)fs.writeFileSync(entitlements,'<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key>'+signedValue+'</dict></plist>');
+    const signed=spawnSync('/usr/bin/codesign',['--force','--sign','-','--options','runtime',...(signedValue!==null?['--entitlements',entitlements]:[]),app],{encoding:'utf8'});
+    if(signed.status!==0)throw Error(signed.stderr);
+    if(${tamper})fs.appendFileSync(executable,'changed after signing');
+  `);
+  f.command('hdiutil',`const fs=require('fs'),p=require('path');fs.writeFileSync('dmg-packaging-started','yes');const a=process.argv.slice(2),stage=a[a.indexOf('-srcfolder')+1];fs.writeFileSync(a.at(-1),fs.readFileSync(p.join(stage,'Memivy.app/Contents/Resources/build-marker')));`);
+  return f;
+}
 test('MCP staging uses the artifact emitted by Cargo with a custom target directory', {skip:!supported}, async t=>{
   const f=fixture(t);
   await f.command('cargo',`const fs=require('fs'),p=require('path');const name=process.argv[process.argv.indexOf('-p')+1];const executable=p.join(process.env.CARGO_TARGET_DIR,'release',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));`);
@@ -34,12 +57,22 @@ test('MCP staging uses the artifact emitted by Cargo with a custom target direct
   assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin'),'utf8'),'FRESH memivy-embedding');
 });
 test('DMG packaging uses the just-built app rather than a stale default target bundle', {skip:!supported}, async t=>{
-  const f=fixture(t);
-  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy-phase1',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
-  await f.command('npm',`const fs=require('fs'),p=require('path');const args=process.argv.slice(2),i=args.indexOf('--target');const dir=p.join(process.env.CARGO_TARGET_DIR,...(i>=0?[args[i+1]]:[]),'release/bundle/macos/Memivy.app');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'build-marker'),'FRESH APP');`);
-  await f.command('hdiutil',`const fs=require('fs'),p=require('path');const a=process.argv.slice(2),stage=a[a.indexOf('-srcfolder')+1];fs.writeFileSync(a.at(-1),fs.readFileSync(p.join(stage,'Memivy.app/build-marker')));`);
+  const f=betaBuildFixture(t);
   const result=f.run('build-beta.mjs');assert.equal(result.status,0,result.stderr);
   assert.equal(readFileSync(path.join(f.root,'target/release/bundle/dmg/Memivy_0.1.0_aarch64.dmg'),'utf8'),'FRESH APP');
+});
+for(const entitlement of [null,'<false/>','<string>true</string>']) {
+  test(`DMG packaging rejects a real signed bundle with audio-input ${entitlement??'absent'}`,{skip:!supported},t=>{
+    const f=betaBuildFixture(t,{entitlement}),result=f.run('build-beta.mjs');
+    assert.notEqual(result.status,0);assert.match(result.stderr,/audio-input entitlement set to true/);
+    assert(!existsSync(path.join(f.root,'dmg-packaging-started')));
+    assert(!existsSync(path.join(f.root,'target/release/bundle/dmg/Memivy_0.1.0_aarch64.dmg')));
+  });
+}
+test('DMG packaging rejects a bundle modified after signing even with audio-input enabled',{skip:!supported},t=>{
+  const f=betaBuildFixture(t,{tamper:true}),result=f.run('build-beta.mjs');
+  assert.notEqual(result.status,0);assert.match(result.stderr,/signature is invalid/);
+  assert(!existsSync(path.join(f.root,'dmg-packaging-started')));
 });
 test('a mixed app and MCP version is rejected before running the native build', {skip:!supported}, async t=>{
   const f=fixture(t);

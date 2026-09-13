@@ -15,11 +15,10 @@ pub(crate) type HostResult<T> = std::result::Result<T, HostError>;
 pub(crate) struct Workspace {
     pub(crate) store: MemoryStore,
     pub(crate) config: PathBuf,
-    config_lock: Mutex<()>,
     pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
     pub(crate) exiting: AtomicBool,
     recommendation_lock: tokio::sync::Mutex<()>,
-    tasks: Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    tasks: Mutex<HashMap<String, (String, tokio::task::AbortHandle)>>,
 }
 pub(crate) fn model_available(state: &Workspace) -> bool {
     validate_config(&state.config).is_ok() && crate::models::read_llm(state).is_ok()
@@ -66,7 +65,7 @@ async fn discussion_open(
         let draft_key = format!("discussion:{id}");
         if s.workspace_draft(&draft_key)?.is_none() {
             s.save_workspace_draft(&WorkspaceDraft {
-                conclusion: None,
+                destination: None,
                 key: draft_key,
                 request_id: id.clone(),
                 title: String::new(),
@@ -81,98 +80,319 @@ async fn discussion_open(
     .await
 }
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Three framework arguments; retain the shared main/panel IPC contract.
-async fn discussion_ask(
+async fn discussion_topic(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    id: String,
+) -> HostResult<Conversation> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.conversation(&id)).await
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscussionUpdate {
+    topic_id: String,
+    input_id: String,
+}
+
+fn emit_discussion(app: &tauri::AppHandle, execution: &AgentExecution) {
+    let _ = app.emit(
+        "discussion-updated",
+        DiscussionUpdate {
+            topic_id: execution.conversation_id.clone(),
+            input_id: execution.input_id.clone(),
+        },
+    );
+}
+
+fn launch_discussion(
+    app: tauri::AppHandle,
+    state: &Workspace,
+    execution: AgentExecution,
+    quick: bool,
+    tasks: &mut HashMap<String, (String, tokio::task::AbortHandle)>,
+) -> HostResult<()> {
+    if execution.state != "processing" || tasks.contains_key(&execution.input_id) {
+        return Ok(());
+    }
+    let config = validate_config(&state.config).and_then(|_| crate::models::read_llm(state));
+    let config = match config {
+        Ok(config) => config,
+        Err(error) => {
+            state.store.stop_agent_input(
+                &execution.input_id,
+                &execution.attempt_id,
+                "failed",
+                Some(error.code),
+            )?;
+            emit_discussion(&app, &execution);
+            let _ = app.emit("resources-changed", ());
+            return Ok(());
+        }
+    };
+    let store = state.store.clone();
+    let input_id = execution.input_id.clone();
+    let attempt_id = execution.attempt_id.clone();
+    let answer_language = crate::i18n::language(&app);
+    let task = tokio::spawn(async move {
+        let update_app = app.clone();
+        let update_execution = execution.clone();
+        if let Err(failure) = store
+            .run_discussion(
+                &config,
+                &execution.input_id,
+                &execution.attempt_id,
+                &answer_language,
+                move |memory_changed| {
+                    emit_discussion(&update_app, &update_execution);
+                    if memory_changed {
+                        let _ = update_app.emit("resources-changed", ());
+                    }
+                },
+            )
+            .await
+        {
+            let code = match failure {
+                Failure::Network => "network",
+                Failure::RateLimit => "rate_limit",
+                Failure::InvalidAnswer => "invalid_answer",
+                Failure::SourceUnavailable => "source_unavailable",
+                Failure::ToolsUnsupported => "tools_unsupported",
+                Failure::Budget => "agent_budget",
+            };
+            let _ = store.stop_agent_input(
+                &execution.input_id,
+                &execution.attempt_id,
+                "failed",
+                Some(code),
+            );
+        }
+        if let Ok(mut tasks) = app.state::<Workspace>().tasks.lock()
+            && tasks
+                .get(&execution.input_id)
+                .is_some_and(|(attempt, _)| attempt == &execution.attempt_id)
+        {
+            tasks.remove(&execution.input_id);
+        }
+        emit_discussion(&app, &execution);
+        let _ = app.emit("resources-changed", ());
+        if quick
+            && let Ok(result) = store.agent_execution(&execution.input_id)
+            && result.state == "complete"
+            && result.record_only
+            && let Ok(receipts) = store.agent_input_receipts(&execution.input_id)
+            && let Some(memory) = receipts
+                .iter()
+                .find(|r| r.status == "applied")
+                .and_then(|r| r.memory_id.clone())
+        {
+            let _ =
+                crate::desktop::record_completed(&app, &execution.conversation_id, memory).await;
+        }
+        // The answer is already terminal and its task is released. Naming must
+        // not delay sending another message or turn a successful answer into a failure.
+        if matches!(
+            store
+                .generate_agent_title(&config, &execution.input_id, &execution.attempt_id)
+                .await,
+            Ok(true)
+        ) {
+            emit_discussion(&app, &execution);
+            let _ = app.emit("resources-changed", ());
+            if let Ok(topic) = store.conversation(&execution.conversation_id) {
+                crate::desktop::refresh_topic_title(&app, &topic);
+            }
+        }
+    });
+    tasks.insert(input_id, (attempt_id, task.abort_handle()));
+    Ok(())
+}
+
+// A redelivered IPC message uses its durable execution identity even when a
+// previously selected source has since been deleted or changed.
+fn persist_discussion_input(
+    store: &MemoryStore,
+    id: &str,
+    topic_id: &str,
+    text: &str,
+    context: &[SourceRef],
+    collection_id: Option<&str>,
+    origin: Option<&Origin>,
+) -> memivy_core::memory::Result<(Conversation, AgentExecution)> {
+    match store.agent_execution(id) {
+        Ok(saved) => {
+            if saved.conversation_id != topic_id || saved.input_text != text {
+                return Err(DataError::RequestConflict);
+            }
+            return Ok((store.conversation(topic_id)?, saved));
+        }
+        Err(DataError::Unavailable) => {}
+        Err(error) => return Err(error),
+    }
+    let topic = match store.conversation(topic_id) {
+        Ok(topic) => topic,
+        Err(DataError::Unavailable) => store.create_scoped_conversation(
+            topic_id,
+            &text.chars().take(60).collect::<String>(),
+            collection_id,
+        )?,
+        Err(error) => return Err(error),
+    };
+    let focus = store.agent_focused_memories(context)?;
+    let execution = store.begin_agent_input(
+        id,
+        &uuid::Uuid::new_v4().to_string(),
+        &topic.id,
+        text,
+        &focus,
+        origin,
+    )?;
+    Ok((topic, execution))
+}
+
+fn fail_unlaunched_input(
+    store: &MemoryStore,
+    tasks: &HashMap<String, (String, tokio::task::AbortHandle)>,
+    input: &str,
+    code: &str,
+) -> memivy_core::memory::Result<AgentExecution> {
+    let execution = store.agent_execution(input)?;
+    let running = tasks
+        .get(input)
+        .is_some_and(|(attempt, task)| attempt == &execution.attempt_id && !task.is_finished());
+    if execution.state == "processing" && !running {
+        store.stop_agent_input(input, &execution.attempt_id, "failed", Some(code))?;
+    }
+    Ok(execution)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Preserve the shared input envelope at the IPC boundary.
+async fn discussion_submit(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     id: String,
-    topic_id: String,
-    question: String,
+    topic_id: Option<String>,
+    text: String,
     context: Vec<SourceRef>,
     collection_id: Option<String>,
+    origin: Option<Origin>,
+    quick: Option<bool>,
 ) -> HostResult<Conversation> {
     require(&window)?;
-    validate_config(&state.config)?;
-    let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
-    config.endpoint().map_err(HostError::from)?;
-    if context.len() > 4 {
-        return Err(HostError::new("context_limit"));
+    let initial = topic_id.is_none();
+    let topic_id = topic_id.unwrap_or_else(|| id.clone());
+    let topic = {
+        let _tasks = state
+            .tasks
+            .lock()
+            .map_err(|_| HostError::new("discussion_unavailable"))?;
+        let (topic, _) = persist_discussion_input(
+            &state.store,
+            &id,
+            &topic_id,
+            &text,
+            &context,
+            collection_id.as_deref(),
+            origin.as_ref(),
+        )?;
+        let draft_key = format!("discussion:{}", topic.id);
+        if initial && state.store.workspace_draft(&draft_key)?.is_none() {
+            state.store.save_workspace_draft(&WorkspaceDraft {
+                key: draft_key,
+                request_id: uuid::Uuid::new_v4().to_string(),
+                title: String::new(),
+                body: String::new(),
+                expected_version: None,
+                context,
+                origin,
+                destination: None,
+            })?;
+        }
+        topic
+    };
+    let is_quick = quick.unwrap_or(false);
+    if is_quick && let Err(error) = crate::desktop::remember_topic(&app, &topic).await {
+        let tasks = state
+            .tasks
+            .lock()
+            .map_err(|_| HostError::new("discussion_unavailable"))?;
+        // No task may be left processing when the required main-thread handoff
+        // cannot be scheduled. An independently launched retry keeps its owner.
+        let execution = fail_unlaunched_input(&state.store, &tasks, &id, error.code)?;
+        emit_discussion(&app, &execution);
+        let _ = app.emit("resources-changed", ());
+        return Err(error);
     }
     let mut tasks = state
         .tasks
         .lock()
         .map_err(|_| HostError::new("discussion_unavailable"))?;
-    let store = state.store.clone();
-    // Retried command delivery reuses the attempt, never starts another request.
-    if let Ok(old) = store.turn(&id) {
-        let _ = old;
-        let previous = store.conversation(&topic_id).map_err(HostError::from)?;
-        if (collection_id.is_some() || id == topic_id) && previous.collection_id != collection_id {
-            return Err(DataError::RequestConflict.into());
-        }
-        store
-            .start_turn(&id, &topic_id, &question, &context)
-            .map_err(HostError::from)?;
-        return store.conversation(&topic_id).map_err(HostError::from);
-    }
-    let topic = match store.conversation(&topic_id) {
-        Ok(topic) => {
-            if collection_id.is_some() && topic.collection_id != collection_id {
-                return Err(DataError::Conflict.into());
-            }
-            topic
-        }
-        Err(DataError::Unavailable) => store
-            .create_scoped_conversation(
-                &topic_id,
-                &question.chars().take(60).collect::<String>(),
-                collection_id.as_deref(),
-            )
-            .map_err(HostError::from)?,
-        Err(e) => return Err(e.into()),
-    };
-    let turn = store
-        .start_turn(&id, &topic_id, &question, &context)
-        .map_err(HostError::from)?;
-    let task_id = id.clone();
+    // Cancellation or an explicit retry may complete while waiting for the
+    // main thread. Launch only the latest durable attempt under the task lock.
+    let execution = state.store.agent_execution(&id)?;
+    launch_discussion(app.clone(), &state, execution, is_quick, &mut tasks)?;
     let _ = app.emit("resources-changed", ());
-    let answer_language = crate::i18n::language(&app);
-    let task = tokio::spawn(async move {
-        if let Err(failure) = store
-            .answer_discussion_with_language(&config, &topic_id, &turn, &context, &answer_language)
-            .await
-        {
-            let _ = store.fail_turn(&task_id, failure);
-        }
-        if let Ok(mut tasks) = app.state::<Workspace>().tasks.lock() {
-            tasks.remove(&task_id);
-        }
-        let _ = app.emit("resources-changed", ());
-    });
-    tasks.insert(id, task.abort_handle());
     Ok(topic)
 }
+
 #[tauri::command]
-fn discussion_cancel(
+async fn discussion_retry(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
-    state: tauri::State<Workspace>,
+    state: tauri::State<'_, Workspace>,
+    input_id: String,
+) -> HostResult<Conversation> {
+    require(&window)?;
+    let mut tasks = state
+        .tasks
+        .lock()
+        .map_err(|_| HostError::new("discussion_unavailable"))?;
+    if let Some((_, task)) = tasks.remove(&input_id) {
+        task.abort();
+    }
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let execution = state.store.retry_agent_input(&input_id, &attempt)?;
+    let topic = state.store.conversation(&execution.conversation_id)?;
+    launch_discussion(
+        app.clone(),
+        &state,
+        execution,
+        window.label() == "capture",
+        &mut tasks,
+    )?;
+    let _ = app.emit("resources-changed", ());
+    Ok(topic)
+}
+
+#[tauri::command]
+async fn discussion_cancel(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
     id: String,
 ) -> HostResult<()> {
     require(&window)?;
-    state.store.cancel_turn(&id).map_err(HostError::from)?;
-    if let Some(task) = state
+    let mut tasks = state
         .tasks
         .lock()
-        .map_err(|_| HostError::new("discussion_unavailable"))?
-        .remove(&id)
-    {
+        .map_err(|_| HostError::new("discussion_unavailable"))?;
+    let execution = state.store.agent_execution(&id)?;
+    if execution.state == "processing" {
+        state
+            .store
+            .stop_agent_input(&id, &execution.attempt_id, "cancelled", None)?;
+    }
+    if let Some((_, task)) = tasks.remove(&id) {
         task.abort();
     }
+    emit_discussion(&app, &execution);
     let _ = app.emit("resources-changed", ());
     Ok(())
 }
+
 #[tauri::command]
 async fn discussion_source(
     window: tauri::WebviewWindow,
@@ -191,41 +411,49 @@ async fn discussion_source(
     .map_err(ReadError::from)
 }
 #[tauri::command]
-async fn discussion_save(
+async fn discussion_save_text(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    request: ConclusionRequest,
-    merged_body: Option<String>,
+    id: String,
+    input_id: String,
+    text: String,
+    title: String,
+    destination: Destination,
 ) -> HostResult<Receipt> {
     require(&window)?;
-    let s = state.store.clone();
-    blocking(move || s.save_reviewed_conclusion(&request, merged_body.as_deref())).await
+    let store = state.store.clone();
+    blocking(move || store.save_agent_text(&id, &input_id, &text, &title, &destination)).await
 }
 #[tauri::command]
-async fn discussion_merge(
+async fn discussion_changes(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    destination: Destination,
-    text: String,
-) -> HostResult<String> {
-    require(&window)?;
-    validate_config(&state.config)?;
-    let config = crate::models::read_llm(&state)?;
-    state
-        .store
-        .preview_conclusion_merge(&config, &destination, &text)
-        .await
-        .map_err(|_| HostError::new("integration_failed"))
-}
-#[tauri::command]
-async fn discussion_targets(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    sources: Vec<SourceRef>,
-) -> HostResult<Vec<(String, String)>> {
+    input_id: String,
+) -> HostResult<Vec<AgentInputChange>> {
     require(&window)?;
     let store = state.store.clone();
-    blocking(move || store.discussion_targets(&sources)).await
+    blocking(move || store.agent_input_changes(&input_id)).await
+}
+#[tauri::command]
+async fn library_agent_changes(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    memory_id: String,
+) -> HostResult<Vec<AgentChangeGroup>> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.memory_agent_changes(&memory_id)).await
+}
+#[tauri::command]
+async fn discussion_undo(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    input_id: String,
+    request_id: String,
+) -> HostResult<AgentUndoResult> {
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.undo_agent_input(&request_id, &input_id)).await
 }
 #[tauri::command]
 async fn organization_jobs(
@@ -310,44 +538,31 @@ fn start_organizer(app: tauri::AppHandle) {
             .await;
             let failure = match prepared {
                 Err(_) => Some("invalid"),
-                Ok(mut task) => match store.propose_organization_flow(&config, &mut task).await {
-                    Ok(proposal) => {
-                        let writer = store.clone();
-                        match tauri::async_runtime::spawn_blocking(move || {
-                            writer.apply_organization(&task, &proposal)
-                        })
-                        .await
-                        {
-                            Ok(Ok(receipt)) => {
-                                let _ = app.emit("organization-complete", &receipt);
-                                if receipt.status == "applied" {
-                                    let app = app.clone();
-                                    let config = config.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        let state = app.state::<Workspace>();
-                                        let _guard = state.recommendation_lock.lock().await;
-                                        if state.exiting.load(Ordering::Relaxed) {
-                                            return;
-                                        }
-                                        let _ = state
-                                            .store
-                                            .recommend_organization_collections(
-                                                &config,
-                                                &receipt.request_id,
-                                            )
-                                            .await;
-                                        let _ = app.emit("resources-changed", ());
-                                    });
+                Ok(task) => match store.run_organization(&config, &task).await {
+                    Ok(Some(receipt)) => {
+                        let _ = app.emit("organization-complete", &receipt);
+                        if receipt.status == "applied" {
+                            let app = app.clone();
+                            let config = config.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let state = app.state::<Workspace>();
+                                let _guard = state.recommendation_lock.lock().await;
+                                if state.exiting.load(Ordering::Relaxed) {
+                                    return;
                                 }
-                                None
-                            }
-                            Ok(Err(DataError::Invalid)) => Some("invalid"),
-                            Ok(Err(DataError::Conflict | DataError::Unavailable)) => {
-                                Some("conflict")
-                            }
-                            _ => Some("storage"),
+                                let _ = state
+                                    .store
+                                    .recommend_organization_collections(
+                                        &config,
+                                        &receipt.request_id,
+                                    )
+                                    .await;
+                                let _ = app.emit("resources-changed", ());
+                            });
                         }
+                        None
                     }
+                    Ok(None) => None,
                     Err(memivy_core::model::ProbeError::Status(429)) => Some("rate_limit"),
                     Err(memivy_core::model::ProbeError::ToolsUnsupported) => {
                         Some("tools_unsupported")
@@ -576,17 +791,6 @@ async fn library_topics(
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.conversations(12)).await
-}
-#[tauri::command]
-async fn library_messages(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    id: String,
-    before: Option<i64>,
-) -> HostResult<Vec<Message>> {
-    require(&window)?;
-    let s = state.store.clone();
-    blocking(move || s.messages(&id, before.unwrap_or(0), 40)).await
 }
 #[tauri::command]
 async fn discussion_messages(
@@ -917,71 +1121,6 @@ fn workspace_settings(
     })
 }
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Existing settings IPC plus optional BYOM output controls.
-fn workspace_configure(
-    window: tauri::WebviewWindow,
-    state: tauri::State<Workspace>,
-    base_url: String,
-    model: String,
-    api_key: Option<String>,
-    disable_reasoning: bool,
-    max_output_tokens: Option<u32>,
-    output_token_parameter: memivy_core::model::OutputTokenParameter,
-    replace_unreadable: bool,
-) -> HostResult<()> {
-    require_main(&window)?;
-    let _lock = state
-        .config_lock
-        .lock()
-        .map_err(|_| HostError::new("busy"))?;
-    let path = &state.config;
-    validate_config(path)?;
-    let previous = if path.exists() {
-        match ModelConfig::read(path) {
-            Ok(c) => Some(c),
-            Err(_) if replace_unreadable => None,
-            Err(e) => return Err(e.into()),
-        }
-    } else {
-        None
-    };
-    let key = api_key.or_else(|| {
-        previous.and_then(|c| {
-            if c.base_url == base_url {
-                c.api_key
-            } else {
-                None
-            }
-        })
-    });
-    ModelConfig {
-        base_url,
-        model,
-        api_key: key,
-        disable_reasoning,
-        max_output_tokens,
-        output_token_parameter,
-    }
-    .save(path)
-    .map_err(HostError::from)?;
-    let _ = window.app_handle().emit("settings-changed", ());
-    Ok(())
-}
-#[tauri::command]
-async fn workspace_test_model(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-) -> HostResult<memivy_core::model::tools::Capabilities> {
-    require_main(&window)?;
-    validate_config(&state.config)?;
-    let c = crate::models::read_llm(&state)?;
-    state
-        .store
-        .test_model_capabilities(&c)
-        .await
-        .map_err(HostError::from)
-}
-#[tauri::command]
 fn workspace_close(window: tauri::WebviewWindow) -> HostResult<()> {
     if window.label() != "main" {
         return Err(HostError::new("main_window_required"));
@@ -1065,7 +1204,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             app.manage(Workspace {
                 store,
                 config,
-                config_lock: Mutex::new(()),
                 restore_request: Mutex::new(None),
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
@@ -1108,6 +1246,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::cleanup::cleanup_cancel,
             crate::cleanup::cleanup_save,
             library_changes,
+            library_agent_changes,
             library_query,
             navigation_collections,
             navigation_record,
@@ -1121,19 +1260,20 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             organization_states,
             organization_dismiss,
             discussion_open,
+            discussion_topic,
             discussion_messages,
-            discussion_ask,
+            discussion_submit,
+            discussion_retry,
             discussion_cancel,
             discussion_source,
-            discussion_save,
-            discussion_merge,
-            discussion_targets,
+            discussion_save_text,
+            discussion_changes,
+            discussion_undo,
             organization_jobs,
             organization_retry,
             library_detail,
             library_projects,
             library_topics,
-            library_messages,
             draft_read,
             draft_write,
             draft_clear,
@@ -1149,8 +1289,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::backup::backup_restore,
             crate::backup::backup_result,
             workspace_settings,
-            workspace_configure,
-            workspace_test_model,
             workspace_close,
             crate::models::models_clear,
             crate::models::models_load,
@@ -1167,7 +1305,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::desktop::desktop_dismiss,
             crate::desktop::desktop_ready,
             crate::desktop::desktop_composer_resize,
-            crate::desktop::desktop_capture,
             crate::desktop::desktop_expand,
             crate::desktop::desktop_handoff_ready,
             crate::desktop::desktop_drag,
@@ -1236,5 +1373,109 @@ mod organization_writeback_tests {
         );
         store.retry_organization(&raw.memory_id).unwrap();
         assert!(store.claim_organization().unwrap().is_some());
+    }
+}
+
+#[cfg(test)]
+mod discussion_input_tests {
+    use super::*;
+    #[tokio::test]
+    async fn failed_handoff_marks_only_an_unlaunched_input_terminal() {
+        let root = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(root.path()).unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_, first) =
+            persist_discussion_input(&store, &id, &id, "保留我的原话", &[], None, None).unwrap();
+        fail_unlaunched_input(&store, &HashMap::new(), &id, "window_operation_failed").unwrap();
+        let failed = store.turn(&id).unwrap();
+        assert_eq!(failed.user.text, "保留我的原话");
+        assert_eq!(failed.assistant.status, "failed");
+        assert_eq!(
+            failed.assistant.error_code.as_deref(),
+            Some("window_operation_failed")
+        );
+
+        let retry = store
+            .retry_agent_input(&id, &uuid::Uuid::new_v4().to_string())
+            .unwrap();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let tasks = HashMap::from([(id.clone(), (retry.attempt_id.clone(), task.abort_handle()))]);
+        fail_unlaunched_input(&store, &tasks, &id, "window_operation_failed").unwrap();
+        assert_eq!(store.agent_execution(&id).unwrap().state, "processing");
+        assert_ne!(retry.attempt_id, first.attempt_id);
+        task.abort();
+
+        store
+            .stop_agent_input(&id, &retry.attempt_id, "cancelled", None)
+            .unwrap();
+        fail_unlaunched_input(&store, &HashMap::new(), &id, "window_operation_failed").unwrap();
+        assert_eq!(store.agent_execution(&id).unwrap().state, "cancelled");
+        assert_eq!(store.messages(&id, 0, 10).unwrap().len(), 2);
+    }
+    #[test]
+    fn redelivery_reuses_durable_input_after_its_selected_source_is_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(root.path()).unwrap();
+        let source = store
+            .capture(&CaptureRequest {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                text: "预算是80元".into(),
+                origin: Origin::User {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        let context = [SourceRef::Version(source.version_id.clone())];
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_, first) = persist_discussion_input(
+            &store,
+            &id,
+            &id,
+            "  这个安排合适吗？\n",
+            &context,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .stop_agent_input(&id, &first.attempt_id, "failed", Some("network"))
+            .unwrap();
+        store
+            .trash_memory(&source.memory_id, &source.version_id)
+            .unwrap();
+        assert!(store.agent_focused_memories(&context).unwrap().is_empty());
+        let (_, replay) = persist_discussion_input(
+            &store,
+            &id,
+            &id,
+            "  这个安排合适吗？\n",
+            &context,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(replay.attempt_id, first.attempt_id);
+        assert_eq!(replay.user_message_id, first.user_message_id);
+        assert_eq!(replay.focused_memory_ids, vec![source.memory_id]);
+        assert_eq!(replay.state, "failed");
+        assert_eq!(store.messages(&id, 0, 10).unwrap().len(), 2);
+        assert!(matches!(
+            persist_discussion_input(&store, &id, &id, "另一句话", &context, None, None),
+            Err(DataError::RequestConflict)
+        ));
+        assert!(matches!(
+            persist_discussion_input(
+                &store,
+                &id,
+                &uuid::Uuid::new_v4().to_string(),
+                "  这个安排合适吗？\n",
+                &context,
+                None,
+                None
+            ),
+            Err(DataError::RequestConflict)
+        ));
     }
 }

@@ -32,8 +32,8 @@ fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
 async fn main() {
     let args: Vec<_> = std::env::args().collect();
     assert!(
-        args.len() == 3 || (args.len() == 4 && args[3] == "--agent"),
-        "intelligence_probe PRIVATE_CONFIG OUTPUT_DIR [--agent]"
+        args.len() == 3,
+        "intelligence_probe PRIVATE_CONFIG OUTPUT_DIR"
     );
     let config =
         ModelConfig::read(std::path::Path::new(&args[1])).expect("private model configuration");
@@ -50,13 +50,14 @@ async fn main() {
         include_str!("../src/memory/library.rs"),
         include_str!("../src/model.rs"),
         include_str!("../src/model/tools.rs"),
+        include_str!("../src/model/stream.rs"),
         include_str!("../src/memory/agent.rs"),
         include_str!("../src/memory/search.rs")
     );
     fs::write(
         output.join("manifest.json"),
         serde_json::to_vec_pretty(&json!({
-            "agent": args.len() == 4, "model": config.model, "disable_reasoning": config.disable_reasoning,
+            "workflow": "second-memory-agent", "model": config.model, "disable_reasoning": config.disable_reasoning,
             "agent_fixture_sha256": format!("{:x}", Sha256::digest(include_str!("../tests/fixtures/agent_organization.json").as_bytes())),
             "fixture_sha256": format!("{:x}", Sha256::digest(fixture.as_bytes())),
             "implementation_sha256": format!("{:x}", Sha256::digest(code.as_bytes())),
@@ -67,21 +68,18 @@ async fn main() {
     .unwrap();
     let mut cases: Vec<Case> = serde_json::from_str(fixture).unwrap();
     let capability_root = tempfile::tempdir().unwrap();
-    let agent = args.len() == 4;
-    if agent {
-        let capabilities = MemoryStore::open(capability_root.path())
-            .unwrap()
-            .test_model_capabilities(&config)
-            .await
-            .expect("capability probe");
-        assert!(
-            capabilities.multi_turn,
-            "multi-turn capability required for Agent evaluation"
-        );
-        let extra = include_str!("../tests/fixtures/agent_organization.json");
-        fs::write(output.join("agent-cases.json"), extra).unwrap();
-        cases.extend(serde_json::from_str::<Vec<Case>>(extra).unwrap());
-    }
+    let capabilities = MemoryStore::open(capability_root.path())
+        .unwrap()
+        .test_model_capabilities(&config)
+        .await
+        .expect("capability probe");
+    assert!(
+        capabilities.supports_agent(),
+        "streaming multi-turn capability required"
+    );
+    let extra = include_str!("../tests/fixtures/agent_organization.json");
+    fs::write(output.join("agent-cases.json"), extra).unwrap();
+    cases.extend(serde_json::from_str::<Vec<Case>>(extra).unwrap());
     let rubric = include_str!("../tests/fixtures/organization_review.json");
     fs::write(output.join("rubric.json"), rubric).unwrap();
     let mut review = vec![];
@@ -90,13 +88,11 @@ async fn main() {
         let path = output.join(format!("{}.json", case.id));
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();
-        if agent {
-            fs::copy(
-                capability_root.path().join("model-capabilities.json"),
-                dir.path().join("model-capabilities.json"),
-            )
-            .unwrap();
-        }
+        fs::copy(
+            capability_root.path().join("model-capabilities.json"),
+            dir.path().join("model-capabilities.json"),
+        )
+        .unwrap();
         for (title, body) in &case.seeds {
             let c = capture(&store, body);
             store
@@ -114,41 +110,31 @@ async fn main() {
         assert_eq!(task.capture_id, raw.capture_id);
         store.prepare_organization(&mut task).unwrap();
         let started = std::time::Instant::now();
-        let proposed = if agent {
-            store.propose_organization_flow(&config, &mut task).await
-        } else {
-            store.propose_organization(&config, &task).await
-        };
-        let result = match proposed {
-            Ok(proposal) => {
-                let target = proposal
-                    .target
-                    .strip_prefix('M')
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .and_then(|i| i.checked_sub(1))
-                    .and_then(|i| task.candidates.get(i))
-                    .map(|v| v.title.clone())
-                    .unwrap_or_default();
-                let applied = store.apply_organization(&task, &proposal);
+        let result = match store.run_organization(&config, &task).await {
+            Ok(receipt) => {
                 let raw_preserved =
                     store.capture_by_id(&raw.capture_id).unwrap().text == case.capture;
-                let replay_pass = applied.as_ref().is_ok_and(|r| {
-                    store
-                        .apply_organization(&task, &proposal)
-                        .is_ok_and(|replay| &replay == r)
-                });
-                let final_body = applied
+                let final_memory = receipt
                     .as_ref()
-                    .ok()
                     .and_then(|r| r.memory_id.as_ref())
-                    .map(|m| store.memory(m).unwrap().current.body);
+                    .map(|memory| store.memory(memory).unwrap());
+                // Historical fixture labels describe the expected data effect,
+                // not a model terminal protocol: keep/merge/defer map to an
+                // organized source, a continued target, or unchanged input.
+                let observed = match receipt.as_ref().map(|r| r.action.as_str()) {
+                    Some("merge") => "merge",
+                    Some(_) => "keep",
+                    None => "defer",
+                };
+                let target = final_memory
+                    .as_ref()
+                    .map(|m| m.current.title.clone())
+                    .unwrap_or_default();
                 let pass = raw_preserved
-                    && replay_pass
-                    && proposal.action == case.expected
-                    && (case.expected != "merge" || target == case.target)
-                    && applied.is_ok();
+                    && observed == case.expected
+                    && (case.expected != "merge" || target == case.target);
                 passed += usize::from(pass);
-                json!({"id":case.id,"proposal":proposal,"selected_title":target,"candidates":task.candidates,"routing_pass":pass,"raw_preserved":raw_preserved,"replay_pass":replay_pass,"final_body":final_body,"apply":applied.map_err(|e|e.to_string()),"elapsed_ms":started.elapsed().as_millis()})
+                json!({"id":case.id,"observed_effect":observed,"selected_title":target,"candidates":task.candidates,"routing_pass":pass,"raw_preserved":raw_preserved,"final_body":final_memory.map(|m|m.current.body),"receipt":receipt,"elapsed_ms":started.elapsed().as_millis()})
             }
             Err(error) => {
                 json!({"id":case.id,"routing_pass":false,"error":error.to_string(),"elapsed_ms":started.elapsed().as_millis()})

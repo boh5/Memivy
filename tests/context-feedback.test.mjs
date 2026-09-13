@@ -84,10 +84,10 @@ test('discussion failures keep their recovery guidance across languages and pres
  const view=f.mount(Discussion,{topic:f.topic,configured:true,onSettings(){},onRefresh(){},onOpenRecord(){}});
  await f.settle();
  for(const [,zh] of failures) assert(f.text(view.tree).includes(zh));
- assert(f.text(view.tree).includes(history));
+ assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text===history));
  const reads=f.calls.filter(c=>c.name==='discussion_messages').length;
  await f.language('en');
  for(const [,,en] of failures) assert(f.text(view.tree).includes(en));
- assert(f.text(view.tree).includes(history));
+ assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text===history));
  assert.equal(f.calls.filter(c=>c.name==='discussion_messages').length,reads,'translating a failure must not reload the conversation');
 });

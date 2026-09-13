@@ -34,6 +34,13 @@ pub enum Origin {
         message_role: String,
         confirmed_by: String,
     },
+    Discussion {
+        conversation_id: String,
+        message_id: String,
+        app: String,
+        project: Option<String>,
+        uri: Option<String>,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,19 +174,6 @@ pub struct EvidenceSpan {
     pub truncated: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Recollection {
-    pub text: String,
-    pub sources: Vec<SourceRef>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DiscussionAnswer {
-    pub recollections: Vec<Recollection>,
-    pub ideas: String,
-    pub conclusion: String,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Conversation {
     #[serde(default)]
     pub collection_id: Option<String>,
@@ -190,6 +184,7 @@ pub struct Conversation {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    pub created_at: i64,
     pub seq: i64,
     pub id: String,
     pub turn_id: String,
@@ -198,7 +193,10 @@ pub struct Message {
     pub status: String,
     pub error_code: Option<String>,
     pub citations: Vec<Citation>,
-    pub answer: Option<DiscussionAnswer>,
+    pub followups: Vec<String>,
+    pub receipts: Vec<Receipt>,
+    pub progress: Option<String>,
+    pub record_only: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Turn {
@@ -212,23 +210,6 @@ pub enum Failure {
     RateLimit,
     InvalidAnswer,
     SourceUnavailable,
-}
-impl Failure {
-    pub(super) fn code(self) -> &'static str {
-        match self {
-            Self::Network => "network",
-            Self::RateLimit => "rate_limit",
-            Self::InvalidAnswer => "invalid_answer",
-            Self::SourceUnavailable => "source_unavailable",
-        }
-    }
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConclusionRequest {
-    pub request_id: String,
-    pub message_id: String,
-    pub destination: Destination,
-    pub title: String,
-    pub text: String,
+    ToolsUnsupported,
+    Budget,
 }

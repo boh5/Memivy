@@ -52,7 +52,15 @@ fn retrieves_only_current_facts_while_historical_citations_remain_readable() {
             .after_version
             .unwrap();
     }
-    let found = s.discussion_sources(&["同步计划".into()], &[]).unwrap();
+    let found = s
+        .search(&SearchRequest::text("同步计划", 8))
+        .map(|r| {
+            r.items
+                .into_iter()
+                .map(|h| h.evidence.source)
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
     let texts: Vec<_> = found
         .iter()
         .map(|r| s.resolve_source(r, 1800).unwrap())
@@ -69,7 +77,12 @@ fn retrieves_only_current_facts_while_historical_citations_remain_readable() {
     );
     s.trash_memory(&mid, &version).unwrap();
     assert!(
-        s.discussion_sources(&["同步计划".into()], &[])
+        s.search(&SearchRequest::text("同步计划", 8))
+            .map(|r| r
+                .items
+                .into_iter()
+                .map(|h| h.evidence.source)
+                .collect::<Vec<_>>())
             .unwrap()
             .is_empty()
     );
@@ -271,13 +284,20 @@ fn retrieval_performance_10000_memories() {
     tx.commit().unwrap();
     drop(db);
     for (name, queries) in [
-        ("FTS", vec!["蓝鲸旅行".into()]),
+        ("FTS", vec![String::from("蓝鲸旅行")]),
         ("short", vec!["蓝鲸".into(), "住宿".into()]),
     ] {
         let mut times = Vec::new();
         for _ in 0..20 {
             let start = Instant::now();
-            let found = s.discussion_sources(&queries, &[]).unwrap();
+            let found = s
+                .search(&SearchRequest {
+                    query: queries[0].clone(),
+                    variants: queries[1..].to_vec(),
+                    ..Default::default()
+                })
+                .map(|r| r.items)
+                .unwrap();
             assert!(!found.is_empty());
             times.push(start.elapsed().as_secs_f64() * 1000.0);
         }
@@ -316,7 +336,8 @@ fn undone_ai_versions_do_not_reappear_as_automatic_rag_evidence() {
         .unwrap();
     s.undo(&id(), &edited.request_id).unwrap();
     assert!(
-        s.discussion_sources(&["星际旅行".into()], &[])
+        s.search(&SearchRequest::text("星际旅行", 8))
+            .map(|r| r.items)
             .unwrap()
             .is_empty()
     );

@@ -7,6 +7,7 @@
   "languageSaveError": "Language could not be saved. Your previous choice is preserved.",
   "retry": "Retry",
   "closeNotice": "Dismiss notification",
+  "sourceDiscussion": "Saved during discussion",
   "sourceConclusion": "Confirmed discussion conclusion",
   "sourceCapture": "Original capture"
 }

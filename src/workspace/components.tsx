@@ -1,5 +1,5 @@
-import { ActionTooltip } from "./IconButton";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { ActionTooltip, positionActionPopup } from "./IconButton";
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../ui";
 import { useTranslation } from "react-i18next";
 
@@ -141,38 +141,55 @@ export function ErrorNotice({ text }: { text: string }) {
 
 export function MoreMenu({ children }: { children: ReactNode }) {
   const { t } = useTranslation("workspace");
-  const tooltipId = useId();
-  const menu = useRef<HTMLDetailsElement>(null);
+  const tooltipId = useId(), menuId = useId();
+  const trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  function close(focus = false) {
+    menu.current?.hidePopover(); setOpen(false);
+    if (focus) trigger.current?.focus({ preventScroll: true });
+  }
+  const items = () => Array.from(menu.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") || []);
+  function show(last = false) {
+    const button = trigger.current, popup = menu.current;
+    if (!button || !popup) return;
+    button.focus({ preventScroll: true });
+    popup.showPopover(); positionActionPopup(button, popup); setOpen(true);
+    const buttons = items(); buttons[last ? buttons.length - 1 : 0]?.focus({ preventScroll: true });
+  }
   useEffect(() => {
-    const close = (e: PointerEvent) => {
-      if (!menu.current?.contains(e.target as Node))
-        menu.current?.removeAttribute("open");
+    if (!open) return;
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && menu.current?.contains(event.target)) return;
+      close();
     };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, []);
-  return (
-    <ActionTooltip label={t("components.more")} tooltipId={tooltipId}><details
-      className="record-more"
-      ref={menu}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          menu.current?.removeAttribute("open");
-          menu.current?.querySelector("summary")?.focus();
+    window.addEventListener("resize", dismiss); window.addEventListener("scroll", dismiss, true);
+    return () => { window.removeEventListener("resize", dismiss); window.removeEventListener("scroll", dismiss, true); };
+  }, [open]);
+  return <span className="record-more">
+    <ActionTooltip label={t("components.more")} tooltipId={tooltipId} suppressed={open}>
+      <button type="button" ref={trigger} className="record-more-trigger" aria-label={t("components.more")} aria-describedby={tooltipId}
+        aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+        onClick={() => open ? close() : show()} onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); show(event.key === "ArrowUp"); }
+          if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); close(true); }
+        }}><Icon name="ellipsis" size={18} /></button>
+    </ActionTooltip>
+    <div id={menuId} ref={menu} popover="auto" className="record-more-actions" role="menu" aria-label={t("components.more")}
+      onToggle={event => setOpen(event.newState === "open")}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); return; }
+        if (event.key === "Tab") { close(true); return; }
+        if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+          event.preventDefault(); const buttons = items(), current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next]?.focus();
         }
-      }}
-    >
-      <summary aria-label={t("components.more")} aria-describedby={tooltipId}><Icon name="ellipsis" size={18} /></summary>
-      <div
-        className="record-more-actions"
-        onClick={(e) => {
-          if ((e.target as HTMLElement).closest("button:not(:disabled)"))
-            menu.current?.removeAttribute("open");
-        }}
-      >
-        {children}
-      </div>
-    </details></ActionTooltip>
-  );
+      }} onClick={event => {
+        if ((event.target as HTMLElement).closest("button:not(:disabled)")) { event.stopPropagation(); close(true); }
+      }}>
+      {Children.map(children, child => isValidElement<{ role?: string; tabIndex?: number }>(child) && child.type === "button" ? cloneElement(child, { role: "menuitem", tabIndex: -1 }) : child)}
+    </div>
+  </span>;
 }

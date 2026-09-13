@@ -29,15 +29,17 @@ fn capture(s: &MemoryStore) -> RawCapture {
         .unwrap();
     s.capture_by_id(&saved.capture_id).unwrap()
 }
-fn proposal() -> OrganizationProposal {
-    OrganizationProposal {
-        action: "keep".into(),
-        target: String::new(),
+fn proposal(task: &OrganizationTask) -> MemoryWriteArgs {
+    MemoryWriteArgs {
+        destination: Destination::New,
         title: "故障恢复".into(),
-        addition: "故障中的原话 SQLite 中文".into(),
-        changes: vec![],
-        keywords: vec!["回归".into()],
-        reason: "合成故障测试".into(),
+        parts: vec![MemoryWritePart {
+            text: "故障中的原话 SQLite 中文 回归".into(),
+            sources: vec![MemorySourceQuote {
+                source_id: task.capture_id.clone(),
+                quote: "故障中的原话 SQLite 中文".into(),
+            }],
+        }],
     }
 }
 fn counts(s: &MemoryStore) -> Vec<i64> {
@@ -124,18 +126,37 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
             let _ = rx.recv_timeout(Duration::from_secs(100));
             return;
         }
-        let mut p = proposal();
-        p.action = "merge".into();
-        p.target = "M99".into();
-        p.title = String::new();
-        let (status,body)=match mode.as_str(){
-            "unknown_target"=>(200,json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"type":"function","function":{"name":"merge_memory","arguments":json!({"target":p.target,"addition":p.addition,"changes":p.changes,"keywords":p.keywords,"reason":p.reason}).to_string()}}]}}]}).to_string()),
-            "truncated"=>(200,json!({"choices":[{"finish_reason":"length","message":{"content":"{\"action\":"}}]}).to_string()),
-            "empty"=>(200,json!({"choices":[]}).to_string()),
-            "rate_limit"=>(429,KEY.into()),"server_error"=>(500,KEY.into()),"oversize"=>(200,"x".repeat(65537)),_=>panic!("unknown fixture mode")};
+        let request: serde_json::Value = serde_json::from_slice(&bytes[end..end + size]).unwrap();
+        let input: serde_json::Value = serde_json::from_str(
+            request["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let event = |delta: serde_json::Value, finish: &str| {
+            format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({"choices":[{"index":0,"delta":delta,"finish_reason":finish}]})
+            )
+        };
+        let (status, body) = match mode.as_str() {
+            "unknown_target" => (
+                200,
+                event(
+                    json!({"role":"assistant","tool_calls":[{"index":0,"id":"synthetic-call","type":"function","function":{"name":"write_memory","arguments":json!({"destination":{"kind":"existing","memory_id":id(),"expected_version":id()},"title":"故障恢复","parts":[{"text":"原话","sources":[{"source_id":input["capture_id"],"quote":"故障中的原话"}]}]}).to_string()}}]}),
+                    "tool_calls",
+                ),
+            ),
+            "truncated" => (200, event(json!({"content":"partial"}), "length")),
+            "empty" => (200, "data: {\"choices\":[]}\n\ndata: [DONE]\n\n".into()),
+            "rate_limit" => (429, KEY.into()),
+            "server_error" => (500, KEY.into()),
+            "oversize" => (200, "x".repeat(1_048_577)),
+            _ => panic!("unknown fixture mode"),
+        };
         let _ = write!(
             socket,
-            "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status} Test\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
     });
@@ -155,17 +176,31 @@ async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
         s.prepare_organization(&mut task).unwrap();
         let (config, release, server) = endpoint(&case.mode);
         config.save(&s.model_config_path()).unwrap();
-        let response = s.propose_organization(&config, &task).await;
+        memivy_core::model::tools::save_capabilities(
+            temp.path(),
+            &config,
+            &memivy_core::model::tools::Capabilities {
+                structured_json: true,
+                streaming_text: true,
+                single_tool: true,
+                multi_turn: true,
+            },
+        )
+        .unwrap();
+        let response = if case.mode == "timeout" {
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                s.run_organization(&config, &task),
+            )
+            .await
+            .unwrap_or(Err(ProbeError::Network))
+        } else {
+            s.run_organization(&config, &task).await
+        };
         let _ = release.send(());
         server.join().unwrap();
         let actual = match response {
-            Ok(p) => {
-                assert_eq!(
-                    s.apply_organization(&task, &p).unwrap_err(),
-                    DataError::Invalid
-                );
-                "invalid".into()
-            }
+            Ok(_) => panic!("fault unexpectedly completed"),
             Err(e) => {
                 assert!(!format!("{e:?} {e}").contains(KEY));
                 match e {
@@ -196,10 +231,10 @@ async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
         );
         s.retry_organization(&task.memory.memory_id).unwrap();
         let retry = s.claim_organization().unwrap().unwrap();
-        let p = proposal();
+        let p = proposal(&retry);
         let receipt = s.apply_organization(&retry, &p).unwrap();
         assert_eq!(s.apply_organization(&retry, &p).unwrap(), receipt);
-        assert_eq!(counts(&s), vec![1, 1, 2, 2, 1]);
+        assert_eq!(counts(&s), vec![1, 1, 2, 2, 0]);
         let export = temp.path().join("article.md");
         s.export_record_markdown(
             &RecordKey {
@@ -228,7 +263,7 @@ fn organization_failure_after_receipt_and_index_updates_rolls_back_every_effect(
     let before = counts(&s);
     let db = rusqlite::Connection::open(s.database_path()).unwrap();
     db.execute_batch("CREATE TRIGGER inject_late_failure BEFORE UPDATE ON organization_jobs WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic_api_key_never_export_47291'); END;").unwrap();
-    let e = s.apply_organization(&task, &proposal()).unwrap_err();
+    let e = s.apply_organization(&task, &proposal(&task)).unwrap_err();
     assert_eq!(e, DataError::Database);
     assert!(!format!("{e:?} {e}").contains(KEY));
     assert_eq!(counts(&s), before);
@@ -247,9 +282,9 @@ fn organization_failure_after_receipt_and_index_updates_rolls_back_every_effect(
     );
     db.execute_batch("DROP TRIGGER inject_late_failure")
         .unwrap();
-    let p = proposal();
+    let p = proposal(&task);
     let r = s.apply_organization(&task, &p).unwrap();
     assert_eq!(s.apply_organization(&task, &p).unwrap(), r);
-    assert_eq!(counts(&s), vec![1, 1, 2, 2, 1]);
+    assert_eq!(counts(&s), vec![1, 1, 2, 2, 0]);
     s.check_integrity().unwrap();
 }

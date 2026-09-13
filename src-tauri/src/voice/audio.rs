@@ -59,6 +59,9 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
     let supported = device
         .default_input_config()
         .map_err(|_| "microphone_unavailable")?;
+    if stop.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
     let rate = config.sample_rate.0 as usize;
@@ -73,12 +76,17 @@ pub fn record(service: Arc<Service>, id: String, stop: Arc<AtomicBool>) -> Resul
         cpal::SampleFormat::U16 => stream::<u16>(&device, &config, tx, failed.clone()),
         _ => Err("microphone_format".into()),
     }?;
+    if stop.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let mut resampler =
         FftFixedIn::<f32>::new(rate, 16000, FRAME, 2, 1).map_err(|_| "audio_conversion_failed")?;
     let mut pending = Vec::with_capacity(FRAME * 4);
     let mut segment = Segmenter::default();
     stream.play().map_err(|_| "microphone_permission")?;
-    service.listening(&id);
+    if !service.listening(&id) {
+        return Ok(());
+    }
     let mut count = 0usize;
     let mut interrupted = false;
     while !stop.load(Ordering::SeqCst) && count < rate * 300 {
@@ -150,18 +158,22 @@ impl Segmenter {
         if self.samples.len() >= 16000 * 12 || (self.speech && self.silent >= 11200) {
             return self.finish();
         }
-        // Keep a short pre-roll during silence, including quiet word onsets.
-        if !self.speech && self.samples.len() > 8000 {
-            let n = self.samples.len() - 8000;
-            self.samples.drain(..n);
-        }
+        // Loudness decides pause boundaries, never whether quiet audio survives.
+        // The hard segment limit bounds the buffer even before a loud frame.
         None
     }
     fn finish(&mut self) -> Option<Vec<f32>> {
-        let samples = std::mem::take(&mut self.samples);
-        let speech = std::mem::take(&mut self.speech);
+        let mut samples = std::mem::take(&mut self.samples);
+        self.speech = false;
         self.silent = 0;
-        (speech && samples.len() >= 1600).then_some(samples)
+        if !samples.iter().any(|sample| *sample != 0.0) {
+            return None;
+        }
+        // Keep even a short final syllable; pad the ASR frame instead of dropping it.
+        if samples.len() < 1600 {
+            samples.resize(1600, 0.0);
+        }
+        Some(samples)
     }
 }
 #[cfg(test)]
@@ -173,8 +185,24 @@ mod tests {
         for _ in 0..1000 {
             assert!(s.push(&[0.; 320], 0.).is_none());
         }
-        assert!(s.samples.len() <= 8000);
+        assert!(s.samples.len() < 16000 * 12);
         assert!(s.finish().is_none());
+    }
+    #[test]
+    fn quiet_audio_is_retained_in_full_for_transcription_and_retry() {
+        let mut s = Segmenter::default();
+        for _ in 0..300 {
+            assert!(s.push(&[0.001; 320], 0.001).is_none());
+        }
+        assert_eq!(s.finish().unwrap(), vec![0.001; 96000]);
+    }
+    #[test]
+    fn sub_frame_final_audio_is_retained_with_silence_padding() {
+        let mut s = Segmenter::default();
+        assert!(s.push(&[0.001; 800], 0.001).is_none());
+        let tail = s.finish().unwrap();
+        assert_eq!(&tail[..800], &[0.001; 800]);
+        assert_eq!(&tail[800..], &[0.0; 800]);
     }
     #[test]
     fn pauses_and_hard_limits_preserve_all_speech() {

@@ -5,6 +5,8 @@ mod changes;
 pub use changes::*;
 mod access;
 mod agent;
+mod agent_mutations;
+mod agent_state;
 mod cleanup;
 mod collection_recommendations;
 mod conversations;
@@ -22,9 +24,13 @@ mod search;
 mod transfer;
 mod types;
 
+pub use agent::{MemorySourceQuote, MemoryWriteArgs, MemoryWritePart};
+pub use agent_mutations::*;
+pub use agent_state::*;
 pub use cleanup::*;
 pub use collection_recommendations::*;
 pub use db::MemoryStore;
+pub use discussion::AgentInputChange;
 pub use embedding::EmbeddingStatus;
 pub use library::*;
 pub use mcp::*;
@@ -52,6 +58,10 @@ pub enum DataError {
     NavigationLimit,
     #[error("输入无效或超过长度限制")]
     Invalid,
+    #[error(
+        "请逐项引用实际用户原话；未引用来源的片段必须完整保留目标原有行，不能省略否定或更改内容"
+    )]
+    SourceAttribution,
     #[error("内容不存在、已删除或不可用")]
     Unavailable,
     #[error("内容已有新版本，请重新核对后再操作")]

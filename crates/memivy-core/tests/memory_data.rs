@@ -41,29 +41,39 @@ fn edit(store: &MemoryStore, r: &Receipt, text: &str) -> Receipt {
         })
         .unwrap()
 }
+const SAVED_TEXT: &str = "  确认后修改的结论\n逐字保留🙂  ";
+const SAVED_TITLE: &str = "用户确认的名称";
 fn finished_turn(store: &MemoryStore, evidence: &[SourceRef]) -> (String, Turn) {
     let conversation = id();
     store
         .create_conversation(&conversation, "继续讨论")
         .unwrap();
-    let turn = store
-        .start_turn(&id(), &conversation, "只是一个假设", evidence)
+    let run = store
+        .begin_agent_input(&id(), &id(), &conversation, "只是一个假设", &[], None)
         .unwrap();
-    assert!(
-        store
-            .finish_turn(&turn.id, "AI 建议，不自动保存", evidence)
+    store
+        .append_agent_text(&run.input_id, &run.attempt_id, "AI 建议，不自动保存")
+        .unwrap();
+    // Fixed database evidence fixture; agent protocol/citation validation is
+    // exercised by the discussion tests rather than duplicated here.
+    let db = Connection::open(store.database_path()).unwrap();
+    for source in evidence {
+        let (kind, source_id) = match source {
+            SourceRef::Capture(id) => ("capture", id),
+            SourceRef::Version(id) => ("version", id),
+        };
+        let length = store
+            .resolve_source(source, 1000)
             .unwrap()
-    );
-    (conversation, store.turn(&turn.id).unwrap())
-}
-fn conclusion(turn: &Turn, destination: Destination) -> ConclusionRequest {
-    ConclusionRequest {
-        request_id: id(),
-        message_id: turn.assistant.id.clone(),
-        destination,
-        title: "用户确认的名称".into(),
-        text: "  确认后修改的结论\n逐字保留🙂  ".into(),
+            .text
+            .chars()
+            .count();
+        db.execute("INSERT INTO message_citations(message_id,kind,source_id,cited,excerpt_start,excerpt_length) VALUES(?1,?2,?3,1,0,?4)",params![run.assistant_message_id,kind,source_id,length as i64]).unwrap();
     }
+    store
+        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .unwrap();
+    (conversation, store.turn(&run.input_id).unwrap())
 }
 
 #[test]
@@ -854,7 +864,7 @@ fn fresh_concurrent_open_never_misclassifies_a_valid_database() {
 }
 
 #[test]
-fn discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance() {
+fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() {
     let (_dir, store) = setup();
     let (conversation, turn) = finished_turn(&store, &[]);
     store
@@ -867,18 +877,33 @@ fn discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance()
             .items
             .is_empty()
     );
-    let request = conclusion(&turn, Destination::New);
-    let r = store.save_conclusion(&request).unwrap();
+    let request = id();
+    let r = store
+        .save_agent_text(
+            &request,
+            &turn.id,
+            SAVED_TEXT,
+            SAVED_TITLE,
+            &Destination::New,
+        )
+        .unwrap();
     let raw = store.capture_by_id(r.capture_id.as_ref().unwrap()).unwrap();
-    assert_eq!(raw.text, request.text);
+    assert_eq!(raw.text, SAVED_TEXT);
     assert!(
         matches!(raw.origin,Origin::Conversation{message_role,confirmed_by,..} if message_role=="assistant" && confirmed_by=="user")
     );
     store.delete_conversation(&conversation).unwrap();
     assert_eq!(
-        store.save_conclusion(&request).unwrap(),
-        r,
-        "delivery retry works after deleting conversation"
+        store
+            .save_agent_text(
+                &request,
+                &turn.id,
+                SAVED_TEXT,
+                SAVED_TITLE,
+                &Destination::New
+            )
+            .unwrap(),
+        r
     );
     assert!(store.conversation(&conversation).is_err());
     assert_eq!(
@@ -887,30 +912,47 @@ fn discussions_and_drafts_are_not_memories_and_confirmation_retains_provenance()
             .unwrap()
             .current
             .body,
-        request.text
+        SAVED_TEXT
     );
-    let mut bad = request.clone();
-    bad.text = "different".into();
     assert_eq!(
-        store.save_conclusion(&bad).unwrap_err(),
+        store
+            .save_agent_text(
+                &request,
+                &turn.id,
+                "different",
+                SAVED_TITLE,
+                &Destination::New
+            )
+            .unwrap_err(),
         DataError::RequestConflict
     );
-    let undo = id();
-    store.undo(&undo, &r.request_id).unwrap();
-    assert_eq!(store.save_conclusion(&request).unwrap().status, "undone");
+    store.undo_agent_input(&id(), &request).unwrap();
+    assert_eq!(
+        store
+            .save_agent_text(
+                &request,
+                &turn.id,
+                SAVED_TEXT,
+                SAVED_TITLE,
+                &Destination::New
+            )
+            .unwrap()
+            .status,
+        "undone"
+    );
     assert!(store.memory(r.memory_id.as_ref().unwrap()).is_err());
     assert_eq!(
         store
             .capture_by_id(r.capture_id.as_ref().unwrap())
             .unwrap()
             .text,
-        request.text
+        SAVED_TEXT
     );
     store.check_integrity().unwrap();
 }
 
 #[test]
-fn stale_conclusion_target_leaves_no_working_archive_or_new_memory() {
+fn stale_manual_save_target_leaves_no_archive_or_new_memory() {
     let (_dir, store) = setup();
     let (_, target) = new_memory(&store, "旧版");
     let (_, turn) = finished_turn(&store, &[]);
@@ -925,12 +967,12 @@ fn stale_conclusion_target_leaves_no_working_archive_or_new_memory() {
             expected_version: id(),
         },
     ] {
-        let r = store
-            .save_conclusion(&conclusion(&turn, destination))
-            .unwrap();
-        assert_eq!(r.status, "needs_review");
-        assert!(r.capture_id.is_none());
-        assert!(r.memory_id.is_none());
+        assert_eq!(
+            store
+                .save_agent_text(&id(), &turn.id, SAVED_TEXT, SAVED_TITLE, &destination)
+                .unwrap_err(),
+            DataError::Conflict
+        );
     }
     assert_eq!(
         store
@@ -940,9 +982,10 @@ fn stale_conclusion_target_leaves_no_working_archive_or_new_memory() {
             .body,
         "已改版"
     );
-    let db = Connection::open(store.database_path()).unwrap();
     assert_eq!(
-        db.query_row("SELECT count(*) FROM captures", [], |r| r.get::<_, i64>(0))
+        Connection::open(store.database_path())
+            .unwrap()
+            .query_row("SELECT count(*) FROM captures", [], |r| r.get::<_, i64>(0))
             .unwrap(),
         1
     );
@@ -955,7 +998,7 @@ fn citations_bind_to_fixed_versions_and_deleted_sources_are_unavailable() {
     let old = SourceRef::Version(r.after_version.clone().unwrap());
     let (_, turn) = finished_turn(&store, std::slice::from_ref(&old));
     let saved = store
-        .save_conclusion(&conclusion(&turn, Destination::New))
+        .save_agent_text(&id(), &turn.id, SAVED_TEXT, SAVED_TITLE, &Destination::New)
         .unwrap();
     let edited = edit(&store, &r, "后来的依据");
     assert_eq!(store.resolve_source(&old, 500).unwrap().text, "当时的依据");
@@ -980,87 +1023,66 @@ fn citations_bind_to_fixed_versions_and_deleted_sources_are_unavailable() {
 }
 
 #[test]
-fn cancellation_recovery_and_invalid_citations_cannot_complete_late_or_write_memory() {
+fn cancellation_and_explicit_restart_recovery_fence_late_results() {
     let (_dir, store) = setup();
     let conversation = id();
     store
         .create_conversation(&conversation, "失败恢复")
         .unwrap();
-    let r = id();
-    let turn = store.start_turn(&r, &conversation, "第一次", &[]).unwrap();
+    let run = store
+        .begin_agent_input(&id(), &id(), &conversation, "第一次", &[], None)
+        .unwrap();
     assert_eq!(
         store
-            .start_turn(&r, &conversation, "第一次", &[])
+            .begin_agent_input(
+                &run.input_id,
+                &run.attempt_id,
+                &conversation,
+                "第一次",
+                &[],
+                None
+            )
             .unwrap()
-            .assistant
-            .id,
-        turn.assistant.id
+            .user_message_id,
+        run.user_message_id
     );
     assert_eq!(
         store
-            .start_turn(&id(), &conversation, "第二次", &[])
+            .begin_agent_input(&id(), &id(), &conversation, "第二次", &[], None)
             .unwrap_err(),
         DataError::Conflict
     );
+    store
+        .stop_agent_input(&run.input_id, &run.attempt_id, "cancelled", None)
+        .unwrap();
     assert_eq!(
         store
-            .finish_turn(&r, "虚假引用", &[SourceRef::Capture(id())])
+            .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
             .unwrap_err(),
-        DataError::Invalid
-    );
-    store.cancel_turn(&r).unwrap();
-    assert!(!store.finish_turn(&r, "迟到答案", &[]).unwrap());
-    let request = conclusion(&turn, Destination::New);
-    assert_eq!(
-        store.save_conclusion(&request).unwrap_err(),
         DataError::Conflict
     );
-    let next = store.start_turn(&id(), &conversation, "重试", &[]).unwrap();
+    let next = store
+        .begin_agent_input(&id(), &id(), &conversation, "新表达", &[], None)
+        .unwrap();
     let reopened = MemoryStore::open(store.database_path().parent().unwrap()).unwrap();
     assert_eq!(
-        reopened.turn(&next.id).unwrap().assistant.status,
+        reopened.turn(&next.input_id).unwrap().assistant.status,
         "processing",
-        "another store reader must not cancel a live request"
+        "opening another reader must not cancel live work"
     );
     assert_eq!(reopened.recover_interrupted_turns().unwrap(), 1);
-    assert!(!store.finish_turn(&next.id, "跨重启迟到答案", &[]).unwrap());
+    assert_eq!(
+        store
+            .finish_agent_input(&next.input_id, &next.attempt_id, false, &[])
+            .unwrap_err(),
+        DataError::Conflict
+    );
     assert!(
         store
             .library(&LibraryQuery::default())
             .unwrap()
             .items
             .is_empty()
-    );
-    let (_, memory) = new_memory(&store, "处理时删除");
-    let reference = SourceRef::Version(memory.after_version.clone().unwrap());
-    let next = store
-        .start_turn(
-            &id(),
-            &conversation,
-            "引用会失效",
-            std::slice::from_ref(&reference),
-        )
-        .unwrap();
-    store
-        .trash_memory(
-            memory.memory_id.as_ref().unwrap(),
-            memory.after_version.as_ref().unwrap(),
-        )
-        .unwrap();
-    assert_eq!(
-        store
-            .finish_turn(&next.id, "不应保存为完成", &[reference])
-            .unwrap_err(),
-        DataError::Unavailable
-    );
-    assert_eq!(
-        store
-            .turn(&next.id)
-            .unwrap()
-            .assistant
-            .error_code
-            .as_deref(),
-        Some("source_unavailable")
     );
 }
 
@@ -1070,8 +1092,15 @@ fn conversation_cursor_reads_do_not_drop_old_messages() {
     let conversation = id();
     store.create_conversation(&conversation, "分页").unwrap();
     for _ in 0..55 {
-        let t = store.start_turn(&id(), &conversation, "问题", &[]).unwrap();
-        store.finish_turn(&t.id, "回答", &[]).unwrap();
+        let t = store
+            .begin_agent_input(&id(), &id(), &conversation, "问题", &[], None)
+            .unwrap();
+        store
+            .append_agent_text(&t.input_id, &t.attempt_id, "回答")
+            .unwrap();
+        store
+            .finish_agent_input(&t.input_id, &t.attempt_id, false, &[])
+            .unwrap();
     }
     let first = store.messages(&conversation, 0, 100).unwrap();
     assert_eq!(first.len(), 100);
@@ -1245,8 +1274,16 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
         &[SourceRef::Version(r.after_version.clone().unwrap())],
     );
     let edit = edit(&store, &r, "包含历史");
-    let request = conclusion(&turn, Destination::New);
-    let saved = store.save_conclusion(&request).unwrap();
+    let request = id();
+    let saved = store
+        .save_agent_text(
+            &request,
+            &turn.id,
+            SAVED_TEXT,
+            SAVED_TITLE,
+            &Destination::New,
+        )
+        .unwrap();
     store
         .trash_memory(
             r.memory_id.as_ref().unwrap(),
@@ -1270,7 +1307,18 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
         restored.conversation(&conversation).unwrap().title,
         "继续讨论"
     );
-    assert_eq!(restored.save_conclusion(&request).unwrap(), saved);
+    assert_eq!(
+        restored
+            .save_agent_text(
+                &request,
+                &turn.id,
+                SAVED_TEXT,
+                SAVED_TITLE,
+                &Destination::New
+            )
+            .unwrap(),
+        saved
+    );
     restored
         .restore_memory(r.memory_id.as_ref().unwrap())
         .unwrap();
@@ -1302,8 +1350,16 @@ fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() 
         &[SourceRef::Version(r.after_version.clone().unwrap())],
     );
     let edited = edit(&store, &r, "编辑的正文");
-    let request = conclusion(&turn, Destination::New);
-    store.save_conclusion(&request).unwrap();
+    let request = id();
+    store
+        .save_agent_text(
+            &request,
+            &turn.id,
+            SAVED_TEXT,
+            SAVED_TITLE,
+            &Destination::New,
+        )
+        .unwrap();
     let sentinel = "SECRET_CONFIG_DO_NOT_EXPORT";
     std::fs::write(store.model_config_path(), sentinel).unwrap();
     let export = dir.path().join("export");
@@ -1311,7 +1367,7 @@ fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() 
     let captures = std::fs::read_to_string(export.join("captures.md")).unwrap();
     assert!(captures.contains(&c.text));
     assert!(captures.contains("confirmed_by"));
-    assert!(captures.contains(&request.title));
+    assert!(captures.contains(SAVED_TEXT));
     let memories = std::fs::read_to_string(export.join("memories.md")).unwrap();
     assert!(memories.contains(r.after_version.as_ref().unwrap()));
     assert!(memories.contains(edited.after_version.as_ref().unwrap()));

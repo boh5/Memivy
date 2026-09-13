@@ -67,6 +67,35 @@ impl Session {
             && !self.processing
             && self.error.is_none()
             && self.parts.iter().all(|p| p.text.is_some())
+            && !self.text().trim().is_empty()
+    }
+    fn prepare_retry(&mut self) -> Result<(), &'static str> {
+        if self.parts.is_empty() {
+            return Err("voice_no_audio");
+        }
+        if self.parts.iter().all(|part| part.text.is_some()) && self.text().trim().is_empty() {
+            for part in &mut self.parts {
+                part.text = None;
+            }
+        }
+        self.error = None;
+        Ok(())
+    }
+    fn check_finished(&mut self) {
+        if self.recording || self.starting || self.processing || self.error.is_some() {
+            return;
+        }
+        let error = if self.parts.is_empty() {
+            Some("voice_no_audio")
+        } else if self.parts.iter().all(|p| p.text.is_some()) && self.text().trim().is_empty() {
+            Some("voice_no_transcription")
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            self.error = Some(error.into());
+            self.applied = false;
+        }
     }
 }
 #[derive(Serialize)]
@@ -95,7 +124,7 @@ impl From<&Session> for SessionView {
             id: s.id.clone(),
             key: s.key.clone(),
             base: s.base.clone(),
-            body: if s.text().is_empty() {
+            body: if s.text().trim().is_empty() {
                 s.base.clone()
             } else {
                 format!("{}{}{}", s.prefix, s.text(), s.suffix)
@@ -129,6 +158,7 @@ pub struct Service {
     state: Mutex<State>,
     engine: Mutex<Option<engine::Engine>>,
     stop: Mutex<Option<Arc<AtomicBool>>>,
+    recorder: Mutex<Option<std::thread::JoinHandle<()>>>,
     download: AtomicBool,
     download_cancel: AtomicBool,
 }
@@ -394,6 +424,9 @@ impl Service {
                         s.model = "failed".into();
                     }
                 }
+                if let Some(v) = s.session.as_mut() {
+                    v.check_finished();
+                }
                 if let Err(e) = self.persist(&s)
                     && let Some(v) = s.session.as_mut()
                 {
@@ -418,11 +451,83 @@ impl Service {
             }
         }
     }
-    fn listening(&self, id: &str) {
+    fn start_recording(
+        self: &Arc<Self>,
+        session: Session,
+        timeout: Duration,
+        record: impl FnOnce(Arc<Self>, String, Arc<AtomicBool>) -> Result<(), String> + Send + 'static,
+    ) -> HostResult<()> {
+        // A timed-out OS call cannot be killed safely. Keep one worker until it
+        // returns, so retries cannot accumulate blocked threads or open devices.
+        let mut worker = self.recorder.lock().unwrap();
+        if worker.as_ref().is_some_and(|worker| !worker.is_finished()) {
+            return Err("microphone_start_timeout".into());
+        }
+        let id = session.id.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.begin(session, stop.clone())?;
+        let service = self.clone();
+        let watchdog = self.clone();
+        let watched_id = id.clone();
+        let watched_stop = stop.clone();
+        let (done, finished) = std::sync::mpsc::channel();
+        *worker = Some(std::thread::spawn(move || {
+            let result = record(service.clone(), id.clone(), stop);
+            let mut s = service.state.lock().unwrap();
+            if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
+                v.starting = false;
+                v.recording = false;
+                v.level = 0.;
+                if v.error.is_none() {
+                    v.error = result.err();
+                }
+                v.check_finished();
+            }
+            let _ = service.persist(&s);
+            let _ = done.send(());
+        }));
+        std::thread::spawn(move || {
+            if finished.recv_timeout(timeout) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+                let mut s = watchdog.state.lock().unwrap();
+                if let Some(v) = s
+                    .session
+                    .as_mut()
+                    .filter(|v| v.id == watched_id && v.starting)
+                {
+                    watched_stop.store(true, Ordering::SeqCst);
+                    v.starting = false;
+                    v.error = Some("microphone_start_timeout".into());
+                    let _ = watchdog.persist(&s);
+                }
+            }
+        });
+        Ok(())
+    }
+    fn listening(&self, id: &str) -> bool {
         let mut s = self.state.lock().unwrap();
-        if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
+        if let Some(v) = s
+            .session
+            .as_mut()
+            .filter(|v| v.id == id && v.starting && v.error.is_none())
+        {
             v.starting = false;
             v.recording = true;
+            true
+        } else {
+            false
+        }
+    }
+    fn stop_session(&self, id: &str) {
+        let mut s = self.state.lock().unwrap();
+        if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
+            self.stop();
+            // No audio exists during device initialization. Restore text input
+            // immediately even when CoreAudio has not returned from its call.
+            if v.starting {
+                v.starting = false;
+                v.check_finished();
+                let _ = self.persist(&s);
+            }
         }
     }
     fn level(&self, id: &str, level: f32, n: usize) {
@@ -504,6 +609,7 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
         if v.parts.iter().any(|p| p.text.is_none()) {
             v.error = Some("voice_interrupted".into());
         }
+        v.check_finished();
     }
     let preload = setup_error.is_none() && prefs.enabled && prefs.preload;
     let shortcut = prefs.shortcut.clone();
@@ -523,6 +629,7 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
         }),
         engine: Mutex::new(None),
         stop: Mutex::new(None),
+        recorder: Mutex::new(None),
         download: AtomicBool::new(false),
         download_cancel: AtomicBool::new(false),
     });
@@ -557,10 +664,11 @@ pub fn voice_start(
     prefix: String,
     suffix: String,
 ) -> HostResult<Status> {
-    if !["capture", "question", "quick_capture", "quick_question"].contains(&key.as_str())
-        || base.len() > 100_000
-        || prefix.len() + suffix.len() > 100_000
-    {
+    let valid_target = ["input", "quick_input"].contains(&key.as_str())
+        || key
+            .strip_prefix("discussion:")
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok());
+    if !valid_target || base.len() > 100_000 || prefix.len() + suffix.len() > 100_000 {
         return Err("voice_target_invalid".into());
     }
     let registry = Registry::read(voice.0.root.parent().ok_or("voice_directory_invalid")?)?;
@@ -582,8 +690,7 @@ pub fn voice_start(
     };
     let service = voice.0.clone();
     let id = uuid::Uuid::new_v4().to_string();
-    let stop = Arc::new(AtomicBool::new(false));
-    service.begin(
+    service.start_recording(
         Session {
             binding,
             endpoint,
@@ -602,36 +709,14 @@ pub fn voice_start(
             seconds: 0.,
             level: 0.,
         },
-        stop.clone(),
+        Duration::from_secs(10),
+        audio::record,
     )?;
-    std::thread::spawn(move || {
-        let result = audio::record(service.clone(), id.clone(), stop);
-        let mut s = service.state.lock().unwrap();
-        if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
-            v.starting = false;
-            v.recording = false;
-            v.level = 0.;
-            if let Err(e) = result {
-                v.error = Some(e.to_string());
-            }
-        }
-        let _ = service.persist(&s);
-    });
     voice.0.status()
 }
 #[tauri::command]
 pub fn voice_stop(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()> {
-    if voice
-        .0
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .as_ref()
-        .is_some_and(|s| s.id == id)
-    {
-        voice.0.stop();
-    }
+    voice.0.stop_session(&id);
     Ok(())
 }
 #[tauri::command]
@@ -645,9 +730,10 @@ pub fn voice_retry(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()>
         if v.recording || v.starting || v.processing {
             return Err("voice_recording_active".into());
         }
-        let previous = v.error.take();
+        let previous = v.clone();
+        v.prepare_retry()?;
         if let Err(e) = voice.0.persist(&s) {
-            s.session.as_mut().unwrap().error = previous;
+            s.session = Some(previous);
             return Err(e);
         }
         s.error = None;
@@ -833,13 +919,14 @@ fn register_shortcut(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
                         .as_ref()
                         .is_some_and(|s| s.recording || s.starting)
                     {
+                        let id = s.session.as_ref().unwrap().id.clone();
                         drop(s);
-                        voice.0.stop();
+                        voice.0.stop_session(&id);
                         return;
                     }
                     s.shortcut_pending = true;
                 }
-                if crate::desktop::open(&handle, Some("capture".into()), true).is_ok() {
+                if crate::desktop::open(&handle, true).is_ok() {
                     let _ = handle.emit_to("capture", "voice-shortcut", ());
                 } else {
                     voice.0.state.lock().unwrap().shortcut_pending = false;
@@ -866,7 +953,7 @@ mod tests {
             endpoint: String::new(),
             label: "voice_local".into(),
             id: "fixture".into(),
-            key: "capture".into(),
+            key: "input".into(),
             base: "existing text".into(),
             prefix: "existing ".into(),
             suffix: "text".into(),
@@ -894,10 +981,141 @@ mod tests {
             }),
             engine: Mutex::new(None),
             stop: Mutex::new(None),
+            recorder: Mutex::new(None),
             download: AtomicBool::new(false),
             download_cancel: AtomicBool::new(false),
         };
         (dir, service)
+    }
+    #[test]
+    fn stalled_device_start_times_out_without_losing_text_or_spawning_more_workers() {
+        let (_dir, service) = fixture();
+        let mut session = service.state.lock().unwrap().session.take().unwrap();
+        session.starting = true;
+        session.recording = false;
+        service.state.lock().unwrap().prefs.enabled = true;
+        let service = Arc::new(service);
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (result, returned) = std::sync::mpsc::channel();
+        service
+            .start_recording(
+                session.clone(),
+                Duration::from_millis(10),
+                move |s, id, stop| {
+                    blocked.recv().unwrap();
+                    result
+                        .send((stop.load(Ordering::SeqCst), s.listening(&id)))
+                        .unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while service
+            .state
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .unwrap()
+            .starting
+        {
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        {
+            let state = service.state.lock().unwrap();
+            let v = state.session.as_ref().unwrap();
+            assert_eq!(v.error.as_deref(), Some("microphone_start_timeout"));
+            assert_eq!(v.base, "existing text");
+            assert!(!v.recording);
+        }
+        service.clear(&session.id).unwrap();
+        assert!(
+            service
+                .start_recording(session, Duration::from_secs(1), |_, _, _| panic!(
+                    "second recorder"
+                ))
+                .is_err()
+        );
+        assert!(service.state.lock().unwrap().session.is_none());
+        release.send(()).unwrap();
+        assert_eq!(
+            returned.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (true, false)
+        );
+        service
+            .recorder
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(service.state.lock().unwrap().session.is_none());
+    }
+    #[test]
+    fn stopping_device_start_is_immediate_and_late_worker_cannot_restart_it() {
+        let (_dir, service) = fixture();
+        let stop = Arc::new(AtomicBool::new(false));
+        *service.stop.lock().unwrap() = Some(stop.clone());
+        {
+            let mut state = service.state.lock().unwrap();
+            let v = state.session.as_mut().unwrap();
+            v.recording = false;
+            v.starting = true;
+        }
+        service.stop_session("other-session");
+        assert!(!stop.load(Ordering::SeqCst));
+        service.stop_session("fixture");
+        assert!(stop.load(Ordering::SeqCst));
+        assert!(!service.listening("fixture"));
+        let state = service.state.lock().unwrap();
+        let v = state.session.as_ref().unwrap();
+        assert!(!v.starting && !v.recording);
+        assert_eq!(v.error.as_deref(), Some("voice_no_audio"));
+        assert_eq!(v.base, "existing text");
+    }
+    #[test]
+    fn device_start_deadline_does_not_stop_a_live_recording() {
+        let (_dir, service) = fixture();
+        let mut session = service.state.lock().unwrap().session.take().unwrap();
+        session.recording = false;
+        session.starting = true;
+        service.state.lock().unwrap().prefs.enabled = true;
+        let service = Arc::new(service);
+        let (ready, listening) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        service
+            .start_recording(session, Duration::from_millis(10), move |s, id, stop| {
+                assert!(s.listening(&id));
+                ready.send(()).unwrap();
+                blocked.recv().unwrap();
+                assert!(!stop.load(Ordering::SeqCst));
+                Ok(())
+            })
+            .unwrap();
+        listening.recv_timeout(Duration::from_secs(2)).unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            service
+                .state
+                .lock()
+                .unwrap()
+                .session
+                .as_ref()
+                .unwrap()
+                .recording
+        );
+        release.send(()).unwrap();
+        service
+            .recorder
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
     }
     #[test]
     fn retained_recording_keeps_original_model_without_copying_credentials() {
@@ -1025,6 +1243,52 @@ mod tests {
             .begin(session, Arc::new(AtomicBool::new(false)))
             .unwrap();
         assert!(service.state.lock().unwrap().error.is_none());
+    }
+    #[test]
+    fn stopped_empty_capture_is_not_a_successful_transcription() {
+        let (_dir, service) = fixture();
+        let mut s = service.state.lock().unwrap();
+        let v = s.session.as_mut().unwrap();
+        v.recording = false;
+        v.applied = true;
+        v.check_finished();
+        assert!(!v.complete());
+        assert!(!v.applied);
+        assert_eq!(v.error.as_deref(), Some("voice_no_audio"));
+        assert_eq!(SessionView::from(&*v).body, "existing text");
+    }
+    #[test]
+    fn empty_model_result_keeps_audio_and_reports_no_transcription() {
+        let (dir, service) = fixture();
+        service.enqueue("fixture", vec![0.001; 1600]).unwrap();
+        let mut s = service.state.lock().unwrap();
+        let v = s.session.as_mut().unwrap();
+        v.recording = false;
+        v.parts[0].text = Some("  ".into());
+        v.check_finished();
+        assert!(!v.complete());
+        assert_eq!(v.error.as_deref(), Some("voice_no_transcription"));
+        assert_eq!(SessionView::from(&*v).body, "existing text");
+        assert!(dir.path().join(&v.parts[0].file).exists());
+    }
+    #[test]
+    fn empty_transcription_can_retry_after_a_save_failure() {
+        let (dir, service) = fixture();
+        service.enqueue("fixture", vec![0.001; 1600]).unwrap();
+        let mut s = service.state.lock().unwrap();
+        let v = s.session.as_mut().unwrap();
+        v.recording = false;
+        v.parts[0].text = Some("  ".into());
+        v.error = Some("voice_audio_save_failed".into());
+        v.prepare_retry().unwrap();
+        assert!(v.parts[0].text.is_none());
+        assert!(SessionView::from(&*v).processing);
+        assert_eq!(SessionView::from(&*v).body, "existing text");
+        assert!(dir.path().join(&v.parts[0].file).exists());
+        v.parts[0].text = Some("spoken ".into());
+        v.check_finished();
+        assert!(v.complete());
+        assert_eq!(SessionView::from(&*v).body, "existing spoken text");
     }
     #[test]
     fn recording_and_failed_tail_cannot_be_mistaken_for_complete() {

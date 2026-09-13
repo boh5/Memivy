@@ -5,15 +5,15 @@ const c={id:'collection-a',name:'面试准备',description:'技术问答',revisi
 
 test('collection scope follows top input into a discussion and remains visible',async t=>{
  const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
- f.overrides.navigation_collections=async()=>[c];f.overrides.discussion_ask=async()=>({...f.topic,collection_id:c.id});
+ f.overrides.navigation_collections=async()=>[c];f.overrides.discussion_submit=async()=>({...f.topic,collection_id:c.id});
  const app=f.mount(App);await f.settle();f.find(app,n=>n.type===Sidebar).props.onCollection(c.id);await f.settle();
- assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
- await f.find(f.query(app),n=>n.type===Form).props.onAsk('我还缺什么？','question-one');await f.settle();
- assert.equal(f.calls.find(v=>v.name==='discussion_ask').args.collectionId,c.id);
- assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 面试准备 中提问'));
+ assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 面试准备'));
+ await f.find(f.query(app),n=>n.type===Form).props.onSubmit({text:'我还缺什么？',id:'question-one',context:[]});await f.settle();
+ assert.equal(f.calls.find(v=>v.name==='discussion_submit').args.collectionId,c.id);
+ assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 面试准备'));
  f.nodes(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).find(n=>n.props['aria-label']==='改为从全部记忆提问').props.onClick();await f.settle();
- await f.find(f.query(app),n=>n.type===Form).props.onAsk('全库提问','question-two');await f.settle();
- assert.equal(f.calls.filter(v=>v.name==='discussion_ask')[1].args.collectionId,null);
+ await f.find(f.query(app),n=>n.type===Form).props.onSubmit({text:'全库提问',id:'question-two',context:[]});await f.settle();
+ assert.equal(f.calls.filter(v=>v.name==='discussion_submit')[1].args.collectionId,null);
 });
 
 test('review retrieves three older memories at a time and replaces the batch',async t=>{
@@ -45,4 +45,29 @@ test('collection create failure keeps edited name and description for retry',asy
  f.find(view,n=>n.type==='button'&&f.text(n)==='创建专题').props.onClick();await f.settle();
  assert.equal(saved,false);assert.equal(f.find(view,n=>n.props['aria-label']==='专题名称').props.value,'我的专题');
  assert.equal(f.find(view,n=>n.props['aria-label']==='专题说明').props.value,'要保留的说明');
+});
+test('workspace collection actions open their dialogs and submit through the existing commands',async t=>{
+ const f=workspaceFixture(t);f.overrides.navigation_collections=async()=>[c];f.overrides.navigation_save_collection=async()=>{};f.overrides.navigation_archive_collection=async()=>{};f.overrides.navigation_suggest=async()=>[];
+ const App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Editor=f.load('src/workspace/CollectionEditor.tsx').default,Suggestions=f.load('src/workspace/CollectionSuggestions.tsx').default;
+ const app=f.mount(App);await f.settle();
+ const sidebarNode=f.find(app,n=>n.type===Sidebar),sidebar=f.mount(Sidebar,sidebarNode.props);await f.settle();
+ f.find(sidebar,n=>n.type==='button'&&n.props['aria-label']==='新建专题').props.onClick();await f.settle();
+ let editorNode=f.find(app,n=>n.type===Editor),editor=f.mount(Editor,editorNode.props);await f.settle();
+ f.find(editor,n=>n.props['aria-label']==='专题名称').props.onChange({target:{value:'新建验收专题'}});await f.settle();
+ f.find(editor,n=>n.type==='button'&&f.text(n)==='创建专题').props.onClick();await f.settle();
+ assert.equal(f.calls.find(call=>call.name==='navigation_save_collection').args.name,'新建验收专题');assert(!f.nodes(app.tree).some(n=>n.type===Editor));
+ sidebarNode.props.onCollection(c.id);await f.settle();
+ f.find(app,n=>n.type==='button'&&f.text(n)==='编辑专题').props.onClick();await f.settle();
+ editorNode=f.find(app,n=>n.type===Editor);assert.equal(editorNode.props.value.id,c.id);editor=f.mount(Editor,editorNode.props);await f.settle();
+ f.find(editor,n=>n.props['aria-label']==='专题名称').props.onChange({target:{value:'修改后的专题'}});await f.settle();
+ f.find(editor,n=>n.type==='button'&&f.text(n)==='保存').props.onClick();await f.settle();
+ assert.equal(f.calls.filter(call=>call.name==='navigation_save_collection')[1].args.expected,c.revision);
+ f.find(app,n=>n.type==='button'&&f.text(n)==='AI 推荐').props.onClick();await f.settle();
+ const suggestionNode=f.find(app,n=>n.type===Suggestions);const suggestions=f.mount(Suggestions,suggestionNode.props);await f.settle();
+ assert.equal(f.calls.find(call=>call.name==='navigation_suggest').args.collection,c.id);suggestionNode.props.onClose();await f.settle();f.unmount(suggestions);
+ f.find(app,n=>n.type==='button'&&f.text(n)==='移除专题').props.onClick();await f.settle();
+ const dialog=f.find(app,n=>n.props?.title==='移除这个专题？');assert(f.text(dialog).includes(c.name));
+ f.nodes(dialog).find(n=>n.type==='button'&&f.text(n)==='移除专题').props.onClick();await f.settle();
+ assert.equal(f.calls.find(call=>call.name==='navigation_archive_collection').args.id,c.id);
+ assert(!f.nodes(app.tree).some(n=>n.props?.title==='移除这个专题？'));
 });

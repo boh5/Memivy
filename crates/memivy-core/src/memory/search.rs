@@ -106,17 +106,6 @@ impl MemoryStore {
     }
 }
 
-pub(super) fn current_source(db: &Connection, source: &SourceRef) -> Result<bool> {
-    let SourceRef::Version(version) = source else {
-        return Ok(false);
-    };
-    Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM memories WHERE current_version_id=? AND state='active')",
-        [version],
-        |r| r.get(0),
-    )?)
-}
-
 fn bind(values: &mut Vec<Value>, value: impl Into<Value>) -> String {
     values.push(value.into());
     format!("?{}", values.len())

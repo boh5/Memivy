@@ -16,11 +16,10 @@ import WorkspaceQuery from "./WorkspaceQuery";
 import WorkspaceSidebar, { type WorkspacePage } from "./WorkspaceSidebar";
 import SettingsPanel from "./Settings";
 import Discussion from "./Discussion";
-import CaptureForm from "./CaptureForm";
+import type { InputSubmission } from "./CaptureForm";
 import CollectionEditor from "./CollectionEditor";
 import CollectionSuggestions from "./CollectionSuggestions";
 import { Modal, MoreMenu } from "./components";
-import CaptureDialog from "./CaptureDialog";
 import LanguageRecovery from "./LanguageRecovery";
 import Toast, { notify } from "./Toast";
 import { useDesktop, useWindowLifecycle, type MainRoute } from "./desktopApi";
@@ -30,7 +29,7 @@ import "./desktop.css";
 import "./navigation.css";
 import "./topbar.css";
 
-type Handoff = { generation: number; target: "capture" | "query" | "topic" | "view" };
+type Handoff = { generation: number; target: "query" | "topic" | "view" };
 
 export default function App() {
   const { t } = useTranslation("workspace");
@@ -52,13 +51,12 @@ export default function App() {
   const topicsRevision = useResourceVersion([{domain:"discussion"},{domain:"collection"}]);
   const settingsRevision = useResourceVersion([{domain:"settings"}]);
   useResourceBridge(error => setWindowError(errorText(error)));
-  const [captureOpen, setCaptureOpen] = useState(false), [captureQuick, setCaptureQuick] = useState(false);
   const [recallQuick, setRecallQuick] = useState(false), [recallFocus, setRecallFocus] = useState(0);
   const [recallOpen, setRecallOpen] = useState(false);
   const recallTrigger = useRef<HTMLButtonElement>(null);
   const closeRecall = useCallback(() => setRecallOpen(false), []);
   const openRecall = useCallback(() => { setRecallOpen(true); setRecallFocus(v => v + 1); }, []);
-  const [captureFocus, setCaptureFocus] = useState(0), [topicFocus, setTopicFocus] = useState(0);
+  const [topicFocus, setTopicFocus] = useState(0);
 
   const [pendingReceipt, setPendingReceipt] = useState<{ key: string; receipt: Receipt } | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null), handoffRef = useRef<Handoff | null>(null);
@@ -107,7 +105,14 @@ export default function App() {
   }, [navigationRevision]);
   useEffect(() => {
     let alive = true;
-    void call<Topic[]>("library_topics").then(t => { if (alive) setTopics(t); })
+    void call<Topic[]>("library_topics").then(t => {
+      if (!alive) return;
+      setTopics(t);
+      setTopic(current => {
+        const updated = t.find(item => item.id === current?.id);
+        return current && updated && current.title !== updated.title ? { ...current, title: updated.title } : current;
+      });
+    })
       .catch(e => { if (alive) setWindowError(errorText(e)); });
     return () => { alive = false; };
   }, [topicsRevision]);
@@ -124,7 +129,7 @@ export default function App() {
         const receipt = e.payload;
         if (receipt.status === "applied" && receipt.action === "merge" && receipt.memory_id) {
           const key: Key = {kind:"memory",id:receipt.memory_id};
-          void call<Detail>("library_detail",{key}).then(d => notify(message("workspace", "app.mergedInto", { title: d.title }), message("workspace", "app.view"), () => { setSelected(key); setPage("library"); setCollectionId(null); })).catch(() => {});
+          void call<Detail>("library_detail",{key}).then(d => notify(message("workspace", "app.mergedInto", { title: d.title }), message("workspace", "app.view"), () => openRecord(key))).catch(() => {});
         }
       }),
       listen("desktop-settings", () => setSettingsOpen(true)),
@@ -139,11 +144,9 @@ export default function App() {
           let target: Handoff["target"];
 
           if (r.settings) { setSettingsInitialPage("ai"); setSettingsOpen(true); target = "view"; }
-          else if (r.record) { setSelected(r.record); setPage("library"); target = "view"; }
-          else if (r.mode === "ask" && r.topic) {
-            setTopic(r.topic); setPage("topic"); setTopicFocus(v => v + 1); target = "topic";
-          } else if (r.mode === "capture") {
-            setRecallOpen(false); setCaptureQuick(r.quick); setCaptureOpen(true); setCaptureFocus(v => v + 1); target = "capture";
+          else if (r.record) { openRecord(r.record); target = "view"; }
+          else if (r.topic) {
+            setRecallQuick(r.quick); setTopic(r.topic); setPage("topic"); setTopicFocus(v => v + 1); target = "topic";
           } else {
             // A new question from the desktop has no collection scope. Existing
             // scoped discussions take the topic branch above.
@@ -167,44 +170,37 @@ export default function App() {
       return () => cancelAnimationFrame(frame);
     }
   }, [handoff, handoffReady]);
-  const newCapture = useCallback(() => {
-    // The modal must return to a visible control, not the textarea we hide.
-    if (recallOpen) recallTrigger.current?.focus();
-    setRecallOpen(false); setCaptureQuick(false); setCaptureOpen(true); setCaptureFocus(v => v + 1);
-  }, [recallOpen]);
+  const newDiscussion = useCallback(() => {
+    void finishVoiceInputs().then(() => flushDrafts()).then(async () => {
+      const next = await call<Topic>("discussion_open", { id: uid(), title: t("input.newDiscussion"), context: [], collectionId: page === "collection" ? collectionId : null });
+      setRecallOpen(false); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1);
+    }).catch(e => setWindowError(errorText(e)));
+  }, [page, collectionId, t]);
   useEffect(() => {
     const keyboard = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229 || e.repeat || document.querySelector("dialog[open]")) return;
       if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() === "k") { e.preventDefault(); openRecall(); }
-      if (e.key.toLowerCase() === "n") { e.preventDefault(); newCapture(); }
+      if (e.key.toLowerCase() === "n") { e.preventDefault(); newDiscussion(); }
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
-  }, [newCapture, openRecall]);
-  async function ask(question: string, id: string) {
-    if (!configured) { recallTrigger.current?.focus(); setRecallOpen(false); setSettingsInitialPage("ai"); setSettingsOpen(true); throw { code: "question_model_required" }; }
-    const t = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [], collectionId: queryScope });
-    if (recallQuick) await desktop.update({ topic_id: t.id });
+  }, [newDiscussion, openRecall]);
+  async function submit(input: InputSubmission) {
+    const currentTopic = page === "topic" ? topic?.id : undefined;
+    const next = await call<Topic>("discussion_submit", { ...input, topicId: currentTopic, collectionId: queryScope, quick: recallQuick });
+    if (recallQuick) await desktop.update({ topic_id: next.id });
     if (pageRef.current === "trash") setSelected(null);
-    setRecallOpen(false); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); refresh();
+    setRecallOpen(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); refresh();
   }
   async function discuss(detail: Detail, related: Source[] = []) {
     const source: Source = detail.current ? { kind: "version", id: detail.current.id } : { kind: "capture", id: detail.key.id };
     const t = await call<Topic>("discussion_open", { id: uid(), title: detail.title, context: [source, ...related], collectionId: page === "collection" ? collectionId : null });
-    setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); refresh();
+    setRecallQuick(false); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); refresh();
   }
-  async function openCaptured(key: Key) {
-    try {
-      const jobs = await call<Array<{receipt:Receipt|null}>>("organization_jobs",{key});
-      const receipt = jobs[0]?.receipt;
-      if(receipt?.status === "applied" && receipt.memory_id) { openRecord({kind:"memory",id:receipt.memory_id}); return; }
-    } catch { /* The saved original remains a valid fallback. */ }
-    openRecord(key);
-  }
-  function openRecord(key: Key) { setSelected(key); setPage("library"); setCollectionId(null); }
-  function showLibrary() { if (page === "trash") setSelected(null); setPage("library"); setCollectionId(null); }
-  function showCollection(id: string) { setCollectionId(id); setSelected(null); setPage("collection"); }
+  function openRecord(key: Key) { setRecallQuick(false); setSelected(key); setPage("library"); setCollectionId(null); }
+  function showLibrary() { setRecallQuick(false); if (page === "trash") setSelected(null); setPage("library"); setCollectionId(null); }
+  function showCollection(id: string) { setRecallQuick(false); setCollectionId(id); setSelected(null); setPage("collection"); }
   async function archiveCollection(value: Collection, undo = false) {
     if (collectionLock.current) return;
     collectionLock.current = true; setCollectionBusy(true); setWindowError("");
@@ -212,7 +208,7 @@ export default function App() {
       await call("navigation_archive_collection", { id: value.id, archived: !undo, expected: value.revision });
       setArchiveConfirm(null);
       notify(undo ? message("workspace", "app.restoredCollection") : message("workspace", "app.removedCollectionNotice"), undo ? undefined : message("workspace", "collection.undo"), undo ? undefined : () => void archiveCollection({ ...value, revision: value.revision + 1 }, true), 8000);
-      if (undo) showCollection(value.id); else { setPage("library"); setCollectionId(null); setSelected(null); }
+      if (undo) showCollection(value.id); else { setRecallQuick(false); setPage("library"); setCollectionId(null); setSelected(null); }
       refresh();
     } catch (e) { setWindowError(errorText(e)); }
     finally { collectionLock.current = false; setCollectionBusy(false); }
@@ -221,7 +217,7 @@ export default function App() {
     try {
       await flushDrafts();
       if (page === "topic" && topic) await desktop.update({ topic_id: topic.id });
-      await call("desktop_open", { mode: page === "topic" ? "ask" : undefined });
+      await call("desktop_open");
     } catch (e) { setWindowError(errorText(e)); }
   }
   const collection = collections.find(c => c.id === collectionId);
@@ -231,18 +227,18 @@ export default function App() {
   const reading = page === "topic" || !!selected;
   return <div className="app-shell formal-app recall-workspace">
     <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
-      scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onCapture:newCapture,
+      scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onNewDiscussion:newDiscussion,
       scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>{t("app.scopedQuestion", { scope: scopeName })}</span><button aria-label={t("app.allMemoriesAria")} onClick={showLibrary}>{t("app.allMemories")}</button></div>,
-    }} form={{ quick:recallQuick, mode:"ask", presentation:"query", focus:recallOpen ? recallFocus : 0,
+    }} form={{ quick:recallQuick, sourceApp:recallQuick ? desktop.state?.source_app : "Memivy", draftKey:page === "topic" && topic ? `discussion:${topic.id}` : undefined, presentation:"query", focus:recallOpen ? recallFocus : 0,
       onReady:handoff?.target === "query" ? handoffReady : undefined,
-      onMode:() => {}, onEdit:() => {}, onSaved:() => {}, onAsk:ask,
+      configured, onSettings:() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}, onSubmit:submit,
     }} />
     <WorkspaceSidebar page={page} topic={topic} topics={topics} configured={configured}
       selected={selected} pins={pins} collections={collections} collectionId={collectionId}
-      onReview={() => { setSelected(null); setPage("review"); setCollectionId(null); }} onPin={openRecord}
+      onReview={() => { setRecallQuick(false); setSelected(null); setPage("review"); setCollectionId(null); }} onPin={openRecord}
       onCollection={showCollection} onNewCollection={() => setCollectionEditor("new")}
-      onLibrary={showLibrary} onTrash={() => { setSelected(null); setPage("trash"); }}
-      onTopic={t => { if (page === "trash") setSelected(null); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); }}
+      onLibrary={showLibrary} onTrash={() => { setRecallQuick(false); setSelected(null); setPage("trash"); }}
+      onTopic={t => { setRecallQuick(false); if (page === "trash") setSelected(null); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); }}
       onDesktop={() => void openDesktop()} onSettings={() => setSettingsOpen(true)} />
     <main className="main-workspace">
       {!native && <div className="preview-banner">{t("app.previewBanner")}</div>}
@@ -261,29 +257,35 @@ export default function App() {
       <div className={`library-layout ${reading ? "has-selection" : ""}`}>
         <MemoryList key={page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library"}
           review={page === "review"} collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
-          selected={selected}  onSelect={key => { setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
-          onCapture={newCapture} onRefresh={refresh} />
+          selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
+          onCapture={newDiscussion} onRefresh={refresh} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
           <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : t("app.topicUnscoped")}</span></div>
-          <Discussion key={topic.id} topic={topic} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
+          <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
              configured={configured} onSettings={() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}
           collectionId={page === "collection" ? collectionId || undefined : undefined}
           initialReceipt={pendingReceipt?.key === keyOf(selected) ? pendingReceipt.receipt : null}
-           query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onBack={() => setSelected(null)} />
+           query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onOpenDiscussion={async id => {
+             try { const next = await call<Topic>("discussion_topic", { id }); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); }
+             catch (e) { setWindowError(errorText(e)); }
+           }} onBack={() => setSelected(null)} />
           : <section className="memory-detail-pane unselected">
             <Empty title={page === "trash" ? t("app.emptyTrashTitle") : page === "review" ? t("app.emptyReviewTitle") : page === "collection" ? t("app.emptyCollectionTitle") : t("app.emptyLibraryTitle")}
               text={page === "trash" ? t("app.emptyTrashText") : t("app.emptyDefaultText")} />
           </section>}
       </div>
     </main>
-    {captureOpen && <CaptureDialog key={`capture:${captureQuick}`} quick={captureQuick} sourceApp={desktop.state?.source_app}
-      focus={captureFocus} onReady={handoff?.target === "capture" ? handoffReady : () => {}}
-      onSaved={key => { notify(message("workspace", "app.captureSaved"), message("workspace", "app.view"), () => void openCaptured(key)); setCaptureOpen(false); refresh(); }} onClose={() => setCaptureOpen(false)} />}
-    {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor} onClose={() => setCollectionEditor(null)} onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} />}
-    {suggestions && <CollectionSuggestions collection={suggestions} onClose={() => setSuggestions(null)} onChanged={refresh} />}
-    {archiveConfirm && <Modal title={t("app.removeCollectionTitle")} onClose={() => { if (!collectionLock.current) setArchiveConfirm(null); }}><p>{t("app.removeCollectionBody", { name: archiveConfirm.name })}</p><ErrorNotice text={windowError} /><div className="action-row"><button className="outline-button" disabled={collectionBusy} onClick={() => setArchiveConfirm(null)}>{t("app.cancel")}</button><button className="send-button" disabled={collectionBusy} onClick={() => void archiveCollection(archiveConfirm)}>{t("app.removeCollection")}</button></div></Modal>}
     {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
+    {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor}
+      onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} onClose={() => setCollectionEditor(null)} />}
+    {suggestions && <CollectionSuggestions collection={suggestions} onChanged={refresh} onClose={() => setSuggestions(null)} />}
+    {archiveConfirm && <Modal title={t("app.removeCollectionTitle")} onClose={() => { if (!collectionBusy) setArchiveConfirm(null); }}>
+      <p>{t("app.removeCollectionBody", { name: archiveConfirm.name })}</p>
+      <ErrorNotice text={windowError} />
+      <div className="action-row"><button className="outline-button" disabled={collectionBusy} onClick={() => setArchiveConfirm(null)}>{t("collection.cancel")}</button>
+        <button className="send-button" disabled={collectionBusy} onClick={() => void archiveCollection(archiveConfirm)}>{t("app.removeCollection")}</button></div>
+    </Modal>}
   </div>;
 }

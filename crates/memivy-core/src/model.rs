@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod stream;
 pub mod tools;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -64,9 +65,9 @@ pub enum ProbeError {
     Status(u16),
     #[error("模型响应超过此任务的安全大小限制")]
     TooLarge,
-    #[error("模型响应不符合约定的完整 JSON")]
+    #[error("模型响应不符合约定的完整协议")]
     InvalidResponse,
-    #[error("模型输出被截断，尚未保存；请提高模型输出上限或使用支持更长输出的模型")]
+    #[error("模型输出被截断；请提高模型输出上限或使用支持更长输出的模型")]
     Truncated,
     #[error("模型不支持所需工具能力，请测试连接或更换模型")]
     ToolsUnsupported,
@@ -143,7 +144,7 @@ fn save_private_json(path: &Path, value: &impl Serialize) -> Result<(), ProbeErr
     Ok(())
 }
 
-/// Two bounded calls per question: query planning, then a structured answer.
+/// Structured output for bounded tasks such as cleanup and context summaries.
 pub async fn complete(
     config: &ModelConfig,
     messages: serde_json::Value,
@@ -173,48 +174,6 @@ pub async fn complete_with_policy(
     .map_err(|_| ProbeError::InvalidResponse)
 }
 
-/// A single proposed call; only the domain layer may validate and execute it.
-pub struct FunctionCall {
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-pub async fn call_function(
-    config: &ModelConfig,
-    messages: serde_json::Value,
-    tools: serde_json::Value,
-) -> Result<FunctionCall, ProbeError> {
-    let choice = request(
-        config,
-        messages,
-        json!({
-            "tools":tools,"tool_choice":"required","parallel_tool_calls":false
-        }),
-        OutputPolicy::Structured,
-    )
-    .await?;
-    if choice["finish_reason"] != "tool_calls" {
-        return Err(ProbeError::InvalidResponse);
-    }
-    let calls = choice["message"]["tool_calls"]
-        .as_array()
-        .ok_or(ProbeError::InvalidResponse)?;
-    if calls.len() != 1 || calls[0]["type"] != "function" {
-        return Err(ProbeError::InvalidResponse);
-    }
-    let f = &calls[0]["function"];
-    Ok(FunctionCall {
-        name: f["name"]
-            .as_str()
-            .ok_or(ProbeError::InvalidResponse)?
-            .into(),
-        arguments: serde_json::from_str(
-            f["arguments"].as_str().ok_or(ProbeError::InvalidResponse)?,
-        )
-        .map_err(|_| ProbeError::InvalidResponse)?,
-    })
-}
-
 async fn request(
     config: &ModelConfig,
     messages: serde_json::Value,
@@ -222,20 +181,11 @@ async fn request(
     policy: OutputPolicy,
 ) -> Result<serde_json::Value, ProbeError> {
     let (url, _) = config.endpoint()?;
-    // Reuse the HTTP connection pool. Credentials remain per request, never defaults.
-    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, reqwest::Error>> =
-        std::sync::OnceLock::new();
-    let client = CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(Duration::from_secs(90))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-        })
-        .as_ref()
-        .map_err(|_| ProbeError::Network)?;
     let body = request_body(config, messages, options);
-    let mut request = client.post(url).timeout(policy.timeout()).json(&body);
+    let mut request = http_client()?
+        .post(url)
+        .timeout(policy.timeout())
+        .json(&body);
     if let Some(key) = config.api_key.as_ref().filter(|s| !s.is_empty()) {
         request = request.bearer_auth(key);
     }
@@ -269,6 +219,21 @@ async fn request(
         return Err(ProbeError::InvalidResponse);
     }
     Ok(choice)
+}
+
+fn http_client() -> Result<&'static reqwest::Client, ProbeError> {
+    // Reuse the HTTP connection pool. Credentials remain per request, never defaults.
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, reqwest::Error>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(90))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+        })
+        .as_ref()
+        .map_err(|_| ProbeError::Network)
 }
 
 fn request_body(

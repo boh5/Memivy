@@ -1,307 +1,408 @@
-//! Current-memory evidence for Q&A and ingestion. No mutation tools or archives.
+//! Memory tools shared by discussion and explicit-capture maintenance.
+//! This module reads facts; the owning execution applies writes transactionally.
 use super::{db::*, records::*, *};
-use crate::model::{self, FunctionCall, ProbeError, tools};
-use serde::Deserialize;
+use crate::model::{self, ProbeError, tools};
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Clone)]
-pub(super) struct SeenMemory {
-    pub memory: String,
-    pub source: SourceRef,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryWriteArgs {
+    pub destination: Destination,
+    pub title: String,
+    pub parts: Vec<MemoryWritePart>,
 }
-#[derive(Clone)]
-pub(super) struct AgentEvidence {
-    pub store: MemoryStore,
-    pub scope: SearchScope,
-    pub known: Vec<SeenMemory>,
-    pub spans: Vec<Evidence>,
-    pub turn: Option<String>,
-    pub input: Option<(String, String)>,
-    pub char_budget: usize,
-    attempted: std::collections::HashSet<String>,
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryWritePart {
+    pub text: String,
+    pub sources: Vec<MemorySourceQuote>,
 }
-impl AgentEvidence {
-    pub fn new(store: MemoryStore, scope: SearchScope, turn: Option<String>) -> Self {
-        Self {
-            store,
-            scope,
-            known: vec![],
-            spans: vec![],
-            turn,
-            input: None,
-            char_budget: 12_000,
-            attempted: Default::default(),
-        }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemorySourceQuote {
+    pub source_id: String,
+    pub quote: String,
+}
+
+/// Validate item-level attribution inside the owner's transaction. The owner
+/// resolves its allowed raw sources; references to the target version inherit
+/// that version's existing captures without archiving an AI-written body.
+pub(super) fn resolve_memory_write(
+    write: &MemoryWriteArgs,
+    previous: Option<&Version>,
+    mut source_text: impl FnMut(&str) -> Result<String>,
+) -> Result<(String, Vec<String>)> {
+    valid_text(&write.title, 200)?;
+    if write.parts.is_empty() || write.parts.len() > 64 {
+        return Err(DataError::Invalid);
     }
-    fn active(&self) -> Result<()> {
-        if let Some(turn) = &self.turn
-            && self.store.turn(turn)?.assistant.status != "processing"
-        {
-            return Err(DataError::Conflict);
+    let mut body = String::new();
+    let mut sources = vec![];
+    let mut inherited_through = 0;
+    for part in &write.parts {
+        if part.sources.len() > 16 || part.text.len() > 128 * 1024 - body.len() {
+            return Err(DataError::Invalid);
         }
-        if let Some((memory, version)) = &self.input
-            && self.store.memory(memory)?.current.id != *version
-        {
-            return Err(DataError::Conflict);
-        }
-        if let Some(collection) = &self.scope.collection_id {
-            super::navigation::active_collection(&self.store.connection()?, collection)?;
-        }
-        Ok(())
-    }
-    pub fn seed(&mut self, memory: String, evidence: Evidence) -> Result<Option<Value>> {
-        self.active()?;
-        let db = self.store.connection()?;
-        if !super::search::current_source(&db, &evidence.source)? {
-            return Err(DataError::Unavailable);
-        }
-        if let Some(collection) = &self.scope.collection_id
-            && !super::navigation::source_in_collection(&db, collection, &evidence.source)?
-        {
-            return Err(DataError::Unavailable);
-        }
-        let is_new = !self.known.iter().any(|s| s.memory == memory);
-        let index = if let Some(index) = self.known.iter().position(|s| s.memory == memory) {
-            if self.known[index].source != evidence.source {
-                return Err(DataError::Unavailable);
-            }
-            index
-        } else {
-            if self.known.len() == 8 {
-                return Ok(None);
-            }
-            self.known.len()
-        };
-        let mut ranges: Vec<_> = self
-            .spans
-            .iter()
-            .filter(|e| e.source == evidence.source)
-            .map(|e| (e.start, e.start + e.text.chars().count()))
-            .collect();
-        ranges.push((
-            evidence.start,
-            evidence.start + evidence.text.chars().count(),
-        ));
-        ranges.sort_unstable();
-        let mut merged: Vec<(usize, usize)> = vec![];
-        for (start, end) in ranges {
-            if let Some(last) = merged.last_mut()
-                && start <= last.1
-            {
-                last.1 = last.1.max(end);
+        body.push_str(&part.text);
+        let text = part.text.trim();
+        if part.sources.is_empty() {
+            if text.is_empty() {
                 continue;
             }
-            merged.push((start, end));
+            let old = &previous.ok_or(DataError::SourceAttribution)?.body;
+            let matched = old[inherited_through..]
+                .match_indices(text)
+                .map(|(start, _)| inherited_through + start)
+                .find(|&start| {
+                    let end = start + text.len();
+                    let line_start = old[..start].rfind('\n').map_or(0, |n| n + 1);
+                    let line_end = old[end..].find('\n').map_or(old.len(), |n| end + n);
+                    old[line_start..start].trim().is_empty() && old[end..line_end].trim().is_empty()
+                });
+            inherited_through = matched.ok_or(DataError::SourceAttribution)? + text.len();
+            continue;
         }
-        let old = self
-            .spans
-            .iter()
-            .filter(|e| e.source != evidence.source)
-            .map(|e| e.text.chars().count())
-            .sum::<usize>();
-        if old + merged.iter().map(|(a, b)| b - a).sum::<usize>() > self.char_budget {
-            return Ok(None);
+        // A source cannot be attached only to a separator to satisfy the raw
+        // source requirement without supporting any newly written content.
+        if text.is_empty() {
+            return Err(DataError::SourceAttribution);
         }
-        let mut rebuilt = vec![];
-        for (start, end) in merged {
-            rebuilt.push(resolve_excerpt(
-                &db,
-                &evidence.source,
-                end - start,
-                &[],
-                Some(start),
-            )?);
-        }
-        let bytes = self
-            .spans
-            .iter()
-            .filter(|e| e.source != evidence.source)
-            .map(|e| e.text.len())
-            .sum::<usize>()
-            + rebuilt.iter().map(|e| e.text.len()).sum::<usize>();
-        if bytes > 48 * 1024 {
-            return Ok(None);
-        }
-        if is_new {
-            self.known.push(SeenMemory {
-                memory,
-                source: evidence.source.clone(),
-            });
-        }
-        self.spans.retain(|e| e.source != evidence.source);
-        self.spans.extend(rebuilt);
-        let next = evidence.start + evidence.text.chars().count();
-        let version = self.store.memory(&self.known[index].memory)?.current;
-        if SourceRef::Version(version.id) != evidence.source {
-            return Err(DataError::Unavailable);
-        }
-        Ok(Some(
-            json!({"id":format!("M{}",index+1),"memory_id":self.known[index].memory,"source":evidence.source,"title":evidence.title,"text":evidence.text,"start_char":evidence.start,"next_start":if next<version.body.chars().count(){Some(next)}else{None},"truncated":evidence.truncated,"recorded_at_ms":evidence.recorded_at}),
-        ))
-    }
-    pub fn source(&self, label: &str) -> Result<&SeenMemory> {
-        let index = label
-            .strip_prefix('M')
-            .and_then(|s| s.parse::<usize>().ok())
-            .and_then(|i| i.checked_sub(1))
-            .ok_or(DataError::Invalid)?;
-        self.known.get(index).ok_or(DataError::Invalid)
-    }
-    pub fn validate(&self) -> Result<()> {
-        self.active()?;
-        let db = self.store.connection()?;
-        for e in &self.spans {
-            if !super::search::current_source(&db, &e.source)? {
-                return Err(DataError::Unavailable);
+        for source in &part.sources {
+            valid_id(&source.source_id)?;
+            if source.quote.len() > 3000 {
+                return Err(DataError::Invalid);
             }
-            if let Some(collection) = &self.scope.collection_id
-                && !super::navigation::source_in_collection(&db, collection, &e.source)?
-            {
-                return Err(DataError::Unavailable);
+            if source.quote.trim().is_empty() {
+                return Err(DataError::SourceAttribution);
             }
-        }
-        Ok(())
-    }
-    fn execute(&mut self, call: FunctionCall) -> Result<(Value, bool)> {
-        self.active()?;
-        let new_search = call.name == "search_memories"
-            && self
-                .attempted
-                .insert(serde_json::to_string(&call.arguments).map_err(|_| DataError::Invalid)?);
-        let mut before: Vec<_> = self
-            .spans
-            .iter()
-            .map(|e| {
-                (
-                    e.source.parts().1.to_owned(),
-                    e.start,
-                    e.text.chars().count(),
-                )
-            })
-            .collect();
-        before.sort();
-        let result = match call.name.as_str() {
-            "search_memories" => {
-                let args: SearchArgs =
-                    serde_json::from_value(call.arguments).map_err(|_| DataError::Invalid)?;
-                if args.limit == 0 || args.limit > 8 {
+            if let Some(old) = previous.filter(|old| old.id == source.source_id) {
+                if !old.body.contains(&source.quote) {
+                    return Err(DataError::SourceAttribution);
+                }
+                continue;
+            }
+            if !source_text(&source.source_id)?.contains(&source.quote) {
+                return Err(DataError::SourceAttribution);
+            }
+            if !sources.contains(&source.source_id) {
+                if sources.len() == 16 {
                     return Err(DataError::Invalid);
                 }
-                let found = self.store.search(&SearchRequest {
-                    query: args.query,
-                    variants: args.variants,
-                    scope: self.scope.clone(),
-                    limit: args.limit,
-                    excerpt_chars: 1200,
-                    ..Default::default()
-                })?;
-                let mut items = vec![];
-                let mut budget = false;
-                for hit in found.items {
-                    match self.seed(hit.memory_id, hit.evidence)? {
-                        Some(v) => items.push(v),
-                        None => {
-                            budget = true;
-                            break;
-                        }
-                    }
-                }
-                json!({"items":items,"truncated":found.truncated||found.has_more||budget,"budget_reached":budget,"mode":found.mode,"degraded_reason":found.degraded_reason})
+                sources.push(source.source_id.clone());
             }
-            "read_memory" => {
-                let args: ReadArgs =
-                    serde_json::from_value(call.arguments).map_err(|_| DataError::Invalid)?;
-                if args.max_chars == 0 || args.max_chars > 3000 {
-                    return Err(DataError::Invalid);
-                }
-                let seen = self.source(&args.id)?;
-                let memory = self.store.memory(&seen.memory)?;
-                if seen.source != SourceRef::Version(memory.current.id) {
-                    return Err(DataError::Unavailable);
-                }
-                if args.start_char >= memory.current.body.chars().count() {
-                    return Ok((json!({"end_of_memory":true}), false));
-                }
-                let e = resolve_excerpt(
-                    &self.store.connection()?,
-                    &seen.source,
-                    args.max_chars,
-                    &[],
-                    Some(args.start_char),
-                )?;
-                self.seed(seen.memory.clone(), e)?
-                    .unwrap_or_else(|| json!({"budget_reached":true}))
-            }
-            _ => return Err(DataError::Invalid),
-        };
-        let mut after: Vec<_> = self
-            .spans
-            .iter()
-            .map(|e| {
-                (
-                    e.source.parts().1.to_owned(),
-                    e.start,
-                    e.text.chars().count(),
-                )
-            })
-            .collect();
-        after.sort();
-        Ok((result, before != after || new_search))
+        }
     }
+    valid_text(&body, 128 * 1024)?;
+    if sources.is_empty() {
+        return Err(DataError::SourceAttribution);
+    }
+    Ok((body, sources))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchArgs {
     query: String,
-    #[serde(default)]
     variants: Vec<String>,
-    #[serde(default = "search_limit")]
     limit: usize,
+    offset: usize,
 }
-fn search_limit() -> usize {
-    4
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListArgs {
+    collection_id: Option<String>,
+    offset: usize,
+    limit: usize,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadArgs {
-    id: String,
+    memory_id: String,
+    view: String,
+    source_id: Option<String>,
     start_char: usize,
-    #[serde(default = "read_limit")]
     max_chars: usize,
 }
-fn read_limit() -> usize {
-    1800
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversationArgs {
+    conversation_id: String,
+    after_seq: i64,
+    limit: usize,
+    manual_saves_offset: Option<usize>,
 }
-pub(super) fn evidence_tools() -> Vec<Value> {
-    vec![
-        tools::function(
-            "search_memories",
-            "Search current memories within the fixed task scope. query is the natural-language question. Always supply up to four short literal variants, including the exact project/person/topic name in its original language. Each variant is an alternative search; words within one variant must all match. For a mixed-language question about 木桥 use variants [木桥], not a translation or a long sentence. If no results, retry with fewer terms or a different exact entity. An empty result does not prove the memory is absent.",
-            json!({"query":{"type":"string"},"variants":{"type":"array","items":{"type":"string"},"maxItems":4},"limit":{"type":"integer","minimum":1,"maximum":8}}),
-        ),
-        tools::function(
-            "read_memory",
-            "Read another current-body window of an M reference already supplied. Continue at next_start; archives are unavailable.",
-            json!({"id":{"type":"string"},"start_char":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":3000}}),
-        ),
-    ]
+
+fn args<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T> {
+    serde_json::from_value(value.clone()).map_err(|_| DataError::Invalid)
 }
-pub(super) async fn handle(
-    mut context: AgentEvidence,
-    call: FunctionCall,
-) -> std::result::Result<(AgentEvidence, Value, bool), ProbeError> {
-    tokio::task::spawn_blocking(move || {
-        let (value, progress) = context
-            .execute(call)
-            .map_err(|_| ProbeError::InvalidResponse)?;
-        Ok((context, value, progress))
-    })
-    .await
-    .map_err(|_| ProbeError::InvalidResponse)?
+pub(super) fn source_url(source: &SourceRef) -> String {
+    let (kind, id) = source.parts();
+    format!("memivy://source/{kind}/{id}")
+}
+pub(super) fn evidence_value(memory_id: &str, evidence: Evidence, total: usize) -> Value {
+    let next = evidence.start + evidence.text.chars().count();
+    json!({"memory_id":memory_id,"citation_url":source_url(&evidence.source),
+        "evidence":evidence,"next_start":(next<total).then_some(next),"total_chars":total})
+}
+
+pub(super) fn collect_evidence(messages: &[Value]) -> Vec<Evidence> {
+    fn collect(value: &Value, out: &mut Vec<Evidence>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(e) = map.get("evidence")
+                    && let Ok(e) = serde_json::from_value::<Evidence>(e.clone())
+                {
+                    out.push(e);
+                }
+                for (key, value) in map {
+                    if key != "evidence" {
+                        collect(value, out);
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for value in items {
+                    collect(value, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut evidence = vec![];
+    for message in messages {
+        // Only assembled user context and tool results are trusted evidence.
+        // Assistant text and arguments cannot manufacture a memory read.
+        if (message["role"] == "user" || message["role"] == "tool")
+            && let Some(content) = message["content"].as_str()
+            && let Ok(value) = serde_json::from_str::<Value>(content)
+        {
+            collect(&value, &mut evidence);
+        }
+    }
+    evidence
+}
+
+// Stored with the assistant checkpoint, never sent to the provider. Hashes bind
+// character ranges to the exact text visible in the request producing its calls,
+// without duplicating the full bodies in every checkpoint or requiring a table.
+const REQUEST_READS: &str = "_memivy_request_reads";
+#[derive(Serialize, Deserialize)]
+struct RequestRead {
+    version_id: String,
+    start: usize,
+    len: usize,
+    hash: Vec<u8>,
+}
+fn request_reads(messages: &[Value]) -> Result<Vec<RequestRead>> {
+    let mut reads = vec![];
+    for evidence in collect_evidence(messages) {
+        let SourceRef::Version(version_id) = evidence.source else {
+            continue;
+        };
+        for (start, text) in std::iter::once((evidence.start, evidence.text)).chain(
+            evidence
+                .additional_spans
+                .into_iter()
+                .map(|s| (s.start, s.text)),
+        ) {
+            reads.push(RequestRead {
+                version_id: version_id.clone(),
+                start,
+                len: text.chars().count(),
+                hash: fingerprint(&text)?,
+            });
+        }
+    }
+    Ok(reads)
+}
+
+pub(super) const INCOMPLETE_WRITE_READ: &str = "The complete target version was not visible in the request that produced this write. Read all missing ranges before replacing its full body. If the full body cannot fit in the context budget, leave the memory unchanged.";
+
+pub(super) fn write_request_fully_read(
+    db: &rusqlite::Connection,
+    messages: &[Value],
+    call_id: &str,
+    version_id: &str,
+) -> Result<bool> {
+    let mut owners = messages.iter().filter(|message| {
+        message["role"] == "assistant"
+            && message["tool_calls"]
+                .as_array()
+                .is_some_and(|calls| calls.iter().any(|call| call["id"] == call_id))
+    });
+    let Some(owner) = owners.next() else {
+        return Ok(false);
+    };
+    if owners.next().is_some() {
+        return Ok(false);
+    }
+    let Ok(reads) = serde_json::from_value::<Vec<RequestRead>>(owner[REQUEST_READS].clone()) else {
+        return Ok(false);
+    };
+    let body: Vec<char> = version(db, version_id)?.body.chars().collect();
+    let mut ranges = vec![];
+    for read in reads.into_iter().filter(|r| r.version_id == version_id) {
+        let Some(end) = read.start.checked_add(read.len) else {
+            return Ok(false);
+        };
+        let Some(actual) = body.get(read.start..end) else {
+            return Ok(false);
+        };
+        if fingerprint(&actual.iter().collect::<String>())? != read.hash {
+            return Ok(false);
+        }
+        ranges.push((read.start, end));
+    }
+    if ranges.is_empty() {
+        return Ok(false);
+    }
+    ranges.sort_unstable();
+    let mut through = 0;
+    for (start, end) in ranges {
+        if start > through {
+            return Ok(false);
+        }
+        through = through.max(end);
+    }
+    Ok(through == body.len())
 }
 
 impl MemoryStore {
+    pub(super) fn filter_unavailable_evidence(&self, messages: &mut [Value]) -> Result<()> {
+        let db = self.connection()?;
+        for message in messages {
+            if let Some(content) = message["content"].as_str()
+                && let Ok(mut value) = serde_json::from_str::<Value>(content)
+            {
+                redact_unavailable(&db, &mut value)?;
+                message["content"] = json!(value.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn agent_read_tool(&self, name: &str, value: &Value) -> Result<Value> {
+        match name {
+            "search_memories" => {
+                let a: SearchArgs = args(value)?;
+                if a.limit == 0 || a.limit > 8 {
+                    return Err(DataError::Invalid);
+                }
+                let found = self.search(&SearchRequest {
+                    query: a.query,
+                    variants: a.variants,
+                    limit: a.limit,
+                    offset: a.offset,
+                    excerpt_chars: 1200,
+                    ..Default::default()
+                })?;
+                let db = self.connection()?;
+                let mut items = vec![];
+                for hit in found.items {
+                    let total = version(&db, &hit.version_id)?.body.chars().count();
+                    items.push(evidence_value(&hit.memory_id, hit.evidence, total));
+                }
+                Ok(
+                    json!({"items":items,"next_offset":found.next_offset,"truncated":found.truncated,
+                    "mode":found.mode,"degraded_reason":found.degraded_reason}),
+                )
+            }
+            "list_memories" => {
+                let a: ListArgs = args(value)?;
+                if a.limit == 0 || a.limit > 20 {
+                    return Err(DataError::Invalid);
+                }
+                let found = self.library(&LibraryQuery {
+                    collection_id: a.collection_id,
+                    offset: a.offset,
+                    limit: a.limit,
+                    ..Default::default()
+                })?;
+                // A directory establishes identity and navigation, never a body citation.
+                Ok(
+                    json!({"directory":found.items.iter().map(|m|json!({"memory_id":m.key.id,"title":m.title})).collect::<Vec<_>>(),
+                    "next_offset":found.next_offset,"truncated":found.next_offset.is_some(),"body_evidence":false}),
+                )
+            }
+            "read_memory" => {
+                let a: ReadArgs = args(value)?;
+                valid_id(&a.memory_id)?;
+                if a.max_chars == 0 || a.max_chars > 3000 || a.start_char > 1_000_000 {
+                    return Err(DataError::Invalid);
+                }
+                let memory = self.memory(&a.memory_id)?;
+                let db = self.connection()?;
+                if a.view == "history" {
+                    let rows:Vec<Value>=db.prepare("SELECT id,title,created_at FROM memory_versions WHERE memory_id=?1 AND body IS NOT NULL ORDER BY created_at DESC,rowid DESC LIMIT 11 OFFSET ?2")?
+                        .query_map(params![a.memory_id,a.start_char as i64],|r|Ok(json!({"version_id":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"recorded_at_ms":r.get::<_,i64>(2)?})))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    return Ok(
+                        json!({"history":rows.iter().take(10).collect::<Vec<_>>(),"next_offset":(rows.len()>10).then_some(a.start_char+10),"body_evidence":false}),
+                    );
+                }
+                let (source, total) = match a.view.as_str() {
+                    "current" => (
+                        SourceRef::Version(memory.current.id.clone()),
+                        memory.current.body.chars().count(),
+                    ),
+                    "version" => {
+                        let v = version(&db, a.source_id.as_deref().ok_or(DataError::Invalid)?)?;
+                        if v.memory_id != a.memory_id {
+                            return Err(DataError::Unavailable);
+                        }
+                        (SourceRef::Version(v.id), v.body.chars().count())
+                    }
+                    "source" => {
+                        let id = a.source_id.ok_or(DataError::Invalid)?;
+                        if !db.prepare("SELECT 1 FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=?1 AND vc.capture_id=?2")?.exists(params![a.memory_id,id])? {return Err(DataError::Unavailable);}
+                        let capture = raw(&db, &id)?;
+                        (SourceRef::Capture(id), capture.text.chars().count())
+                    }
+                    _ => return Err(DataError::Invalid),
+                };
+                let evidence = resolve_excerpt(&db, &source, a.max_chars, &[], Some(a.start_char))?;
+                let captures = match &source {
+                    SourceRef::Version(id) => version(&db, id)?.capture_ids,
+                    _ => vec![],
+                };
+                let mut result = evidence_value(&a.memory_id, evidence, total);
+                result["source_ids"] = json!(captures);
+                Ok(result)
+            }
+            "read_conversation" => {
+                let a: ConversationArgs = args(value)?;
+                if a.limit == 0 || a.limit > 20 || a.after_seq < 0 {
+                    return Err(DataError::Invalid);
+                }
+                let messages = self.agent_conversation_messages(
+                    &a.conversation_id,
+                    a.after_seq,
+                    a.limit,
+                    a.manual_saves_offset.unwrap_or(0),
+                )?;
+                let mut items = vec![];
+                let mut bytes = 0;
+                for v in messages {
+                    let size = v.to_string().len();
+                    if bytes + size > 32 * 1024 && !items.is_empty() {
+                        break;
+                    }
+                    bytes += size;
+                    items.push(v);
+                }
+                let next = items.last().and_then(|v| v["seq"].as_i64());
+                Ok(
+                    json!({"messages":items,"next_after_seq":next,"note":"Conversation, not durable-memory evidence. Preserve speaker and tentative status."}),
+                )
+            }
+            _ => Err(DataError::Invalid),
+        }
+    }
+
     pub fn model_capabilities(&self, config: &model::ModelConfig) -> Option<tools::Capabilities> {
         tools::cached(&self.root, config)
     }
@@ -313,136 +414,522 @@ impl MemoryStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn capture(s: &MemoryStore, text: &str) -> CaptureResult {
-        s.capture(&CaptureRequest {
-            request_id: id(),
-            text: text.into(),
-            origin: Origin::User {
-                app: "QA".into(),
-                project: None,
-                uri: None,
-            },
-        })
-        .unwrap()
-    }
-    fn search(query: &str) -> FunctionCall {
-        FunctionCall {
-            name: "search_memories".into(),
-            arguments: json!({"query":query,"variants":[],"limit":8}),
-        }
-    }
-    #[test]
-    fn scope_is_fixed_and_removed_members_cannot_be_read() {
-        let d = tempfile::tempdir().unwrap();
-        let s = MemoryStore::open(d.path()).unwrap();
-        let inside = capture(&s, "anchor inside");
-        capture(&s, "anchor outside");
-        let collection = id();
-        s.save_collection(&collection, "scope", "", None).unwrap();
-        let key = RecordKey {
-            kind: "memory".into(),
-            id: inside.memory_id.clone(),
-        };
-        s.collect_record(&collection, &key, true).unwrap();
-        let mut context = AgentEvidence::new(
-            s.clone(),
-            SearchScope {
-                collection_id: Some(collection.clone()),
-                ..Default::default()
-            },
-            None,
-        );
-        let (result, _) = context.execute(search("anchor")).unwrap();
-        assert_eq!(result["items"].as_array().unwrap().len(), 1);
-        assert_eq!(context.known[0].memory, inside.memory_id);
-        assert!(
-            context
-                .execute(FunctionCall {
-                    name: "read_memory".into(),
-                    arguments: json!({"id":"M2","start_char":0,"max_chars":1800})
-                })
-                .is_err()
-        );
-        let mut escape = search("anchor");
-        escape.arguments["scope"] = json!({});
-        assert!(context.execute(escape).is_err());
-        s.collect_record(&collection, &key, false).unwrap();
-        assert!(
-            context
-                .execute(FunctionCall {
-                    name: "read_memory".into(),
-                    arguments: json!({"id":"M1","start_char":0,"max_chars":1800})
-                })
-                .is_err()
-        );
-        assert!(context.validate().is_err());
-    }
-    #[test]
-    fn overlap_budget_and_duplicate_reads_count_unique_ranges_not_vector_order() {
-        let d = tempfile::tempdir().unwrap();
-        let s = MemoryStore::open(d.path()).unwrap();
-        capture(&s, &format!("anchor first {}", "x".repeat(4000)));
-        capture(&s, "anchor second");
-        let mut context = AgentEvidence::new(s, SearchScope::default(), None);
-        context.execute(search("anchor")).unwrap();
-        for label in ["M1", "M2", "M1"] {
-            let (_, progress) = context
-                .execute(FunctionCall {
-                    name: "read_memory".into(),
-                    arguments: json!({"id":label,"start_char":0,"max_chars":1200}),
-                })
-                .unwrap();
-            assert!(!progress);
-        }
-        let long = context
-            .known
-            .iter()
-            .position(|s| {
-                context
-                    .spans
+pub(super) fn memory_read_tools() -> Vec<Value> {
+    vec![
+        tools::function(
+            "search_memories",
+            "Search all active CURRENT user memories. No topic restriction. Supply the natural question plus up to four short alternative literal entities/terms, not whole sentences. Retry fewer terms if empty; empty results are not proof of absence. Return real body evidence and pagination.",
+            json!({"query":{"type":"string"},"variants":{"type":"array","items":{"type":"string"},"maxItems":4},"limit":{"type":"integer","minimum":1,"maximum":8},"offset":{"type":"integer","minimum":0}}),
+        ),
+        tools::function(
+            "list_memories",
+            "Page a topic directory, or the whole library with collection_id=null. Titles are navigation, not evidence; read relevant bodies by stable ID.",
+            json!({"collection_id":{"type":["string","null"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":20}}),
+        ),
+        tools::function(
+            "read_memory",
+            "Read by memory ID directly (no prior search required). view=current uses the current version; version uses source_id=version ID; source uses source_id=raw capture ID linked to this memory; history lists version IDs with start_char as page offset. Other views use character positions, continue at next_start. Historical evidence stays historical. Never read trash.",
+            json!({"memory_id":{"type":"string"},"view":{"type":"string","enum":["current","version","source","history"]},"source_id":{"type":["string","null"]},"start_char":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":3000}}),
+        ),
+        tools::function(
+            "read_conversation",
+            "Page exact past conversation messages, retaining speaker, sequence and status. Use to resolve an early condition after compaction; messages are not automatically durable facts. Each message.manual_saves is one bounded page with items, total and next_offset; never treat a partial page as all saves. To read more saves for the SAME message, set after_seq=that message.seq-1, limit=1 and manual_saves_offset=its next_offset. This does not change message text or sequence pagination. manual_saves_offset null or omitted means 0. Each save has its own input_id for undo; status=undone means already reversed.",
+            json!({"conversation_id":{"type":"string"},"after_seq":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":20},"manual_saves_offset":{"type":["integer","null"],"minimum":0}}),
+        ),
+    ]
+}
+pub(super) fn memory_write_tool() -> Value {
+    tools::function(
+        "write_memory",
+        "Save a user's meaningful idea, fact, constraint or decision now. parts.text concatenate EXACTLY in order into the full Markdown body; include needed spaces and newlines yourself. Each part states one fact or change, with its actual source_id and a verbatim quote (maximum 3000 UTF-8 bytes). Do not put facts from different sources into one part. Read earlier original user messages before saving their facts; 'other conditions unchanged' alone does not source those conditions. For unchanged target text, sources=[] may preserve only complete original lines in their original order, not arbitrary substrings; whitespace-only parts may also use []. To rephrase existing target content, cite its CURRENT expected_version and an exact quote from that body to inherit its old captures. Other sources must be actual user message IDs in this conversation (the task's capture_id for capture maintenance), with at least one such raw source in the write. Never cite an AI message or summary as a user source. Preserve uncertainty, negation, speaker, time, plans versus execution and useful change reasons. Preserve the subject and scope of each quote: these discussed ideas are undecided does not mean no plan has ever been decided. Do not add unsupported all/any/never claims or broaden a local statement into a global user fact. title is only a neutral summary, with no new facts absent from the body. New creates a memory; existing requires the complete current version to be visible in the request and preserves unaffected content. Writes are atomic, versioned and undoable; report only committed receipts.",
+        json!({
+            "destination":{"anyOf":[{"type":"object","properties":{"kind":{"type":"string","enum":["new"]}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"type":"string","enum":["existing"]},"memory_id":{"type":"string"},"expected_version":{"type":"string"}},"required":["kind","memory_id","expected_version"],"additionalProperties":false}]},
+            "title":{"type":"string"},
+            "parts":{"type":"array","minItems":1,"maxItems":64,"items":{
+                "type":"object","properties":{
+                    "text":{"type":"string"},
+                    "sources":{"type":"array","maxItems":16,"items":{
+                        "type":"object","properties":{"source_id":{"type":"string"},"quote":{"type":"string"}},
+                        "required":["source_id","quote"],"additionalProperties":false
+                    }}
+                },"required":["text","sources"],"additionalProperties":false
+            }}
+        }),
+    )
+}
+
+// UTF-8 bytes are a deliberately conservative upper bound on input token usage.
+// These are internal execution limits, not a second model-settings surface.
+pub(super) const CONTEXT_TOKENS: usize = 65_536;
+pub(super) const OUTPUT_RESERVE: usize = 8192;
+pub(super) const INITIAL_CONTEXT_BUDGET: usize = 48_000;
+pub(super) const MAX_MODEL_STEPS: usize = 12;
+
+pub(super) enum AgentEvent<'a> {
+    Text(&'a str),
+    Checkpoint(&'a [Value]),
+    BeforeRequest(&'a mut Vec<Value>),
+    Tool(&'a tools::ToolCall),
+}
+
+/// One loop for both task owners. The callback owns durable effects and fencing;
+/// the driver owns only provider protocol, streaming and bounded continuation.
+pub(super) async fn run_memory_agent(
+    config: &model::ModelConfig,
+    mut messages: Vec<Value>,
+    tool_defs: &[Value],
+    mut callback: impl FnMut(AgentEvent<'_>) -> std::result::Result<Option<Value>, ProbeError>,
+) -> std::result::Result<Vec<Value>, ProbeError> {
+    let reserve =
+        (config.max_output_tokens.unwrap_or(OUTPUT_RESERVE as u32) as usize).max(OUTPUT_RESERVE);
+    let budget = CONTEXT_TOKENS
+        .checked_sub(reserve)
+        .ok_or(ProbeError::TooLarge)?;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(240);
+    for _ in 0..MAX_MODEL_STEPS {
+        // Rebuild missing tool results after a checkpoint/restart before asking
+        // the model to plan again. A committed operation is replayed by its owner.
+        if let Some(index) = messages.iter().rposition(|m| m["role"] == "assistant") {
+            let calls = messages[index]["tool_calls"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if calls.is_empty() && index + 1 == messages.len() {
+                return Ok(messages);
+            }
+            for wire in calls {
+                let call = tools::ToolCall {
+                    id: wire["id"]
+                        .as_str()
+                        .ok_or(ProbeError::InvalidResponse)?
+                        .into(),
+                    name: wire["function"]["name"]
+                        .as_str()
+                        .ok_or(ProbeError::InvalidResponse)?
+                        .into(),
+                    arguments: serde_json::from_str(
+                        wire["function"]["arguments"]
+                            .as_str()
+                            .ok_or(ProbeError::InvalidResponse)?,
+                    )
+                    .map_err(|_| ProbeError::InvalidResponse)?,
+                };
+                if messages[index + 1..]
                     .iter()
-                    .any(|e| e.source == s.source && e.text.len() == 1200)
+                    .any(|m| m["role"] == "tool" && m["tool_call_id"] == call.id)
+                {
+                    continue;
+                }
+                let result =
+                    callback(AgentEvent::Tool(&call))?.ok_or(ProbeError::InvalidResponse)?;
+                messages.push(
+                    json!({"role":"tool","tool_call_id":call.id,"content":result.to_string()}),
+                );
+                callback(AgentEvent::Checkpoint(&messages))?;
+            }
+        }
+        let mut wire = messages.clone();
+        for message in &mut wire {
+            if let Some(object) = message.as_object_mut() {
+                object.remove(REQUEST_READS);
+            }
+        }
+        callback(AgentEvent::BeforeRequest(&mut wire))?;
+        let defs_size = serde_json::to_vec(tool_defs)
+            .map_err(|_| ProbeError::InvalidResponse)?
+            .len();
+        // Raw checkpoints retain the exact protocol. Only the request view
+        // releases older, re-readable tool bodies when the input budget fills.
+        for index in 0..wire.len().saturating_sub(1) {
+            if json!(wire).to_string().len() + defs_size + 1024 <= budget {
+                break;
+            }
+            if wire[index]["role"] == "tool"
+                && let Some(content) = wire[index]["content"].as_str()
+                && let Ok(mut value) = serde_json::from_str::<Value>(content)
+            {
+                release_evidence_text(&mut value);
+                wire[index]["content"] = json!(value.to_string());
+            }
+        }
+        if json!(wire).to_string().len() + defs_size + 1024 > budget {
+            return Err(ProbeError::TooLarge);
+        }
+        let reads = request_reads(&wire).map_err(|_| ProbeError::InvalidResponse)?;
+        let needs_separator = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "assistant")
+            .and_then(|m| m["content"].as_str())
+            .is_some_and(|s| !s.is_empty());
+        let mut first_text = true;
+        let mut turn = tokio::time::timeout_at(
+            deadline,
+            tools::stream_turn(config, &wire, tool_defs, |delta| {
+                if let tools::StreamDelta::Text(text) = delta {
+                    if first_text && needs_separator {
+                        callback(AgentEvent::Text("\n\n"))?;
+                    }
+                    first_text = false;
+                    callback(AgentEvent::Text(&text))?;
+                }
+                Ok(())
+            }),
+        )
+        .await
+        .map_err(|_| ProbeError::Network)??;
+        if turn.calls.is_empty() && turn.text.trim().is_empty() {
+            return Err(ProbeError::InvalidResponse);
+        }
+        if !turn.calls.is_empty() {
+            turn.message[REQUEST_READS] = json!(reads);
+        } else if let Some(object) = turn.message.as_object_mut() {
+            object.remove(REQUEST_READS);
+        }
+        messages.push(turn.message);
+        callback(AgentEvent::Checkpoint(&messages))?;
+        if turn.calls.is_empty() {
+            return Ok(messages);
+        }
+    }
+    Err(ProbeError::TooLarge)
+}
+
+fn release_evidence_text(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if map.contains_key("source") && map.contains_key("start") && map.contains_key("text") {
+                map.remove("text");
+                map.insert("read_again".into(), json!(true));
+            }
+            for v in map.values_mut() {
+                release_evidence_text(v);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                release_evidence_text(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_unavailable(db: &rusqlite::Connection, value: &mut Value) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            if let Some(source) = map.get("source")
+                && map.contains_key("text")
+                && let Ok(source) = serde_json::from_value::<SourceRef>(source.clone())
+            {
+                match resolve(db, &source, 1) {
+                    Ok(actual) => {
+                        if map.get("current").and_then(Value::as_bool) == Some(true)
+                            && !actual.current
+                        {
+                            map.insert("current".into(), json!(false));
+                            map.insert("changed_since_read".into(), json!(true));
+                        }
+                    }
+                    Err(DataError::Unavailable) => {
+                        map.remove("text");
+                        map.remove("additional_spans");
+                        map.insert("unavailable".into(), json!(true));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            for v in map.values_mut() {
+                redact_unavailable(db, v)?;
+            }
+        }
+        Value::Array(items) => {
+            for v in items {
+                redact_unavailable(db, v)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod request_read_tests {
+    use super::*;
+
+    #[test]
+    fn replacement_requires_exact_unicode_text_and_gapless_visible_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let captured = store
+            .capture(&CaptureRequest {
+                request_id: id(),
+                text: "甲乙🙂丙丁。禁止上传".into(),
+                origin: Origin::User {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        let db = store.connection().unwrap();
+        let source = SourceRef::Version(captured.version_id.clone());
+        let first = resolve_excerpt(&db, &source, 3, &[], Some(0)).unwrap();
+        let rest = resolve_excerpt(&db, &source, 100, &[], Some(3)).unwrap();
+        let authorize = |evidence: Evidence| {
+            let request =
+                vec![json!({"role":"user","content":json!({"evidence":evidence}).to_string()})];
+            let mut response = json!({"role":"assistant","tool_calls":[{"id":"write"}]});
+            response[REQUEST_READS] = json!(request_reads(&request).unwrap());
+            write_request_fully_read(&db, &[response], "write", &captured.version_id).unwrap()
+        };
+        let mut complete = first.clone();
+        complete.additional_spans.push(EvidenceSpan {
+            start: rest.start,
+            text: rest.text.clone(),
+            truncated: false,
+        });
+        assert!(authorize(complete.clone()));
+
+        let mut gap = complete.clone();
+        gap.additional_spans[0].start += 1;
+        gap.additional_spans[0].text = rest.text.chars().skip(1).collect();
+        assert!(!authorize(gap));
+
+        let mut changed_text = complete;
+        changed_text.text = "甲乙丙".into(); // Same character count is insufficient.
+        assert!(!authorize(changed_text));
+        assert!(!authorize(first));
+    }
+
+    #[test]
+    fn deleting_a_memory_removes_all_its_spans_from_context_and_tool_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let capture = |text: &str| {
+            store
+                .capture(&CaptureRequest {
+                    request_id: id(),
+                    text: text.into(),
+                    origin: Origin::User {
+                        app: "QA".into(),
+                        project: None,
+                        uri: None,
+                    },
+                })
+                .unwrap()
+        };
+        let deleted = capture("主片段：不得上传。额外片段：只能在本机处理。");
+        let retained = capture("另一条仍有效的记忆。");
+        let db = store.connection().unwrap();
+        let make_spans = |source: SourceRef| {
+            let mut evidence = resolve_excerpt(&db, &source, 9, &[], Some(0)).unwrap();
+            let tail = resolve_excerpt(&db, &source, 100, &[], Some(9)).unwrap();
+            evidence.additional_spans.push(EvidenceSpan {
+                start: tail.start,
+                text: tail.text,
+                truncated: false,
+            });
+            evidence
+        };
+        let version = make_spans(SourceRef::Version(deleted.version_id.clone()));
+        let raw = make_spans(SourceRef::Capture(deleted.capture_id.clone()));
+        let active = resolve_excerpt(
+            &db,
+            &SourceRef::Version(retained.version_id.clone()),
+            100,
+            &[],
+            Some(0),
+        )
+        .unwrap();
+        let mut messages = vec![
+            json!({"role":"user","content":json!({"items":[{"evidence":version},{"evidence":active}]}).to_string()}),
+            json!({"role":"tool","tool_call_id":"read-source","content":json!({"evidence":raw}).to_string()}),
+        ];
+        store
+            .trash_memory(&deleted.memory_id, &deleted.version_id)
+            .unwrap();
+        store.filter_unavailable_evidence(&mut messages).unwrap();
+        let context: Value =
+            serde_json::from_str(messages[0]["content"].as_str().unwrap()).unwrap();
+        let tool: Value = serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+        for evidence in [&context["items"][0]["evidence"], &tool["evidence"]] {
+            assert_eq!(evidence["unavailable"], true);
+            assert!(evidence.get("text").is_none());
+            assert!(evidence.get("additional_spans").is_none());
+        }
+        assert_eq!(
+            context["items"][1]["evidence"]["text"],
+            "另一条仍有效的记忆。"
+        );
+        let reads = request_reads(&messages).unwrap();
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].version_id, retained.version_id);
+        let mut response = json!({"role":"assistant","tool_calls":[{"id":"write"}]});
+        response[REQUEST_READS] = json!(reads);
+        assert!(!write_request_fully_read(&db, &[response], "write", &deleted.version_id).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod write_attribution_tests {
+    use super::*;
+
+    fn part(text: &str, source_id: &str, quote: &str) -> MemoryWritePart {
+        MemoryWritePart {
+            text: text.into(),
+            sources: vec![MemorySourceQuote {
+                source_id: source_id.into(),
+                quote: quote.into(),
+            }],
+        }
+    }
+    fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
+        store
+            .capture(&CaptureRequest {
+                request_id: id(),
+                text: text.into(),
+                origin: Origin::User {
+                    app: "attribution QA".into(),
+                    project: None,
+                    uri: None,
+                },
             })
             .unwrap()
-            + 1;
-        let (_, progress) = context
-            .execute(FunctionCall {
-                name: "read_memory".into(),
-                arguments: json!({"id":format!("M{long}"),"start_char":1000,"max_chars":1800}),
-            })
-            .unwrap();
-        assert!(progress);
+    }
+
+    #[test]
+    fn quoted_parts_preserve_exact_composition_and_only_return_raw_source_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let old = capture(&store, "原来每周4小时。\n不允许上传录音。");
+        let source = capture(&store, "现在每周8小时，尚未上线。");
+        let previous = store.memory(&old.memory_id).unwrap().current;
+        let write = MemoryWriteArgs {
+            destination: Destination::Existing {
+                memory_id: old.memory_id,
+                expected_version: previous.id.clone(),
+            },
+            title: "当前约束".into(),
+            parts: vec![
+                part("此前每周4小时；", &previous.id, "原来每周4小时。"),
+                part("现在每周8小时。\n", &source.capture_id, "现在每周8小时"),
+                part("尚未上线。\n", &source.capture_id, "尚未上线"),
+                MemoryWritePart {
+                    text: "不允许上传录音。\n".into(),
+                    sources: vec![],
+                },
+            ],
+        };
+        let (body, ids) = resolve_memory_write(&write, Some(&previous), |source_id| {
+            assert_eq!(source_id, source.capture_id); // Target version never enters the raw resolver.
+            Ok(store.capture_by_id(source_id)?.text)
+        })
+        .unwrap();
         assert_eq!(
-            context
-                .spans
-                .iter()
-                .filter(|e| e.source == context.known[long - 1].source)
-                .count(),
-            1
+            body,
+            "此前每周4小时；现在每周8小时。\n尚未上线。\n不允许上传录音。\n"
         );
-        let before = context
-            .spans
-            .iter()
-            .map(|e| e.text.chars().count())
-            .sum::<usize>();
-        context.char_budget = before;
-        let (result, _) = context
-            .execute(FunctionCall {
-                name: "read_memory".into(),
-                arguments: json!({"id":format!("M{long}"),"start_char":2800,"max_chars":1800}),
-            })
-            .unwrap();
-        assert_eq!(result["budget_reached"], true);
+        assert_eq!(ids, vec![source.capture_id.clone()]);
+        let mut wrong_quote = write;
+        wrong_quote.parts[1].sources[0].quote = "现在每周80小时".into();
         assert_eq!(
-            context
-                .spans
-                .iter()
-                .map(|e| e.text.chars().count())
-                .sum::<usize>(),
-            before
+            resolve_memory_write(&wrong_quote, Some(&previous), |id| Ok(store
+                .capture_by_id(id)?
+                .text)),
+            Err(DataError::SourceAttribution)
+        );
+    }
+
+    #[test]
+    fn inheritance_cannot_remove_negation_reorder_lines_or_attach_sources_to_whitespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let old = capture(
+            &store,
+            "不允许上传录音。\n仅考虑收费，尚未决定。\n保留离线模式。",
+        );
+        let source = capture(&store, "补充：每周8小时。");
+        let previous = store.memory(&old.memory_id).unwrap().current;
+        let write = MemoryWriteArgs {
+            destination: Destination::Existing {
+                memory_id: old.memory_id,
+                expected_version: previous.id.clone(),
+            },
+            title: "约束".into(),
+            parts: vec![
+                MemoryWritePart {
+                    text: "不允许上传录音。\n仅考虑收费，尚未决定。\n".into(),
+                    sources: vec![],
+                },
+                part("每周8小时。\n", &source.capture_id, "每周8小时"),
+                MemoryWritePart {
+                    text: "保留离线模式。\n".into(),
+                    sources: vec![],
+                },
+            ],
+        };
+        let validate = |write: &MemoryWriteArgs| {
+            resolve_memory_write(write, Some(&previous), |id| {
+                Ok(store.capture_by_id(id)?.text)
+            })
+        };
+        assert!(validate(&write).is_ok());
+        let mut changed = write.clone();
+        changed.parts[0].text = "允许上传录音。\n".into();
+        assert_eq!(validate(&changed), Err(DataError::SourceAttribution));
+        let mut reordered = write.clone();
+        reordered.parts.swap(0, 2);
+        assert_eq!(validate(&reordered), Err(DataError::SourceAttribution));
+        let mut no_raw = write.clone();
+        no_raw.parts.remove(1);
+        assert_eq!(validate(&no_raw), Err(DataError::SourceAttribution));
+        no_raw
+            .parts
+            .push(part("\n ", &source.capture_id, "每周8小时"));
+        assert_eq!(validate(&no_raw), Err(DataError::SourceAttribution));
+        let mut formatting = write;
+        formatting.parts.push(MemoryWritePart {
+            text: "\n \t".into(),
+            sources: vec![],
+        });
+        assert!(validate(&formatting).unwrap().0.ends_with("\n \t"));
+    }
+
+    #[test]
+    fn attribution_limits_count_utf8_bytes_and_bound_parts_and_source_lists() {
+        let source_id = id();
+        let raw = "甲".repeat(1001);
+        let mut write = MemoryWriteArgs {
+            destination: Destination::New,
+            title: "合成文字".into(),
+            parts: vec![part("合成文字", &source_id, &"甲".repeat(1000))],
+        };
+        assert!(resolve_memory_write(&write, None, |_| Ok(raw.clone())).is_ok());
+        write.parts[0].sources[0].quote = raw.clone();
+        assert_eq!(
+            resolve_memory_write(&write, None, |_| Ok(raw.clone())),
+            Err(DataError::Invalid)
+        );
+        write.parts[0].sources[0].quote = "甲".into();
+        write.parts[0].sources = vec![write.parts[0].sources[0].clone(); 17];
+        assert_eq!(
+            resolve_memory_write(&write, None, |_| Ok(raw.clone())),
+            Err(DataError::Invalid)
+        );
+        write.parts[0].sources.truncate(1);
+        write.parts.extend((0..63).map(|_| MemoryWritePart {
+            text: "\n".into(),
+            sources: vec![],
+        }));
+        assert!(resolve_memory_write(&write, None, |_| Ok(raw.clone())).is_ok());
+        write.parts.push(MemoryWritePart {
+            text: "\n".into(),
+            sources: vec![],
+        });
+        assert_eq!(
+            resolve_memory_write(&write, None, |_| Ok(raw.clone())),
+            Err(DataError::Invalid)
         );
     }
 }

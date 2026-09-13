@@ -18,11 +18,12 @@ export type SourceEvidence = {
 };
 export type Key = { kind: "memory" | "capture"; id: string };
 export type Origin = {
-  kind: "user" | "agent" | "conversation";
+  kind: "user" | "agent" | "conversation" | "discussion";
   app?: string;
   project?: string | null;
   uri?: string | null;
   conversation_id?: string;
+  message_id?: string;
 };
 export type CaptureResult = { memory_id: string; version_id: string; capture_id: string; created_at: number };
 export type Raw = {
@@ -66,7 +67,6 @@ export type Version = {
   capture_ids: string[];
 };
 export type Detail = {
-  reviewed_conclusion?: { title: string; body: string } | null;
   key: Key;
   state: string;
   title: string;
@@ -75,11 +75,11 @@ export type Detail = {
   history: Version[];
   history_count?: number;
   source_count?: number;
-  sources: { id: string; capture: Raw | null }[];
+  sources: { id: string; capture: Raw | null; conversation_available: boolean | null }[];
 };
 export type ConclusionDestination = { kind: "new" } | { kind: "existing"; memory_id: string; expected_version: string };
 export type Draft = {
-  conclusion?: { destination: ConclusionDestination; merged_body: string | null };
+  destination?: ConclusionDestination;
   key: string;
   request_id: string;
   title: string;
@@ -101,7 +101,10 @@ export type Topic = { id: string; title: string; updated_at: number; collection_
 export type Collection = { id: string; name: string; description: string; revision: number; count: number };
 export type RecordNavigation = { pinned: boolean; collections: string[] };
 export type Message = {
-  answer?: { recollections: { text: string; sources: Source[] }[]; ideas: string; conclusion: string } | null;
+  followups: string[];
+  receipts: Receipt[];
+  progress: string | null;
+  record_only: boolean;
   seq: number;
   id: string;
   text: string;
@@ -112,7 +115,7 @@ export type Message = {
   citations: { source: Source; available: boolean }[];
 };
 export type Settings = {
-  model_capabilities?: {structured_json:boolean;single_tool:boolean;multi_turn:boolean}|null;
+  model_capabilities?: {structured_json:boolean;streaming_text:boolean;single_tool:boolean;multi_turn:boolean}|null;
   configured: boolean;
   base_url: string;
   model: string;
@@ -126,7 +129,7 @@ export const uid = () => crypto.randomUUID();
 export const date = formatDate;
 export const fullDate = formatFullDate;
 export const sourceName = (o: Origin | null) =>
-  o?.kind === "conversation" ? i18n.t('sourceConclusion') : o?.app || i18n.t('sourceCapture');
+  o?.kind === "discussion" ? i18n.t('sourceDiscussion') : o?.kind === "conversation" ? i18n.t('sourceConclusion') : o?.app || i18n.t('sourceCapture');
 export function errorText(error: unknown): UiMessage {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return message('errors', typeof code === 'string' && Object.hasOwn(errors, code) ? code as keyof typeof errors : 'operation_failed');
@@ -157,7 +160,6 @@ export async function call<T>(
   if (name === "voice_status") return {source:"local",label:"voice_local",local_available:false,enabled:false,preload:false,shortcut:"",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"",session:null} as T;
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
-  if (name === "discussion_targets") return [] as T;
   if (name === "organization_jobs") return [] as T;
   if (name === "library_query") {
     const q = args?.query as Query;
@@ -180,8 +182,8 @@ export async function call<T>(
       sources: [{ id: previewId, capture: previewRaw }],
     } as T;
   if (
+    name === "library_agent_changes" ||
     name === "library_topics" ||
-    name === "library_messages" ||
     name === "discussion_messages"
   )
     return [] as T;

@@ -1,294 +1,406 @@
-//! Fixed synthetic Q&A corpus. Semantic correctness is reviewed, never inferred from JSON.
-use memivy_core::{memory::*, model::ModelConfig};
-use serde::Deserialize;
-use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::{
-    collections::{BTreeSet, HashMap},
-    fs,
-    path::PathBuf,
+//! Real-model acceptance evidence using synthetic memories only.
+//! Writes full inputs/results for human semantic review; no credentials copied.
+use memivy_core::{
+    memory::*,
+    model::{ModelConfig, tools},
 };
+use serde_json::{Value, json};
+use std::{fs, path::PathBuf};
 use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
 }
-const FIXTURE: &str = include_str!("../tests/fixtures/core_discussion.json");
-#[derive(Deserialize)]
-struct Fixture {
-    version: u32,
-    seeds: Vec<Seed>,
-    cases: Vec<Case>,
-}
-#[derive(Deserialize)]
-struct Seed {
-    id: String,
-    title: String,
-    raw: String,
-    body: String,
-}
-#[derive(Deserialize)]
-struct Case {
-    id: String,
-    seeds: Vec<String>,
-    topic: String,
-    question: String,
-    keywords: Vec<String>,
-    expected_sources: Vec<String>,
-    rubric: String,
-    #[serde(default)]
-    reopen: bool,
-}
-fn counts(s: &MemoryStore) -> Vec<i64> {
-    let db = rusqlite::Connection::open(s.database_path()).unwrap();
-    ["captures", "memories", "memory_versions", "receipts"]
-        .iter()
-        .map(|t| {
-            db.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
-                .unwrap()
+fn seed(s: &MemoryStore, title: &str, body: &str) -> CaptureResult {
+    let c = s
+        .capture(&CaptureRequest {
+            request_id: id(),
+            text: body.into(),
+            origin: Origin::User {
+                app: "Synthetic acceptance".into(),
+                project: None,
+                uri: None,
+            },
         })
-        .collect()
+        .unwrap();
+    if title != body {
+        s.edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: c.memory_id.clone(),
+            expected_version: c.version_id.clone(),
+            title: title.into(),
+            body: body.into(),
+        })
+        .unwrap();
+    }
+    c
 }
-
-// Read-only inspection of this probe's synthetic database. Keep uncited evidence
-// too, so a retrieval miss can be distinguished from an answer omitting a source.
-fn retrieved_evidence(
+async fn ask(
     s: &MemoryStore,
-    message: &str,
-    mapping: &HashMap<String, String>,
-) -> Vec<serde_json::Value> {
-    let db = rusqlite::Connection::open(s.database_path()).unwrap();
-    retrieved_rows(&db, message, mapping)
-}
-fn retrieved_rows(
-    db: &rusqlite::Connection,
-    message: &str,
-    mapping: &HashMap<String, String>,
-) -> Vec<serde_json::Value> {
-    db.prepare("SELECT c.kind,c.source_id,c.cited,COALESCE(e.start_char,c.excerpt_start),COALESCE(e.length_chars,c.excerpt_length),CASE c.kind WHEN 'capture' THEN r.text ELSE v.body END FROM message_citations c LEFT JOIN message_evidence_spans e ON e.message_id=c.message_id AND e.kind=c.kind AND e.source_id=c.source_id LEFT JOIN captures r ON c.kind='capture' AND r.id=c.source_id LEFT JOIN memory_versions v ON c.kind='version' AND v.id=c.source_id WHERE c.message_id=? ORDER BY c.kind,c.source_id,COALESCE(e.start_char,c.excerpt_start)")
-        .unwrap().query_map([message], |r| {
-            let kind: String = r.get(0)?;
-            let source: String = r.get(1)?;
-            let cited: bool = r.get(2)?;
-            let start = usize::try_from(r.get::<_, i64>(3)?).unwrap();
-            let length = usize::try_from(r.get::<_, i64>(4)?).unwrap();
-            let text: String = r.get(5)?;
-            Ok(json!({"kind":kind,"source_id":source,"seed_id":mapping.get(&source),"cited":cited,"start":start,"length":length,"text":text.chars().skip(start).take(length).collect::<String>()}))
-        }).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+    config: &ModelConfig,
+    topic: &str,
+    text: &str,
+    focus: &[String],
+) -> Value {
+    let input = id();
+    let attempt = id();
+    let e = s
+        .begin_agent_input(&input, &attempt, topic, text, focus, None)
+        .unwrap();
+    let started = std::time::Instant::now();
+    let mut updates = 0;
+    let mut mutations = 0;
+    let result = s
+        .run_discussion(config, &input, &attempt, "zh-CN", |changed| {
+            updates += 1;
+            if changed {
+                mutations += 1;
+            }
+        })
+        .await;
+    if result.is_err() {
+        let _ = s.stop_agent_input(&input, &attempt, "failed", Some("evaluation_failed"));
+    }
+    let execution = s.agent_execution(&input).unwrap();
+    let message = s.turn(&input).unwrap().assistant;
+    json!({"input_id":input,"user_message_id":e.user_message_id,"input":text,"focus":focus,
+        "result":result.map_err(|e|format!("{e:?}")),"message":message,"execution":execution,
+        "stream_updates":updates,"memory_updates":mutations,"elapsed_ms":started.elapsed().as_millis()})
 }
 #[tokio::main]
 async fn main() {
     let args: Vec<_> = std::env::args().collect();
     assert!(
-        args.len() == 3 || (args.len() == 4 && args[3] == "--agent"),
-        "discussion_probe PRIVATE_CONFIG FRESH_OUTPUT_DIR [--agent]"
+        (3..=4).contains(&args.len()),
+        "discussion_probe PRIVATE_CONFIG FRESH_OUTPUT_DIR [CASE[,CASE...]]"
     );
     let config =
-        ModelConfig::read(std::path::Path::new(&args[1])).expect("private model configuration");
-    let output = PathBuf::from(&args[2]);
-    fs::create_dir(&output).expect("output must not exist");
-    fs::write(output.join("cases.json"), FIXTURE).unwrap();
-    let code = concat!(
-        include_str!("../src/memory/discussion.rs"),
-        include_str!("../src/memory/retrieval.rs"),
-        include_str!("../src/memory/library.rs"),
-        include_str!("../src/memory/conversations.rs"),
-        include_str!("../src/model.rs"),
-        include_str!("../src/model/tools.rs"),
-        include_str!("../src/memory/agent.rs"),
-        include_str!("../src/memory/search.rs")
+        ModelConfig::read(std::path::Path::new(&args[1])).expect("current private configuration");
+    let output = std::env::current_dir()
+        .unwrap()
+        .join(PathBuf::from(&args[2]));
+    fs::create_dir(&output).expect("fresh output directory required");
+    let capabilities = tools::probe(&config)
+        .await
+        .expect("actual protocol capability");
+    assert!(
+        capabilities.supports_agent(),
+        "configured model does not support Agent"
     );
-    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"agent":args.len()==4,"model":config.model,"disable_reasoning":config.disable_reasoning,"endpoint_sha256":format!("{:x}",Sha256::digest(config.base_url.as_bytes())),"fixture_sha256":format!("{:x}",Sha256::digest(FIXTURE.as_bytes())),"implementation_sha256":format!("{:x}",Sha256::digest(code.as_bytes())),"semantic_review":"pending"})).unwrap()).unwrap();
-    let fixture: Fixture = serde_json::from_str(FIXTURE).unwrap();
-    assert_eq!(fixture.version, 1);
-    let root = tempfile::tempdir().unwrap();
-    let capability_root = tempfile::tempdir().unwrap();
-    if args.len() == 4 {
-        let capabilities = MemoryStore::open(capability_root.path())
-            .unwrap()
-            .test_model_capabilities(&config)
-            .await
-            .expect("capability probe");
-        assert!(
-            capabilities.multi_turn,
-            "multi-turn capability required for Agent evaluation"
-        );
-    }
-    let mut topics: HashMap<String, (String, HashMap<String, String>)> = HashMap::new();
-    let mut complete = 0;
-    let mut structural = 0;
-    let mut review = vec![];
-    for case in &fixture.cases {
-        let data = root.path().join(&case.topic);
-        let mut s = MemoryStore::open(&data).unwrap();
-        if args.len() == 4 {
-            fs::copy(
-                capability_root.path().join("model-capabilities.json"),
-                data.join("model-capabilities.json"),
-            )
-            .unwrap();
+    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"capabilities":capabilities,"context_token_upper_bound":65536,"output_reserve":8192,"max_model_steps":12,"semantic_review":"pending","synthetic_only":true,"memory_write_contract":"parts_with_source_quotes"})).unwrap()).unwrap();
+    for case in [
+        "record_and_question",
+        "global_focus",
+        "state_changes",
+        "pause",
+        "topic",
+        "history",
+        "long_memory",
+        "material_changes",
+        "versioned_update",
+        "compaction",
+    ] {
+        if args
+            .get(3)
+            .is_some_and(|filter| !filter.split(',').any(|selected| selected == case))
+        {
+            continue;
         }
-        let (topic, mapping) = topics.entry(case.topic.clone()).or_insert_with(|| {
-            let mut mapping = HashMap::new();
-            for key in &case.seeds {
-                let row = fixture.seeds.iter().find(|r| &r.id == key).unwrap();
-                let raw = s
-                    .capture(&CaptureRequest {
-                        request_id: id(),
-                        text: row.raw.clone(),
-                        origin: Origin::User {
-                            app: "Synthetic Q&A".into(),
-                            project: None,
-                            uri: None,
-                        },
-                    })
-                    .unwrap();
-                let first = s
-                    .edit_memory(&EditRequest {
-                        request_id: id(),
-                        memory_id: raw.memory_id.clone(),
-                        expected_version: raw.version_id.clone(),
-                        title: row.title.clone(),
-                        body: row.raw.clone(),
-                    })
-                    .unwrap();
-                let memory = first.memory_id.unwrap();
-                mapping.insert(memory.clone(), key.clone());
-                mapping.insert(raw.capture_id, key.clone());
-                mapping.insert(first.after_version.clone().unwrap(), key.clone());
-                if row.body != row.raw {
-                    let edit = s
-                        .edit_memory(&EditRequest {
-                            request_id: id(),
-                            memory_id: memory,
-                            expected_version: first.after_version.unwrap(),
-                            title: row.title.clone(),
-                            body: row.body.clone(),
-                        })
-                        .unwrap();
-                    mapping.insert(edit.after_version.unwrap(), key.clone());
+        let s = MemoryStore::open(output.join(case)).unwrap();
+        tools::save_capabilities(&output.join(case), &config, &capabilities).unwrap();
+        let topic = id();
+        let mut focus = vec![];
+        let mut turns = vec![];
+        let mut rubric = String::new();
+        let mut dataset = Value::Null;
+        match case {
+            "record_and_question" => {
+                s.create_conversation(&topic, "随时表达").unwrap();
+                for text in [
+                    "我有个想法：做一个帮助个人整理访谈的小工具，目前只是考虑。",
+                    "我刚才的想法是什么？",
+                    "我决定先访谈3位独立开发者，还没有开始。你觉得可以怎么安排？",
+                ] {
+                    turns.push(ask(&s, &config, &topic, text, &focus).await);
                 }
+                rubric.push_str("第一轮只记录考虑中的想法，简短回执record_only=true；第二轮只回忆不新增事实；第三轮记录访谈3人决定但未执行，并自然回答且2-3条建议。无必需确认。");
             }
-            let topic = id();
-            s.create_conversation(&topic, "固定合成讨论").unwrap();
-            (topic, mapping)
-        });
-        let before = counts(&s);
-        if case.reopen {
-            let warm = s.start_turn(&id(), topic, "接着讨论木桥项目", &[]).unwrap();
-            s.cancel_turn(&warm.id).unwrap();
-            drop(s);
-            s = MemoryStore::open(&data).unwrap();
+            "global_focus" => {
+                let product = seed(
+                    &s,
+                    "新产品",
+                    "想做给独立开发者整理访谈的产品，方案尚未确定。",
+                );
+                seed(&s, "每周时间", "我每周仅10小时能用于个人项目。");
+                seed(&s, "项目预算", "我的新项目总预算只有5000元。");
+                focus.push(product.memory_id);
+                s.create_conversation(&topic, "可行性").unwrap();
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "这个新产品可行吗？帮我规划一个能做完的第一步。",
+                        &focus,
+                    )
+                    .await,
+                );
+                let collection = id();
+                s.save_collection(&collection, "新产品", "访谈整理", None)
+                    .unwrap();
+                s.collect_record(
+                    &collection,
+                    &RecordKey {
+                        kind: "memory".into(),
+                        id: focus[0].clone(),
+                    },
+                    true,
+                )
+                .unwrap();
+                let scoped = id();
+                s.create_scoped_conversation(&scoped, "专题可行性", Some(&collection))
+                    .unwrap();
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &scoped,
+                        "这个新产品可行吗？帮我规划一个能做完的第一步。",
+                        &[],
+                    )
+                    .await,
+                );
+                turns.push(ask(&s, &config, &scoped, "补充一个限制：必须离线处理，不能上传访谈录音。按这个限制调整刚才的第一步。", &[]).await);
+                rubric.push_str("指定材料与专题两入口首次Agent请求前均已带全局10小时/5000元；答案实际使用并真实引用，不替用户作决定。后续新增离线/不上传限制及时记录并约束回答。");
+            }
+            "state_changes" => {
+                s.create_conversation(&topic, "收费决定").unwrap();
+                for text in [
+                    "我考虑给木桥项目收费，但还没决定。",
+                    "现在决定收费，先每年99元。还没有上线，也没有收款。",
+                    "朋友小李认为应该月付，这是他的建议，我尚未采纳。",
+                    "刚才99元说错了，应是每年79元，其余不变。现在我的决定和执行状态分别是什么？",
+                ] {
+                    turns.push(ask(&s, &config, &topic, text, &focus).await);
+                }
+                rubric.push_str("考虑→决定收费→尚未上线收款，朋友意见不变成用户决定，最终79元且保留未执行状态，纠正影响记忆及回答。");
+            }
+            "pause" => {
+                seed(
+                    &s,
+                    "已有的产品探索限制",
+                    "我每周用于产品探索最多6小时，访谈和尝试新方向都算在内。",
+                );
+                s.create_conversation(&topic, "暂停记忆").unwrap();
+                for text in [
+                    "这轮别记：我随口设想把产品改成游戏，帮我想一下可能性。",
+                    "我想到先做5次用户访谈，这个想法可以记下。",
+                    "接下来先别记，我想结合已有的产品探索限制，试想另一条方向。",
+                    "也许完全不做这个产品，结合已有的产品探索限制给我两个思考角度。",
+                    "恢复记忆。我决定先保留产品方向，安排5次访谈，但尚未执行。",
+                ] {
+                    turns.push(ask(&s, &config, &topic, text, &focus).await);
+                }
+                rubric.push_str("第一轮无写入，第二轮正常记；第三/四轮持续暂停但仍召回已有6小时产品探索限制，第四轮回答实际使用；第五明确恢复保存真实决定，设想放弃不作为事实。");
+            }
+            "topic" => {
+                let outside = seed(&s, "我的资源计划", "每周个人项目最多10小时，不能额外投入。");
+                let collection = id();
+                s.save_collection(&collection, "新产品", "访谈整理", None)
+                    .unwrap();
+                s.create_scoped_conversation(&topic, "新想法", Some(&collection))
+                    .unwrap();
+                turns.push(ask(&s,&config,&topic,"新想法：先做访谈原话标注。另有个更正：我每周可投入的时间是8小时，之前记的10小时有误。请记好。",&focus).await);
+                rubric.push_str("新想法自动加入当前专题；专题外资源计划改8小时且保留其原成员关系；没有多余capture当前Memory/二次organizer。关键原计划ID:");
+                rubric.push_str(&outside.memory_id);
+            }
+            "history" => {
+                let c = seed(
+                    &s,
+                    "木桥",
+                    "去年我因每周只能拿出2小时而暂停木桥项目，并非缺预算。",
+                );
+                focus.push(c.memory_id);
+                s.create_conversation(&topic, "回顾变化").unwrap();
+                turns.push(ask(&s, &config, &topic, "现在我每周可以投入8小时，决定恢复木桥项目。把这个变化记下来，保留当初为什么暂停的原因。", &focus).await);
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "木桥以前什么时候、为什么暂停？现在情况有什么变化？请回读当时的原始记录核对。",
+                        &focus,
+                    )
+                    .await,
+                );
+                rubric.push_str("先由AI实际更新为每周8小时决定恢复，并在当前正文保留去年因2小时而非预算暂停的原因；随后实际读取历史/原话，回答保留去年/2小时/非预算/现在8小时，版本可打开。");
+            }
+            "long_memory" => {
+                let c = seed(
+                    &s,
+                    "很长的方案",
+                    &format!(
+                        "项目方案背景：{}最后的硬条件：只支持离线，预算上限4800元，不允许上传录音。",
+                        "先研究访谈标注体验和资料整理方式。".repeat(500)
+                    ),
+                );
+                focus.push(c.memory_id);
+                s.create_conversation(&topic, "长材料").unwrap();
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "这份方案有哪些必须遵守的硬条件？请把原文末尾也看完整。",
+                        &focus,
+                    )
+                    .await,
+                );
+                rubric.push_str("通过搜索/分段读取找到末尾，准确回答离线/4800元/不上传录音；引用确实覆盖对应文字，预算未溢出。");
+            }
+            "material_changes" => {
+                let first = seed(&s, "访谈工具条件", "访谈工具必须离线处理，不允许上传录音。");
+                let second = seed(&s, "试点安排", "试点每周最多安排6小时，预算上限3600元。");
+                s.create_conversation(&topic, "增减指定材料").unwrap();
+                focus.push(first.memory_id.clone());
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "请复述这次指定材料中的约束并引用原文。",
+                        &focus,
+                    )
+                    .await,
+                );
+                focus.push(second.memory_id.clone());
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "我又指定了一份材料，请结合现在指定的两份材料复述限制并引用原文。",
+                        &focus,
+                    )
+                    .await,
+                );
+                focus.remove(0);
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "继续看现在指定的材料：试点时间和预算限制分别是什么？",
+                        &focus,
+                    )
+                    .await,
+                );
+
+                let collection = id();
+                s.save_collection(&collection, "大型专题", "合成目录预算验收", None)
+                    .unwrap();
+                let mut directory = vec![];
+                for n in 0..360 {
+                    let title =
+                        format!("{n:03} {}", "用于专题目录预算边界验证的合成材料".repeat(3));
+                    let memory = seed(&s, &title, "合成资料：仅周六可安排访谈，其余时间不可安排。");
+                    s.collect_record(
+                        &collection,
+                        &RecordKey {
+                            kind: "memory".into(),
+                            id: memory.memory_id.clone(),
+                        },
+                        true,
+                    )
+                    .unwrap();
+                    directory.push(json!({"memory_id":memory.memory_id,"title":title}));
+                }
+                let full_directory_bytes = serde_json::to_vec(&directory).unwrap().len();
+                assert!(
+                    full_directory_bytes > 65_536,
+                    "directory fixture must exceed the declared context budget"
+                );
+                let scoped = id();
+                s.create_scoped_conversation(&scoped, "目录翻页", Some(&collection))
+                    .unwrap();
+                turns.push(ask(&s, &config, &scoped, "请再翻一页这个专题目录，任选下一页的一条记忆，读取它的正文后告诉我其中安排访谈的时间条件，并引用原文。", &[]).await);
+                dataset = json!({"first_memory_id":first.memory_id,"second_memory_id":second.memory_id,"collection_id":collection,"directory_count":directory.len(),"full_directory_bytes":full_directory_bytes});
+                rubric.push_str("同一会话三轮指定材料A→A+B→B，实际初始请求反映增减；移除只停止优先带入，不抹去历史。答案按实际正文准确引用离线/不上传/每周6小时/3600元，纯提问无事实写入。完整360条目录确实超预算，初始目录标记未完整且不是正文证据；真实工具翻到下一页并读取其中正文，回答仅周六可安排访谈且引用正文。每次请求完整预算由确定性wire测试另行核对。");
+            }
+            "versioned_update" => {
+                let c = seed(
+                    &s,
+                    "Kappa预算",
+                    "Kappa试点预算5000元，只在本机处理录音，尚未上线。",
+                );
+                focus.push(c.memory_id.clone());
+                s.create_conversation(&topic, "预算变化").unwrap();
+                turns.push(ask(&s, &config, &topic, "把Kappa试点预算改为3800元，其他条件不变。请引用原记忆说明预算怎么变了，保存后再搜索Kappa预算确认新金额。", &focus).await);
+                rubric.push_str("本轮读取v1并写v2；v1引用仍可打开且有5000，v2立即检索出3800，保留本机处理/未上线，无凭空新事实。删除来源不可用由确定性生命周期测试完成。");
+            }
+            "compaction" => {
+                s.create_conversation(&topic, "持续讨论").unwrap();
+                for n in 0..12 {
+                    let input = id();
+                    let attempt = id();
+                    let text = if n == 0 {
+                        "固定条件：每周8小时、预算4800元；不上传录音；是否收费尚未决定。"
+                            .to_string()
+                    } else {
+                        format!(
+                            "讨论片段{n}：{}这里只讨论思路，尚未执行或决定。",
+                            "可以比较访谈标注体验、操作步骤和后续验证问题。".repeat(30)
+                        )
+                    };
+                    s.begin_agent_input(&input, &attempt, &topic, &text, &[], None)
+                        .unwrap();
+                    s.append_agent_text(
+                        &input,
+                        &attempt,
+                        "这是备选思路，仍需结合最初限制判断，尚未形成新的决定。",
+                    )
+                    .unwrap();
+                    s.finish_agent_input(&input, &attempt, false, &[]).unwrap();
+                }
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "接着讨论，请先复述我们最初的数字限制、不能做的事和没有决定的事。",
+                        &focus,
+                    )
+                    .await,
+                );
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "更正：预算是3800元，之前4800元有误。其他条件不变。现在的约束是什么？",
+                        &focus,
+                    )
+                    .await,
+                );
+                rubric.push_str("真实压缩summary_through_seq>0；保持8小时/4800/不上传/收费未决，纠正后3800不再把4800当当前，摘要未变Memory。");
+            }
+            _ => unreachable!(),
         }
-        let keyword_hits:Vec<_>=case.keywords.iter().map(|q|{let p=s.library(&LibraryQuery{query:q.clone(),limit:8,..Default::default()}).unwrap();json!({"query":q,"records":p.items.iter().filter_map(|r|mapping.get(&r.key.id)).collect::<Vec<_>>()})}).collect();
-        let turn = s.start_turn(&id(), topic, &case.question, &[]).unwrap();
-        let started = std::time::Instant::now();
-        let result = s.answer_discussion(&config, topic, &turn, &[]).await;
-        if let Err(f) = &result {
-            s.fail_turn(&turn.id, *f).unwrap();
-        }
-        let message = s.turn(&turn.id).unwrap().assistant;
-        let excerpts: Vec<_> = message
-            .citations
-            .iter()
-            .map(|c| s.discussion_excerpt(&message.id, &c.source).unwrap())
-            .collect();
-        let cited: BTreeSet<_> = message
-            .citations
-            .iter()
-            .filter_map(|c| {
-                let key = match &c.source {
-                    SourceRef::Capture(k) | SourceRef::Version(k) => k,
-                };
-                mapping.get(key).cloned()
+        let memories = s
+            .library(&LibraryQuery {
+                limit: 100,
+                ..Default::default()
             })
-            .collect();
-        let expected: BTreeSet<_> = case.expected_sources.iter().cloned().collect();
-        let retrieved = retrieved_evidence(&s, &message.id, mapping);
-        let no_writes = counts(&s) == before;
-        assert!(no_writes, "{} unexpected memory write", case.id);
-        let completed = message.status == "complete";
-        complete += usize::from(completed);
-        let source_coverage = if expected.is_empty() {
-            cited.is_empty()
-        } else {
-            expected.is_subset(&cited)
-        };
-        let structural_pass = completed && source_coverage && no_writes;
-        structural += usize::from(structural_pass);
-        let artifact = json!({"id":case.id,"question":case.question,"rubric":case.rubric,"result":result.map_err(|e|format!("{e:?}")),"message":message,"evidence":excerpts,"retrieved_evidence":retrieved,"cited_seed_ids":cited,"expected_seed_ids":expected,"keyword_control":keyword_hits,"no_memory_writes":no_writes,"source_coverage":source_coverage,"structural_pass":structural_pass,"elapsed_ms":started.elapsed().as_millis(),"semantic_review":"pending"});
+            .unwrap()
+            .items
+            .iter()
+            .map(|m| s.library_detail(&m.key).unwrap())
+            .collect::<Vec<_>>();
+        let artifact = json!({"case":case,"rubric":rubric,"dataset":dataset,"turns":turns,"memories":memories,"conversation_context":s.agent_conversation_context(&topic).unwrap(),"semantic_review":"pending"});
         fs::write(
-            output.join(format!("{}.json", case.id)),
+            output.join(format!("{case}.json")),
             serde_json::to_vec_pretty(&artifact).unwrap(),
         )
         .unwrap();
-        review.push(json!({"id":case.id,"rubric":case.rubric,"retrieval":"pending","answer_support":"pending","uncertainty":"pending","notes":"","reviewer":""}));
-        println!(
-            "{} complete={completed} source_coverage={source_coverage} no_memory_writes={no_writes}",
-            case.id
-        );
-    }
-    fs::write(
-        output.join("review.json"),
-        serde_json::to_vec_pretty(&review).unwrap(),
-    )
-    .unwrap();
-    fs::write(output.join("summary.json"),serde_json::to_vec_pretty(&json!({"cases":fixture.cases.len(),"complete":complete,"structural_pass":structural,"semantic_review":"pending","note":"Source ID coverage is not semantic correctness. Review each claim against its frozen excerpt; record retrieval misses separately."})).unwrap()).unwrap();
-    if complete != fixture.cases.len() || structural != fixture.cases.len() {
-        std::process::exit(1);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn retrieval_trace_keeps_bound_but_uncited_sources() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = MemoryStore::open(dir.path()).unwrap();
-        let raw = store
-            .capture(&CaptureRequest {
-                request_id: id(),
-                text: "模型看到了但没有引用的依据".into(),
-                origin: Origin::User {
-                    app: "fixture".into(),
-                    project: None,
-                    uri: None,
-                },
-            })
-            .unwrap();
-        let topic = id();
-        store.create_conversation(&topic, "trace").unwrap();
-        let source = SourceRef::Version(raw.version_id.clone());
-        let turn = store
-            .start_turn(&id(), &topic, "问题", std::slice::from_ref(&source))
-            .unwrap();
-        store
-            .bind_discussion_evidence(&turn.id, std::slice::from_ref(&source))
-            .unwrap();
-        let mapping = HashMap::from([(raw.version_id, "seed".into())]);
-        let bound = retrieved_evidence(&store, &turn.assistant.id, &mapping);
-        assert_eq!(bound.len(), 1);
-        assert_eq!(bound[0]["cited"], false);
-        assert_eq!(bound[0]["text"], "模型看到了但没有引用的依据");
-        store.finish_turn(&turn.id, "答案", &[source]).unwrap();
-        assert_eq!(
-            retrieved_evidence(&store, &turn.assistant.id, &mapping)[0]["cited"],
-            true
-        );
-    }
-    #[test]
-    fn evidence_export_keeps_uncited_disjoint_reads() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE message_citations(message_id,kind,source_id,cited,excerpt_start,excerpt_length);
-            CREATE TABLE message_evidence_spans(message_id,kind,source_id,start_char,length_chars);
-            CREATE TABLE captures(id,text); CREATE TABLE memory_versions(id,body);
-            INSERT INTO memory_versions VALUES('v','first-----last');
-            INSERT INTO message_citations VALUES('m','version','v',0,0,5);
-            INSERT INTO message_evidence_spans VALUES('m','version','v',0,5),('m','version','v',10,4);").unwrap();
-        let rows = retrieved_rows(&db, "m", &HashMap::new());
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0]["text"], "first");
-        assert_eq!(rows[1]["text"], "last");
-        assert_eq!(rows[1]["cited"], false);
+        println!("{case}: saved synthetic evidence");
     }
 }

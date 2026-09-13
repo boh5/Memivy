@@ -8,15 +8,15 @@ import { flushDrafts, refreshDrafts } from "./useDraft";
 
 export type DesktopState = {
   expanded: boolean; generation: number; sequence?: number; pinned: boolean; visible: boolean;
-  paused: boolean; shortcut: string; mode: "capture" | "ask"; topic: Topic | null;
+  paused: boolean; shortcut: string; topic: Topic | null;
   source_app: string; last_memory: string | null; error: string | null;
   configured: boolean; ready_ms: number | null; save_ms: number | null;
   receipt: boolean;
 };
-export type DesktopPatch = Partial<Pick<DesktopState, "visible" | "paused" | "shortcut" | "pinned" | "mode">> & { topic_id?: string; clear_topic?: boolean };
-export type MainRoute = { generation: number; topic: Topic | null; mode: "capture" | "ask"; quick: boolean; record: Key | null; settings: boolean };
+export type DesktopPatch = Partial<Pick<DesktopState, "visible" | "paused" | "shortcut" | "pinned">> & { topic_id?: string; clear_topic?: boolean };
+export type MainRoute = { generation: number; topic: Topic | null; quick: boolean; record: Key | null; settings: boolean };
 export const previewDesktop: DesktopState = { expanded: true, generation: 1, pinned: false, visible: true,
-  paused: false, shortcut: "Control+Super+KeyM", mode: "capture", topic: null, source_app: "Safari",
+  paused: false, shortcut: "Control+Super+KeyM", topic: null, source_app: "Safari",
   last_memory: null, error: null, configured: false, ready_ms: null, save_ms: null, receipt: false };
 export function useDesktop() {
   const [state, setState] = useState<DesktopState | null>(native ? null : previewDesktop);

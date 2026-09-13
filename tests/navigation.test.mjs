@@ -1,78 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workspaceFixture } from './helpers/workspace.mjs';
-import { isRecallSubmitKey } from '../src/workspace/keyboard.ts';
-
 const input=(f,v)=>f.find(v,n=>n.type==='textarea');
-const enter={key:'Enter',metaKey:false,ctrlKey:false,altKey:false,shiftKey:false,repeat:false,keyCode:13,nativeEvent:{isComposing:false},preventDefault(){}};
-const captureProps={mode:'capture',presentation:'capture',focus:1,onSaved(){},onAsk:async()=>{},onMode(){},onEdit(){}};
-const queryProps={...captureProps,mode:'ask',presentation:'query'};
-
-test('recall Return submits, Shift Return and IME confirmation do not',()=>{
-  assert.equal(isRecallSubmitKey(enter),true);
-  assert.equal(isRecallSubmitKey({...enter,metaKey:true}),true);
-  for(const patch of [{shiftKey:true},{ctrlKey:true},{altKey:true},{repeat:true},{isComposing:true},{keyCode:229}])
-    assert.equal(isRecallSubmitKey({...enter,...patch}),false);
-  assert.equal(isRecallSubmitKey(enter,true),false);
-});
-
-test('typing never starts RAG; Return starts one discussion and never captures the query',async t=>{
-  const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
-  const app=f.mount(App);await f.settle();
-  const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
-  input(f,form).props.onChange({target:{value:'我为什么决定先做桌面版？'}});await f.settle();
-  assert.equal(f.calls.filter(c=>c.name==='discussion_ask').length,0);
-  assert.equal(f.db.get('question').body,'我为什么决定先做桌面版？');
-  input(f,form).props.onKeyDown(enter);input(f,form).props.onKeyDown(enter);await f.settle();
-  const asks=f.calls.filter(c=>c.name==='discussion_ask');assert.equal(asks.length,1);
-  assert.equal(asks[0].args.context.length,0);f.completeAsk();await f.settle();
-  assert.equal(f.calls.filter(c=>c.name==='library_capture').length,0);
-  assert.equal(f.db.has('question'),false);
-  assert(f.nodes(app.tree).some(n=>n.props.topic?.id==='topic-a'));
-});
-
-test('failed recall keeps its draft and retries the same logical question',async t=>{
-  const f=workspaceFixture(t),Form=f.load('src/workspace/CaptureForm.tsx').default;
-  const ids=[];const form=f.mount(Form,{...queryProps,onAsk:async(_,id)=>{ids.push(id);throw '暂时断开';}});await f.settle();
-  input(f,form).props.onChange({target:{value:'过去的决定'}});await f.settle();
-  for(let i=0;i<2;i++){input(f,form).props.onKeyDown(enter);await f.settle();}
-  assert.equal(input(f,form).props.value,'过去的决定');assert.equal(ids.length,2);assert.equal(ids[0],ids[1]);
-  f.unmount(form);const reopened=f.mount(Form,queryProps);await f.settle();assert.equal(input(f,reopened).props.value,'过去的决定');
-});
-
-test('completed capture restores input focus while a query leaves focus with discussion',async t=>{
-  const f=workspaceFixture(t),Form=f.load('src/workspace/CaptureForm.tsx').default;
-  f.overrides.library_capture=async()=>({id:'saved'});
-  for(const props of [captureProps,{...queryProps,onAsk:async()=>{}}]) {
-    const form=f.mount(Form,props);await f.settle();let enabledFocus=0;
-    input(f,form).props.ref.current.focus=()=>{if(!input(f,form).props.disabled)enabledFocus++;};
-    input(f,form).props.onChange({target:{value:'焦点验证'}});await f.settle();
-    input(f,form).props.onKeyDown({...enter,metaKey:true});await f.settle();
-    assert.equal(enabledFocus>0,props.mode==='capture');f.unmount(form);
-  }
-});
-
-test('capture dialog preserves the selected record and recall draft when saving',async t=>{
-  const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,List=f.load('src/workspace/MemoryList.tsx').default,Dialog=f.load('src/workspace/CaptureDialog.tsx').default,Detail=f.load('src/workspace/MemoryDetail.tsx').default;
-  const app=f.mount(App);await f.settle();f.find(app,n=>n.type===List).props.onSelect(f.keyA);await f.settle();
-  const question={key:'question',request_id:'q',title:'',body:'还没提问的草稿',expected_version:null};f.db.set('question',question);
-  f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
-  assert.equal(f.find(app,n=>n.type===Detail).props.record.id,'a');
-  f.find(app,n=>n.type===Dialog).props.onSaved({kind:'capture',id:'new'});await f.settle();
-  assert.equal(f.find(app,n=>n.type===Detail).props.record.id,'a');
-  assert.equal(f.db.get('question').body,'还没提问的草稿');assert(!f.nodes(app.tree).some(n=>n.type===Dialog));
-});
-
-test('closing capture flushes its own draft, ignores unrelated failures, and waits for submission',async t=>{
-  const f=workspaceFixture(t),Dialog=f.load('src/workspace/CaptureDialog.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
-  const {useDraft}=f.load('src/workspace/useDraft.ts');let closed=0;
-  const bad=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();bad.tree.update({title:'中文'.repeat(101)});await f.settle();
-  const dialog=f.mount(Dialog,{quick:false,focus:1,onReady(){},onSaved(){},onClose(){closed++;}});await f.settle();
-  const formNode=f.find(dialog,n=>n.type===Form);const form=f.mount(Form,formNode.props);await f.settle();
-  input(f,form).props.onChange({target:{value:'收起后还在'}});await f.settle();
-  formNode.props.onBusy(true);dialog.tree.props.onClose();await f.settle();assert.equal(closed,0);
-  formNode.props.onBusy(false);dialog.tree.props.onClose();await f.settle();assert.equal(closed,1);assert.equal(f.db.get('capture').body,'收起后还在');
-});
 
 test('browsing selection or discussions does not refetch the paged list',async t=>{
   const f=workspaceFixture(t),List=f.load('src/workspace/MemoryList.tsx').default;
@@ -95,9 +24,9 @@ test('a stale list request cannot replace a newer filter result',async t=>{
 test('query handoff reads the existing quick-question draft before acknowledging',async t=>{
   const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};f.overrides.desktop_state=async()=>null;f.overrides.desktop_handoff_ready=async()=>{};
-  f.db.set('quick_question',{key:'quick_question',request_id:'handoff-query',title:'',body:'小窗里没问完的问题',expected_version:null});
+  f.db.set('quick_input',{key:'quick_input',request_id:'handoff-query',title:'',body:'小窗里没问完的问题',expected_version:null});
   const app=f.mount(App);await f.settle();
-  f.emit('desktop-route',{generation:42,quick:true,mode:'ask',topic:null,record:null,settings:false});await f.settle();
+  f.emit('desktop-route',{generation:42,quick:true,topic:null,record:null,settings:false});await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='desktop_handoff_ready').length,0);
   const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
   assert.equal(input(f,form).props.value,'小窗里没问完的问题');
@@ -108,15 +37,15 @@ test('query handoff reads the existing quick-question draft before acknowledging
 test('new desktop questions do not inherit the collection open in the main window',async t=>{
   const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};f.overrides.desktop_state=async()=>null;
-  f.overrides.desktop_update=async()=>null;f.overrides.discussion_ask=async()=>f.topic;
+  f.overrides.desktop_update=async()=>null;f.overrides.discussion_submit=async()=>f.topic;
   f.overrides.navigation_collections=async()=>[{id:'scope',name:'产品',revision:1}];
   const app=f.mount(App);await f.settle();
   f.find(app,n=>n.type===Sidebar).props.onCollection('scope');await f.settle();
-  assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
-  f.emit('desktop-route',{generation:43,quick:true,mode:'ask',topic:null,record:null,settings:false});await f.settle();
-  assert(!f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('仅在 产品 中提问'));
-  await f.find(f.query(app),n=>n.type===Form).props.onAsk('全库问题','desktop-question');await f.settle();
-  assert.equal(f.calls.find(c=>c.name==='discussion_ask').args.collectionId,null);
+  assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 产品'));
+  f.emit('desktop-route',{generation:43,quick:true,topic:null,record:null,settings:false});await f.settle();
+  assert(!f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 产品'));
+  await f.find(f.query(app),n=>n.type===Form).props.onSubmit({text:'全库问题',id:'desktop-question',context:[]});await f.settle();
+  assert.equal(f.calls.find(c=>c.name==='discussion_submit').args.collectionId,null);
 });
 
 test('native initialization errors keep language recovery mounted in the main window',async t=>{
@@ -125,4 +54,69 @@ test('native initialization errors keep language recovery mounted in the main wi
   f.overrides.backup_result=async()=>null;f.overrides.desktop_state=async()=>null;
   const app=f.mount(App);await f.settle();
   assert(f.nodes(app.tree).some(n=>n.type===LanguageRecovery));
+});
+
+test('generated topic titles refresh the open discussion without replacing its composer draft',async t=>{
+  let revision=0;
+  const f=workspaceFixture(t,{modules:{'./resources':{useResourceVersion:()=>revision,useResourceBridge(){},expireQueries:async()=>{}}}});
+  const App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Discussion=f.load('src/workspace/Discussion.tsx').default;
+  let topic={...f.topic,title:'New discussion'};
+  f.overrides.library_topics=async()=>[topic];
+  const app=f.mount(App);await f.settle();
+  f.find(app,n=>n.type===Sidebar).props.onTopic(topic);await f.settle();
+  const before=f.find(app,n=>n.type===Discussion);
+  const discussion=f.mount(Discussion,before.props);await f.settle();
+  const composer=f.composer(discussion);await f.settle();
+  input(f,composer).props.onChange({target:{value:'还没有发送的下一句'}});await f.settle();
+  topic={...topic,title:'每周二十分钟的折纸练习'};revision++;
+  f.render(app,{});await f.settle();
+  const after=f.find(app,n=>n.type===Discussion);
+  assert.equal(after.key,before.key);assert.equal(after.props.topic.title,topic.title);
+  f.render(discussion,after.props);await f.settle();
+  assert.equal(input(f,f.composer(discussion)).props.value,'还没有发送的下一句');
+});
+
+for (const quick of [false, true]) test(`discussion submission uses the ${quick ? 'handed-off application' : 'main window'} as its source`,async t=>{
+  const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default;
+  const Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Discussion=f.load('src/workspace/Discussion.tsx').default;
+  const {previewDesktop}=f.load('src/workspace/desktopApi.ts');
+  f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};
+  f.overrides.desktop_state=async()=>({...previewDesktop,source_app:'Safari'});
+  f.overrides.desktop_handoff_ready=async()=>{};
+  f.overrides.discussion_submit=async()=>f.topic;
+  const app=f.mount(App);await f.settle();
+  if(quick) f.emit('desktop-route',{generation:44,quick:true,topic:f.topic,record:null,settings:false});
+  else f.find(app,n=>n.type===Sidebar).props.onTopic(f.topic);
+  await f.settle();
+  const discussion=f.mount(Discussion,f.find(app,n=>n.type===Discussion).props);await f.settle();
+  const composer=f.composer(discussion);await f.settle();
+  input(f,composer).props.onChange({target:{value:'每周安排二十分钟练习。'}});await f.settle();
+  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==='发送').props.onClick();await f.settle();
+  assert.equal(f.calls.find(c=>c.name==='discussion_submit').args.origin.app,quick?'Safari':'Memivy');
+});
+
+for (const target of ['topic','library']) test(`local ${target} navigation ends quick-entry submission ownership and preserves the handoff draft`,async t=>{
+  const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default;
+  const Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Discussion=f.load('src/workspace/Discussion.tsx').default;
+  const Form=f.load('src/workspace/CaptureForm.tsx').default,{previewDesktop}=f.load('src/workspace/desktopApi.ts');
+  f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};
+  f.overrides.desktop_state=async()=>({...previewDesktop,topic:f.topic,source_app:'Safari'});
+  f.overrides.desktop_handoff_ready=async()=>{};f.overrides.desktop_update=async()=>previewDesktop;
+  f.overrides.discussion_submit=async()=>({...f.topic,id:'other-topic'});
+  const original={key:`discussion:${f.topic.id}`,request_id:'handoff-original',title:'',body:'小窗未发送的原话',expected_version:null,origin:{kind:'user',app:'Safari'}};
+  f.db.set(original.key,structuredClone(original));
+  const app=f.mount(App);await f.settle();
+  f.emit('desktop-route',{generation:45,quick:true,topic:f.topic,record:null,settings:false});await f.settle();
+  const navigation=f.find(app,n=>n.type===Sidebar).props;
+  if(target==='topic') navigation.onTopic({...f.topic,id:'other-topic'});else navigation.onLibrary();
+  await f.settle();
+  const surface=target==='topic'?f.mount(Discussion,f.find(app,n=>n.type===Discussion).props):null;
+  if(surface) await f.settle();
+  const composer=surface?f.composer(surface):f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
+  input(f,composer).props.onChange({target:{value:'这条表达来自主窗口。'}});await f.settle();
+  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==='发送').props.onClick();await f.settle();
+  const sent=f.calls.find(c=>c.name==='discussion_submit');
+  assert.equal(sent.args.quick,false);assert.equal(sent.args.origin.app,'Memivy');
+  assert(!f.calls.some(c=>c.name==='desktop_update'),'local input must not replace the quick-entry topic');
+  assert.deepEqual(f.db.get(original.key),original);
 });

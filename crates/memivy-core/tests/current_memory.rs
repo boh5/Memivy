@@ -15,15 +15,17 @@ fn request(text: &str) -> CaptureRequest {
         },
     }
 }
-fn proposal(action: &str, text: &str) -> OrganizationProposal {
-    OrganizationProposal {
-        action: action.into(),
-        target: String::new(),
+fn proposal(task: &OrganizationTask, text: &str) -> MemoryWriteArgs {
+    MemoryWriteArgs {
+        destination: Destination::New,
         title: "整理后".into(),
-        addition: text.into(),
-        changes: vec![],
-        keywords: vec![],
-        reason: "独立事项".into(),
+        parts: vec![MemoryWritePart {
+            text: text.into(),
+            sources: vec![MemorySourceQuote {
+                source_id: task.capture_id.clone(),
+                quote: task.memory.body.trim().chars().take(512).collect(),
+            }],
+        }],
     }
 }
 
@@ -96,7 +98,7 @@ fn automatic_organization_keeps_identity_and_yields_to_a_draft() {
     let task = store.claim_organization().unwrap().unwrap();
     store
         .save_workspace_draft(&WorkspaceDraft {
-            conclusion: None,
+            destination: None,
             key: format!("memory:{}", saved.memory_id),
             request_id: id(),
             title: "用户标题".into(),
@@ -107,7 +109,7 @@ fn automatic_organization_keeps_identity_and_yields_to_a_draft() {
         })
         .unwrap();
     assert!(matches!(
-        store.apply_organization(&task, &proposal("keep", "整理好的细节")),
+        store.apply_organization(&task, &proposal(&task, "整理好的细节")),
         Err(DataError::Conflict)
     ));
     assert_eq!(
@@ -118,7 +120,7 @@ fn automatic_organization_keeps_identity_and_yields_to_a_draft() {
         .delete_workspace_draft(&format!("memory:{}", saved.memory_id))
         .unwrap();
     let receipt = store
-        .apply_organization(&task, &proposal("keep", "整理好的细节"))
+        .apply_organization(&task, &proposal(&task, "整理好的细节"))
         .unwrap();
     assert_eq!(receipt.memory_id.as_deref(), Some(saved.memory_id.as_str()));
     assert_eq!(
@@ -134,15 +136,24 @@ fn merge_is_atomic_and_purge_removes_the_hidden_snapshot() {
     let target = store.capture(&request("主记忆")).unwrap();
     let target_task = store.claim_organization().unwrap().unwrap();
     store
-        .apply_organization(&target_task, &proposal("keep", "主记忆"))
+        .apply_organization(&target_task, &proposal(&target_task, "主记忆"))
         .unwrap();
     let input = store.capture(&request("合并输入独有机密")).unwrap();
-    let mut task = store.claim_organization().unwrap().unwrap();
-    task.candidates
-        .push(store.memory(&target.memory_id).unwrap().current);
-    let mut p = proposal("merge", "合并输入独有机密");
-    p.target = "M1".into();
-    p.title.clear();
+    let task = store.claim_organization().unwrap().unwrap();
+    let target_version = store.memory(&target.memory_id).unwrap().current;
+    let mut p = proposal(&task, "主记忆\n\n合并输入独有机密");
+    p.destination = Destination::Existing {
+        memory_id: target.memory_id.clone(),
+        expected_version: target_version.id,
+    };
+    p.title = target_version.title;
+    p.parts = vec![
+        MemoryWritePart {
+            text: "主记忆\n\n".into(),
+            sources: vec![],
+        },
+        proposal(&task, "合并输入独有机密").parts.remove(0),
+    ];
     let receipt = store.apply_organization(&task, &p).unwrap();
     assert_eq!(receipt.action, "merge");
     assert_eq!(
@@ -166,32 +177,36 @@ fn merge_is_atomic_and_purge_removes_the_hidden_snapshot() {
 }
 
 #[test]
-fn conclusion_conflict_preserves_review_draft_without_creating_an_archive() {
+fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let target = store.capture(&request("目标原正文")).unwrap();
     let topic = id();
     store.create_conversation(&topic, "讨论").unwrap();
-    let turn = store.start_turn(&id(), &topic, "问题", &[]).unwrap();
-    store.finish_turn(&turn.id, "回答", &[]).unwrap();
+    let run = store
+        .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
+        .unwrap();
+    store
+        .append_agent_text(&run.input_id, &run.attempt_id, "回答")
+        .unwrap();
+    store
+        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .unwrap();
     let destination = Destination::Existing {
         memory_id: target.memory_id.clone(),
         expected_version: target.version_id.clone(),
     };
     let draft = WorkspaceDraft {
-        key: format!("conclusion:{}", turn.assistant.id),
+        key: format!("save:{}", run.assistant_message_id),
         request_id: id(),
-        title: "审核标题".into(),
-        body: "  审核结论\n原样保留 🙂  ".into(),
+        title: "手动标题".into(),
+        body: "  用户选择的文字\n原样保留 🙂  ".into(),
         expected_version: None,
         origin: None,
         context: vec![],
-        conclusion: Some(ConclusionDraft {
-            destination: destination.clone(),
-            merged_body: Some("完整融合稿\n含原文和新结论".into()),
-        }),
+        destination: Some(destination.clone()),
     };
-    assert!(store.compare_workspace_draft(&draft, None).unwrap());
+    store.compare_workspace_draft(&draft, None).unwrap();
     store
         .edit_memory(&EditRequest {
             request_id: id(),
@@ -201,47 +216,42 @@ fn conclusion_conflict_preserves_review_draft_without_creating_an_archive() {
             body: "目标已改动".into(),
         })
         .unwrap();
-    let save = ConclusionRequest {
-        request_id: draft.request_id.clone(),
-        message_id: turn.assistant.id,
-        destination: destination.clone(),
-        title: draft.title.clone(),
-        text: draft.body.clone(),
-    };
     assert_eq!(
         store
-            .save_reviewed_conclusion(
-                &save,
-                draft.conclusion.as_ref().unwrap().merged_body.as_deref()
+            .save_agent_text(
+                &draft.request_id,
+                &run.input_id,
+                &draft.body,
+                &draft.title,
+                &destination
             )
-            .unwrap()
-            .status,
-        "needs_review"
+            .unwrap_err(),
+        DataError::Conflict
     );
     drop(store);
     let store = MemoryStore::open(dir.path()).unwrap();
     let recovered = store.workspace_draft(&draft.key).unwrap().unwrap();
     assert_eq!(recovered.body, draft.body);
     assert_eq!(recovered.title, draft.title);
-    let review = recovered.conclusion.unwrap();
-    assert_eq!(review.destination, destination);
-    assert_eq!(review.merged_body, draft.conclusion.unwrap().merged_body);
+    assert_eq!(recovered.destination, Some(destination));
     assert_eq!(
         store.memory(&target.memory_id).unwrap().current.body,
         "目标已改动"
     );
-    let db = rusqlite::Connection::open(store.database_path()).unwrap();
-    let archives: i64 = db
-        .query_row("SELECT count(*) FROM captures", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(archives, 1);
+    assert_eq!(
+        rusqlite::Connection::open(store.database_path())
+            .unwrap()
+            .query_row("SELECT count(*) FROM captures", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
     assert_eq!(
         store.library(&LibraryQuery::default()).unwrap().items.len(),
         1
     );
     assert!(
         store
-            .search(&SearchRequest::text("审核结论", 8))
+            .search(&SearchRequest::text("用户选择", 8))
             .unwrap()
             .items
             .is_empty()
@@ -250,52 +260,55 @@ fn conclusion_conflict_preserves_review_draft_without_creating_an_archive() {
 }
 
 #[test]
-fn confirmed_conclusion_consumes_its_draft_atomically_and_replays_once() {
+fn manual_save_consumes_its_draft_atomically_and_replay_preserves_a_newer_draft() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let target = store.capture(&request("原正文")).unwrap();
     let topic = id();
     store.create_conversation(&topic, "讨论").unwrap();
-    let turn = store.start_turn(&id(), &topic, "问题", &[]).unwrap();
-    store.finish_turn(&turn.id, "回答", &[]).unwrap();
-    let save = ConclusionRequest {
-        request_id: id(),
-        message_id: turn.assistant.id,
-        destination: Destination::Existing {
-            memory_id: target.memory_id.clone(),
-            expected_version: target.version_id,
-        },
-        title: "标题".into(),
-        text: "确认的结论".into(),
+    let run = store
+        .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
+        .unwrap();
+    store
+        .append_agent_text(&run.input_id, &run.attempt_id, "回答")
+        .unwrap();
+    store
+        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .unwrap();
+    let request = id();
+    let destination = Destination::Existing {
+        memory_id: target.memory_id.clone(),
+        expected_version: target.version_id,
     };
+    let text = "确认的文字";
+    let title = "标题";
     let mut draft = WorkspaceDraft {
-        key: format!("conclusion:{}", save.message_id),
-        request_id: save.request_id.clone(),
-        title: save.title.clone(),
-        body: save.text.clone(),
+        key: format!("save:{}", run.assistant_message_id),
+        request_id: request.clone(),
+        title: title.into(),
+        body: text.into(),
         expected_version: None,
         origin: None,
         context: vec![],
-        conclusion: Some(ConclusionDraft {
-            destination: save.destination.clone(),
-            merged_body: None,
-        }),
+        destination: Some(destination.clone()),
     };
     store.save_workspace_draft(&draft).unwrap();
-    let saved = store.save_conclusion(&save).unwrap();
-    assert_eq!(saved.status, "applied");
-    // Simulate process loss immediately after commit, before the UI receives it.
+    let saved = store
+        .save_agent_text(&request, &run.input_id, text, title, &destination)
+        .unwrap();
     drop(store);
     let store = MemoryStore::open(dir.path()).unwrap();
     assert!(store.workspace_draft(&draft.key).unwrap().is_none());
     draft.request_id = id();
     draft.body = "另一窗口的新草稿".into();
     store.save_workspace_draft(&draft).unwrap();
-    let replay = store.save_conclusion(&save).unwrap();
+    let replay = store
+        .save_agent_text(&request, &run.input_id, text, title, &destination)
+        .unwrap();
     assert_eq!(replay.after_version, saved.after_version);
     assert_eq!(
         store.memory(&target.memory_id).unwrap().current.body,
-        "原正文\n\n确认的结论"
+        "原正文\n\n确认的文字"
     );
     assert_eq!(
         store.workspace_draft(&draft.key).unwrap().unwrap().body,
@@ -412,12 +425,11 @@ fn merge_yields_to_an_unsaved_target_draft_without_changing_either_memory() {
     let target = store.capture(&request("目标当前正文")).unwrap();
     let target_task = store.claim_organization().unwrap().unwrap();
     store
-        .apply_organization(&target_task, &proposal("keep", "目标当前正文"))
+        .apply_organization(&target_task, &proposal(&target_task, "目标当前正文"))
         .unwrap();
     let input = store.capture(&request("新补充内容")).unwrap();
-    let mut task = store.claim_organization().unwrap().unwrap();
+    let task = store.claim_organization().unwrap().unwrap();
     let before = store.memory(&target.memory_id).unwrap().current;
-    task.candidates.push(before.clone());
     let draft = WorkspaceDraft {
         key: format!("memory:{}", target.memory_id),
         request_id: id(),
@@ -426,12 +438,22 @@ fn merge_yields_to_an_unsaved_target_draft_without_changing_either_memory() {
         expected_version: Some(before.id.clone()),
         origin: None,
         context: vec![],
-        conclusion: None,
+        destination: None,
     };
     store.save_workspace_draft(&draft).unwrap();
-    let mut p = proposal("merge", "新补充内容");
-    p.target = "M1".into();
-    p.title.clear();
+    let mut p = proposal(&task, "目标当前正文\n\n新补充内容");
+    p.destination = Destination::Existing {
+        memory_id: target.memory_id.clone(),
+        expected_version: before.id.clone(),
+    };
+    p.title = before.title.clone();
+    p.parts = vec![
+        MemoryWritePart {
+            text: "目标当前正文\n\n".into(),
+            sources: vec![],
+        },
+        proposal(&task, "新补充内容").parts.remove(0),
+    ];
     assert_eq!(
         store.apply_organization(&task, &p).unwrap_err(),
         DataError::Conflict
@@ -455,34 +477,38 @@ fn merge_yields_to_an_unsaved_target_draft_without_changing_either_memory() {
 }
 
 #[test]
-fn deleting_a_discussion_removes_its_review_drafts_but_preserves_saved_memories() {
+fn deleting_a_discussion_removes_its_unsaved_selection_but_preserves_saved_memories() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let topic = id();
     store.create_conversation(&topic, "讨论").unwrap();
-    let turn = store.start_turn(&id(), &topic, "问题", &[]).unwrap();
-    store.finish_turn(&turn.id, "回答", &[]).unwrap();
+    let run = store
+        .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
+        .unwrap();
+    store
+        .append_agent_text(&run.input_id, &run.attempt_id, "回答")
+        .unwrap();
+    store
+        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .unwrap();
     let saved = store
-        .save_conclusion(&ConclusionRequest {
-            request_id: id(),
-            message_id: turn.assistant.id.clone(),
-            destination: Destination::New,
-            title: "已确认".into(),
-            text: "已保存的内容".into(),
-        })
+        .save_agent_text(
+            &id(),
+            &run.input_id,
+            "已保存的内容",
+            "手动保存",
+            &Destination::New,
+        )
         .unwrap();
     let draft = WorkspaceDraft {
-        key: format!("conclusion:{}", turn.assistant.id),
+        key: format!("save:{}", run.assistant_message_id),
         request_id: id(),
         title: "未保存".into(),
-        body: "待审核结论".into(),
+        body: "未发送文字".into(),
         expected_version: None,
         origin: None,
         context: vec![],
-        conclusion: Some(ConclusionDraft {
-            destination: Destination::New,
-            merged_body: None,
-        }),
+        destination: Some(Destination::New),
     };
     store.save_workspace_draft(&draft).unwrap();
     store.delete_conversation(&topic).unwrap();
@@ -509,7 +535,7 @@ fn organization_off_blocks_new_effects_but_preserves_receipt_replay() {
     let store = MemoryStore::open(dir.path()).unwrap();
     store.capture(&request("已整理事项")).unwrap();
     let first = store.claim_organization().unwrap().unwrap();
-    let proposal = proposal("keep", "整理结果");
+    let proposal = proposal(&first, "整理结果");
     let receipt = store.apply_organization(&first, &proposal).unwrap();
     let saved = store.capture(&request("新事项原文")).unwrap();
     let pending = store.claim_organization().unwrap().unwrap();
@@ -523,7 +549,19 @@ fn organization_off_blocks_new_effects_but_preserves_receipt_replay() {
         receipt
     );
     assert!(matches!(
-        store.apply_organization(&pending, &proposal),
+        store.apply_organization(
+            &pending,
+            &MemoryWriteArgs {
+                parts: vec![MemoryWritePart {
+                    text: "整理结果".into(),
+                    sources: vec![MemorySourceQuote {
+                        source_id: pending.capture_id.clone(),
+                        quote: pending.memory.body.clone()
+                    }],
+                }],
+                ..proposal.clone()
+            }
+        ),
         Err(DataError::Conflict)
     ));
     assert_eq!(

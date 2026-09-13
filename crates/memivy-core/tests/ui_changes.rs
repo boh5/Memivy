@@ -33,14 +33,14 @@ fn committed_changes_are_scoped_cross_connection_and_drafts_are_excluded() {
     assert!(!changes.changes.iter().any(|c| c.domain == "discussion"));
     other
         .save_workspace_draft(&WorkspaceDraft {
-            key: "question".into(),
+            key: "input".into(),
             request_id: Uuid::new_v4().to_string(),
             title: "".into(),
             body: "draft only".into(),
             expected_version: None,
             origin: None,
             context: vec![],
-            conclusion: None,
+            destination: None,
         })
         .unwrap();
     assert!(

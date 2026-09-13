@@ -17,6 +17,7 @@
   "model_truncated": "The model response was cut off. Try adjusting its output limit.",
   "model_tools_unsupported": "This model does not support the required tools.",
   "invalid": "Check the input and try again.",
+  "source_attribution": "The memory's source references could not be verified. This change was not saved.",
   "collection_name": "A collection with this name already exists. Choose another name.",
   "navigation_limit": "Pins or collections have reached the 100-item limit. Remove an item before adding another.",
   "schema": "This library format is not supported by this version.",
@@ -47,6 +48,8 @@
   "shortcut_taken": "This shortcut is already in use. Choose another combination.",
   "voice_shortcut_failed": "The voice shortcut could not be registered. Choose another combination.",
   "voice_incomplete": "Wait for transcription to finish before submitting.",
+  "voice_no_audio": "No audio was captured. Check the microphone input and record again.",
+  "voice_no_transcription": "No speech was recognized. Your recording is retained; retry or record again.",
   "voice_settings_unreadable": "Voice settings cannot be read. Check local file permissions.",
   "voice_settings_invalid": "Voice settings are invalid. Text input is still available.",
   "desktop_settings_invalid": "Quick entry settings are invalid. Save them again in Settings.",
@@ -92,6 +95,7 @@
   "voice_transcription_failed": "Transcription did not finish. Retry using the retained recording.",
   "microphone_permission": "Allow Memivy in System Settings → Privacy & Security → Microphone, and check the input device.",
   "microphone_missing": "No microphone was found. Connect an input device.",
+  "microphone_start_timeout": "The audio device did not respond. Check the system input device and restart Memivy before recording again. Your text is preserved.",
   "microphone_unavailable": "The microphone is unavailable. Check the system input device.",
   "microphone_format": "The microphone format is unsupported. Choose another input device.",
   "audio_conversion_failed": "Audio conversion failed. Retry using a supported input device.",
@@ -195,5 +199,9 @@
   "embedding_clear_failed": "Model cleanup did not finish. Check local permissions and retry.",
   "restore_completed": "Backup restored. The previous library is also preserved.",
   "restore_rolled_back": "Restore did not finish. The library was rolled back to its previous content.",
-  "restore_failed_preserved": "Restore did not finish. The original library is preserved. {{error}}"
+  "restore_failed_preserved": "Restore did not finish. The original library is preserved. {{error}}",
+  "model_test_agent": "Verified: streaming replies and multi-turn tools are supported.",
+  "model_test_agent_unsupported": "Agent capability check failed. Streaming text and multi-turn tools are required to activate this conversation model.",
+  "agent_model_required": "Your original input is saved. Connect a model, then retry.",
+  "agent_budget": "This turn reached its processing limit. Your input and completed changes are preserved; you can continue the discussion."
 }

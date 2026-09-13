@@ -1,10 +1,9 @@
 .memory-detail-toolbar .toolbar-actions[hidden], .detail-tabs[hidden] { display: none; }
 .action-tooltip { position: relative; display: inline-flex; align-items: center; }
-.action-tooltip [role="tooltip"] { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 80; width: max-content; max-width: 220px; padding: 6px 9px; border-radius: 6px; background: #25262a; color: white; font-size: 11px; font-weight: 400; line-height: 1.5; pointer-events: none; opacity: 0; visibility: hidden; }
-.action-tooltip:not(.tooltip-dismissed):hover > [role="tooltip"], .action-tooltip:not(.tooltip-dismissed):focus-within > [role="tooltip"] { opacity: 1; visibility: visible; }
-.memory-detail-toolbar .detail-icon-button, .memory-detail-toolbar .record-more > summary { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #666973; cursor: pointer; }
-.memory-detail-toolbar .detail-icon-button:hover, .memory-detail-toolbar .record-more > summary:hover { background: #f1f1ed; color: #24262d; }
-.memory-detail-toolbar .detail-icon-button:focus-visible, .memory-detail-toolbar .record-more > summary:focus-visible { outline: 2px solid #b78c00; outline-offset: 2px; }
+.action-tooltip [role="tooltip"] { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: max-content; max-width: min(220px, calc(100vw - 20px)); padding: 6px 9px; border: 0; border-radius: 6px; background: #25262a; color: white; font-size: 11px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; pointer-events: none; }
+.memory-detail-toolbar .detail-icon-button, .memory-detail-toolbar .record-more-trigger { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #666973; cursor: pointer; }
+.memory-detail-toolbar .detail-icon-button:hover, .memory-detail-toolbar .record-more-trigger:hover { background: #f1f1ed; color: #24262d; }
+.memory-detail-toolbar .detail-icon-button:focus-visible, .memory-detail-toolbar .record-more-trigger:focus-visible { outline: 2px solid #b78c00; outline-offset: 2px; }
 .memory-detail-toolbar .detail-icon-button.is-pinned { background: #fff4c4; color: #926e00; }
 .memory-detail-toolbar .detail-icon-button:disabled { opacity: .4; cursor: default; }
 .toolbar-divider { height: 18px; width: 1px; background: #e9e9e6; margin: 0 3px; }
@@ -25,8 +24,5 @@
 .model-output-settings { margin: 14px 0; }
 @media(max-width: 700px) { .memory-detail-toolbar { padding-left: 12px; padding-right: 12px; } .toolbar-actions { gap: 2px; } .cleanup-toolbar { gap: 4px; } .cleanup-toolbar button { padding: 7px; } }
 
-.toolbar-actions > .action-tooltip:last-child > [role="tooltip"] { left: auto; right: 0; transform: none; }
 .cleanup-diff del, .cleanup-diff ins { display: block; }
 .cleanup-toolbar .send-button { background: #ffd02f; color: #24262d; }
-
-.action-tooltip:has(.record-more[open]) > [role="tooltip"] { opacity: 0; visibility: hidden; }

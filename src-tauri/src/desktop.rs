@@ -3,7 +3,7 @@ use crate::{
     capture_panel,
     workspace::{HostResult, Workspace},
 };
-use memivy_core::memory::{CaptureRequest, CaptureResult, Conversation, Origin, RecordKey};
+use memivy_core::memory::{Conversation, RecordKey};
 use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::Instant};
@@ -50,7 +50,6 @@ struct Preferences {
     visible: bool,
     paused: bool,
     pinned: bool,
-    mode: String,
     topic_id: Option<String>,
     source_app: String,
     position: Option<(i32, i32)>,
@@ -63,7 +62,6 @@ impl Default for Preferences {
             visible: true,
             paused: false,
             pinned: false,
-            mode: "capture".into(),
             topic_id: None,
             source_app: "Memivy".into(),
             position: None,
@@ -105,7 +103,6 @@ pub struct Snapshot {
     pub visible: bool,
     pub paused: bool,
     pub shortcut: String,
-    pub mode: String,
     pub configured: bool,
     pub topic: Option<Conversation>,
     pub source_app: String,
@@ -116,6 +113,28 @@ pub struct Snapshot {
     pub receipt: bool,
 }
 impl Desktop {
+    fn remember_topic(&self, topic: Conversation) {
+        let mut state = self.inner.lock().unwrap();
+        state.prefs.topic_id = Some(topic.id.clone());
+        state.topic = Some(topic);
+        // The conversation is already durable. A failed optional window setting
+        // remains visible, but must not prevent the Agent from starting.
+        if let Err(error) = self.persist(&state.prefs) {
+            state.error = Some(error.to_string());
+        }
+    }
+    fn refresh_topic_title(&self, topic: &Conversation) -> bool {
+        let mut state = self.inner.lock().unwrap();
+        let Some(current) = state
+            .topic
+            .as_mut()
+            .filter(|current| current.id == topic.id)
+        else {
+            return false;
+        };
+        current.title.clone_from(&topic.title);
+        true
+    }
     pub fn new(path: PathBuf) -> Self {
         let (prefs, error) = match fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice::<Preferences>(&bytes) {
@@ -246,7 +265,6 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
         visible: p.visible,
         paused: p.paused,
         shortcut: p.shortcut.clone(),
-        mode: p.mode.clone(),
         configured: s.configured,
         topic: s.topic.clone(),
         source_app: p.source_app.clone(),
@@ -261,25 +279,71 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
 }
 // Context IO is separate from geometry/focus snapshots. A failed read must not
 // convert a live discussion into a new capture surface.
-fn refresh_context(app: &tauri::AppHandle) {
+struct DesktopContext {
+    topic_id: Option<String>,
+    previous_title: Option<String>,
+    topic: Option<memivy_core::memory::Result<Conversation>>,
+    configured: bool,
+}
+fn read_context(app: &tauri::AppHandle) -> DesktopContext {
     let desktop = app.state::<Desktop>();
-    let topic_id = desktop.inner.lock().unwrap().prefs.topic_id.clone();
+    let (topic_id, previous_title) = {
+        let state = desktop.inner.lock().unwrap();
+        (
+            state.prefs.topic_id.clone(),
+            state.topic.as_ref().map(|topic| topic.title.clone()),
+        )
+    };
     let topic = topic_id
         .as_ref()
         .map(|id| app.state::<Workspace>().store.conversation(id));
     let configured = crate::workspace::model_available(&app.state::<Workspace>());
+    DesktopContext {
+        topic_id,
+        previous_title,
+        topic,
+        configured,
+    }
+}
+// Call only on the main thread, where all preference read/modify/write operations
+// are serialized with change(), open(), and the window lifecycle.
+fn apply_context(desktop: &Desktop, context: DesktopContext) {
     let mut state = desktop.inner.lock().unwrap();
-    state.configured = configured;
-    if state.prefs.topic_id == topic_id {
-        match topic {
-            Some(Ok(value)) => state.topic = Some(value),
+    state.configured = context.configured;
+    if state.prefs.topic_id == context.topic_id {
+        match context.topic {
+            Some(Ok(mut value)) => {
+                if let Some(current) = state
+                    .topic
+                    .as_ref()
+                    .filter(|current| current.id == value.id)
+                    && Some(current.title.as_str()) != context.previous_title.as_deref()
+                {
+                    // An auxiliary title arrived after this read began. Its
+                    // database write does not change the conversation timestamp.
+                    value.title.clone_from(&current.title);
+                }
+                state.topic = Some(value);
+            }
             None => state.topic = None,
+            Some(Err(memivy_core::memory::DataError::Unavailable)) => {
+                state.topic = None;
+                state.prefs.topic_id = None;
+                if let Err(error) = desktop.persist(&state.prefs) {
+                    state.error = Some(error.to_string());
+                }
+            }
             Some(Err(error)) => state.error = Some(error.to_string()),
         }
     }
 }
 fn publish(app: &tauri::AppHandle) {
     let _ = app.emit("desktop-state", snapshot(app));
+}
+pub fn refresh_topic_title(app: &tauri::AppHandle, topic: &Conversation) {
+    if app.state::<Desktop>().refresh_topic_title(topic) {
+        publish(app);
+    }
 }
 pub fn clamp_position(
     x: i32,
@@ -374,7 +438,7 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
         .and_then(|_| w.set_position(frame.position))
         .map_err(|_| "window_geometry_failed".into())
 }
-pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> HostResult<()> {
+pub fn open(app: &tauri::AppHandle, at_cursor: bool) -> HostResult<()> {
     let started = Instant::now();
     let panel = app
         .get_webview_panel("capture")
@@ -390,7 +454,14 @@ pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> Ho
             if app
                 .state::<Workspace>()
                 .store
-                .workspace_draft("quick_capture")
+                .workspace_draft(
+                    s.prefs
+                        .topic_id
+                        .as_ref()
+                        .map(|id| format!("discussion:{id}"))
+                        .as_deref()
+                        .unwrap_or("quick_input"),
+                )
                 .map_err(crate::errors::HostError::from)?
                 .is_none_or(|d| d.body.is_empty())
             {
@@ -401,12 +472,6 @@ pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> Ho
                     .unwrap_or_default();
             }
         }
-        if let Some(mode) = mode.filter(|_| !s.modal_open) {
-            if !matches!(mode.as_str(), "capture" | "ask") {
-                return Err("capture_mode_invalid".into());
-            }
-            s.prefs.mode = mode;
-        }
         let persist_started = Instant::now();
         desktop.persist(&s.prefs)?;
         diagnostic("entry_prefs_ms", persist_started.elapsed().as_millis());
@@ -415,7 +480,7 @@ pub fn open(app: &tauri::AppHandle, mode: Option<String>, at_cursor: bool) -> Ho
         s.generation += 1;
         s.opened = Some(started);
         s.ready_ms = None;
-        discussion = s.prefs.mode == "ask" && s.prefs.topic_id.is_some();
+        discussion = s.prefs.topic_id.is_some();
     }
     layout(
         app,
@@ -540,7 +605,7 @@ fn register(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
                         .is_ok_and(|p| p.as_panel().isKeyWindow())
                 {
                     let _ = h.emit_to("capture", "desktop-dismiss-request", generation);
-                } else if let Err(e) = open(&h, None, true) {
+                } else if let Err(e) = open(&h, true) {
                     set_error(&h, e.to_string());
                 }
             });
@@ -564,17 +629,10 @@ pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         false,
         None::<&str>,
     )?;
-    let capture = MenuItem::with_id(
+    let input = MenuItem::with_id(
         app,
-        "quick-capture",
-        crate::i18n::text(app, "capture"),
-        true,
-        None::<&str>,
-    )?;
-    let ask = MenuItem::with_id(
-        app,
-        "quick-ask",
-        crate::i18n::text(app, "ask"),
+        "quick-input",
+        crate::i18n::text(app, "quickInput"),
         true,
         None::<&str>,
     )?;
@@ -626,7 +684,7 @@ pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &status, &sep, &capture, &ask, &open, &visible, &pause, &settings, &sep2, &quit,
+            &status, &sep, &input, &open, &visible, &pause, &settings, &sep2, &quit,
         ],
     )?;
     if let Some(tray) = app.tray_by_id("memivy") {
@@ -641,7 +699,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .database_path()
         .with_file_name("desktop.json");
     app.manage(Desktop::new(path));
-    refresh_context(app.handle());
+    apply_context(&app.state::<Desktop>(), read_context(app.handle()));
     termination::install(app.handle())?;
     capture_panel::configure(app.handle())?;
     panel_events::install(app.handle());
@@ -656,8 +714,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let id = event.id.as_ref().to_string();
             let _ = app.run_on_main_thread(move || {
                 let result = match id.as_str() {
-                    "quick-capture" => open(&h, Some("capture".into()), true),
-                    "quick-ask" => open(&h, Some("ask".into()), true),
+                    "quick-input" => open(&h, true),
                     "open" => show_main(&h),
                     "settings" => {
                         let r = show_main(&h);
@@ -721,14 +778,13 @@ pub struct Patch {
     visible: Option<bool>,
     paused: Option<bool>,
     pinned: Option<bool>,
-    mode: Option<String>,
     topic_id: Option<String>,
     clear_topic: Option<bool>,
 }
 fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     let desktop = app.state::<Desktop>();
     if desktop.inner.lock().unwrap().modal_open
-        && (patch.mode.is_some() || patch.topic_id.is_some() || patch.clear_topic == Some(true))
+        && (patch.topic_id.is_some() || patch.clear_topic == Some(true))
     {
         return Err("desktop_dialog_active".into());
     }
@@ -748,12 +804,6 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
     if let Some(v) = patch.pinned {
         p.pinned = v;
     }
-    if let Some(v) = patch.mode {
-        if !matches!(v.as_str(), "capture" | "ask") {
-            return Err("capture_mode_invalid".into());
-        }
-        p.mode = v;
-    }
     if let Some(id) = patch.topic_id {
         let topic = app
             .state::<Workspace>()
@@ -762,7 +812,6 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
             .map_err(crate::errors::HostError::from)?;
         next_topic = Some(Some(topic));
         p.topic_id = Some(id);
-        p.mode = "ask".into();
     }
     if patch.clear_topic == Some(true) {
         next_topic = Some(None);
@@ -817,11 +866,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
         layout(
             app,
             500.0,
-            if p.mode == "ask" && p.topic_id.is_some() {
-                620.0
-            } else {
-                310.0
-            },
+            if p.topic_id.is_some() { 620.0 } else { 310.0 },
             Placement::KeepAnchor,
         )?;
     }
@@ -848,10 +893,14 @@ pub async fn desktop_state(
 ) -> HostResult<Snapshot> {
     require(&window)?;
     let context_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || refresh_context(&context_app))
+    let context = tauri::async_runtime::spawn_blocking(move || read_context(&context_app))
         .await
         .map_err(|_| "desktop_status_failed")?;
-    on_main(&app, |h| Ok(snapshot(&h))).await
+    on_main(&app, move |h| {
+        apply_context(&h.state::<Desktop>(), context);
+        Ok(snapshot(&h))
+    })
+    .await
 }
 #[tauri::command]
 pub fn desktop_modal(
@@ -879,14 +928,10 @@ pub async fn desktop_update(
     .await
 }
 #[tauri::command]
-pub async fn desktop_open(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    mode: Option<String>,
-) -> HostResult<()> {
+pub async fn desktop_open(app: tauri::AppHandle, window: tauri::WebviewWindow) -> HostResult<()> {
     require(&window)?;
     let at_cursor = window.label() == "main";
-    on_main(&app, move |h| open(&h, mode, at_cursor)).await
+    on_main(&app, move |h| open(&h, at_cursor)).await
 }
 #[tauri::command]
 pub async fn desktop_dismiss(
@@ -949,10 +994,7 @@ pub async fn desktop_composer_resize(
     on_main(&app, move |h| {
         let desktop = h.state::<Desktop>();
         let s = desktop.inner.lock().unwrap();
-        if !s.expanded
-            || s.generation != generation
-            || (s.prefs.mode == "ask" && s.prefs.topic_id.is_some())
-        {
+        if !s.expanded || s.generation != generation || (s.prefs.topic_id.is_some()) {
             return Ok(());
         }
         drop(s);
@@ -986,90 +1028,68 @@ pub async fn desktop_ready(
     })
     .await
 }
-#[tauri::command]
-pub async fn desktop_capture(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    request: CaptureRequest,
-    submitted_at: Option<u128>,
-) -> HostResult<CaptureResult> {
-    require(&window)?;
-    let start = Instant::now();
-    let store = app.state::<Workspace>().store.clone();
-    if !matches!(request.origin, Origin::User { .. }) {
-        return Err("capture_origin_invalid".into());
-    }
-    if let Origin::User { project, uri, .. } = &request.origin
-        && (project.is_some()
-            || uri.as_ref().is_some_and(|v| {
-                !v.starts_with("https://")
-                    && !v.starts_with("http://")
-                    && !v.starts_with("file://")
-                    && !v.starts_with('/')
-            }))
-    {
-        return Err("capture_source_required".into());
-    }
-    let raw = super::workspace::blocking(move || store.capture(&request)).await?;
-    let committed_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|now| submitted_at.map(|start| now.as_millis().saturating_sub(start)))
-        .unwrap_or_else(|| start.elapsed().as_millis());
-    diagnostic("capture_committed_ms", committed_ms);
-    let memory_id = raw.memory_id.clone();
-    on_main(&app, move |h| {
-        let desktop = h.state::<Desktop>();
-        let mut s = desktop.inner.lock().unwrap();
-        s.save_ms = Some(committed_ms);
-        if window.label() == "capture" {
-            s.receipt = Some(memory_id.clone());
-        }
-        s.prefs.last_memory = Some(memory_id);
-        if let Err(e) = desktop.persist(&s.prefs) {
-            s.error = Some(e.to_string());
-        }
+pub(crate) async fn remember_topic(app: &tauri::AppHandle, topic: &Conversation) -> HostResult<()> {
+    let topic = topic.clone();
+    on_main(app, move |app| {
+        app.state::<Desktop>().remember_topic(topic);
+        publish(&app);
         Ok(())
     })
+    .await
+}
+
+pub(crate) async fn record_completed(
+    app: &tauri::AppHandle,
+    topic_id: &str,
+    memory_id: String,
+) -> HostResult<()> {
+    let topic_id = topic_id.to_owned();
+    let receipt_id = memory_id.clone();
+    let accepted = on_main(app, move |h| {
+        let desktop = h.state::<Desktop>();
+        let mut state = desktop.inner.lock().unwrap();
+        if state.prefs.topic_id.as_deref() != Some(&topic_id) {
+            return Ok(false);
+        }
+        state.receipt = Some(memory_id.clone());
+        state.prefs.last_memory = Some(memory_id);
+        if let Err(error) = desktop.persist(&state.prefs) {
+            state.error = Some(error.to_string());
+        }
+        drop(state);
+        publish(&h);
+        let _ = h.emit_to("capture", "desktop-record-complete", &topic_id);
+        Ok(true)
+    })
     .await?;
-    let timer_app = app.clone();
-    let receipt_id = raw.memory_id.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(2800)).await;
-        let _ = on_main(&timer_app, move |h| {
-            let d = h.state::<Desktop>();
-            let clear = {
-                let mut s = d.inner.lock().unwrap();
-                if s.receipt.as_ref() == Some(&receipt_id) {
-                    s.receipt = None;
-                    true
-                } else {
-                    false
+    if accepted {
+        let timer_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(2800)).await;
+            let _ = on_main(&timer_app, move |h| {
+                let desktop = h.state::<Desktop>();
+                let mut state = desktop.inner.lock().unwrap();
+                if state.receipt.as_ref() != Some(&receipt_id) {
+                    return Ok(());
                 }
-            };
-            if clear {
-                if !snapshot(&h).expanded {
+                state.receipt = None;
+                let expanded = state.expanded;
+                drop(state);
+                if !expanded {
                     layout(&h, 72.0, 76.0, Placement::KeepAnchor)?;
                 }
                 publish(&h);
-            }
-            Ok(())
-        })
-        .await;
-    });
-    let _ = app.emit("resources-changed", ());
-    on_main(&app, |h| {
-        publish(&h);
-        Ok(())
-    })
-    .await?;
-    Ok(raw)
+                Ok(())
+            })
+            .await;
+        });
+    }
+    Ok(())
 }
 #[derive(Clone, Serialize)]
 pub struct MainRoute {
     pub generation: u64,
     pub topic: Option<Conversation>,
-    pub mode: String,
     pub quick: bool,
     pub record: Option<RecordKey>,
     pub settings: bool,
@@ -1097,7 +1117,6 @@ pub async fn desktop_expand(
         let route = MainRoute {
             generation: s.generation,
             topic: s.topic,
-            mode: s.mode,
             quick: true,
             record,
             settings,
@@ -1270,7 +1289,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
                 crate::backup::cancel_restart(&app);
                 set_error(&app, "quit_draft_unconfirmed".into());
                 if waiting.contains("capture") {
-                    open(&app, None, true)?;
+                    open(&app, true)?;
                 } else {
                     show_main(&app)?;
                 }
@@ -1443,6 +1462,111 @@ mod tests {
             0o600
         );
     }
+    #[test]
+    fn delayed_context_cleanup_preserves_newer_topic_and_preference_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
+        let previous = uuid::Uuid::new_v4().to_string();
+        let next = store
+            .create_conversation(&uuid::Uuid::new_v4().to_string(), "New discussion")
+            .unwrap();
+        let path = dir.path().join("desktop.json");
+        let desktop = Desktop::new(path.clone());
+        // A background read for the old topic finishes after main-thread changes
+        // have selected another discussion and changed the window preferences.
+        {
+            let mut state = desktop.inner.lock().unwrap();
+            state.prefs.topic_id = Some(next.id.clone());
+            state.prefs.pinned = true;
+            state.prefs.shortcut = "Super+Shift+KeyM".into();
+            state.topic = Some(next.clone());
+            desktop.persist(&state.prefs).unwrap();
+        }
+        apply_context(
+            &desktop,
+            DesktopContext {
+                topic_id: Some(previous),
+                previous_title: None,
+                topic: Some(Err(memivy_core::memory::DataError::Unavailable)),
+                configured: true,
+            },
+        );
+        {
+            let state = desktop.inner.lock().unwrap();
+            assert_eq!(state.topic.as_ref().unwrap().id, next.id);
+            assert_eq!(state.prefs.topic_id.as_deref(), Some(next.id.as_str()));
+            assert!(state.prefs.pinned && state.configured);
+        }
+        let saved = Desktop::new(path.clone());
+        assert_eq!(
+            saved.inner.lock().unwrap().prefs.topic_id,
+            Some(next.id.clone())
+        );
+
+        // A current read may remove only its missing topic, retaining the latest
+        // pin and shortcut settings in both memory and the persisted preferences.
+        apply_context(
+            &desktop,
+            DesktopContext {
+                topic_id: Some(next.id),
+                previous_title: Some(next.title),
+                topic: Some(Err(memivy_core::memory::DataError::Unavailable)),
+                configured: true,
+            },
+        );
+        assert!(desktop.inner.lock().unwrap().topic.is_none());
+        let saved = Desktop::new(path);
+        let prefs = &saved.inner.lock().unwrap().prefs;
+        assert!(prefs.topic_id.is_none());
+        assert!(prefs.pinned);
+        assert_eq!(prefs.shortcut, "Super+Shift+KeyM");
+    }
+    #[test]
+    fn failed_optional_preferences_keep_the_durable_discussion_available_in_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
+        let topic = store
+            .create_conversation(&uuid::Uuid::new_v4().to_string(), "Durable discussion")
+            .unwrap();
+        let path = dir.path().join("desktop.json");
+        let desktop = Desktop::new(path.clone());
+        // Block only this optional preference file, leaving SQLite writable.
+        fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        desktop.remember_topic(topic.clone());
+        let state = desktop.inner.lock().unwrap();
+        assert_eq!(state.topic.as_ref().unwrap().id, topic.id);
+        assert_eq!(state.prefs.topic_id.as_deref(), Some(topic.id.as_str()));
+        assert_eq!(state.error.as_deref(), Some("desktop_settings_save_failed"));
+        assert!(
+            !path.exists(),
+            "the failed preference write must not be presented as durable"
+        );
+        assert_eq!(store.conversation(&topic.id).unwrap().id, topic.id);
+    }
+    #[test]
+    fn delayed_context_read_cannot_replace_a_generated_title_for_the_same_topic() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
+        let old = store
+            .create_conversation(&uuid::Uuid::new_v4().to_string(), "New discussion")
+            .unwrap();
+        let desktop = Desktop::new(dir.path().join("desktop.json"));
+        desktop.remember_topic(old.clone());
+        let pending = DesktopContext {
+            topic_id: Some(old.id.clone()),
+            previous_title: Some(old.title.clone()),
+            topic: Some(Ok(old.clone())),
+            configured: true,
+        };
+        let mut generated = old.clone();
+        generated.title = "每周的练习安排".into();
+        assert!(desktop.refresh_topic_title(&generated));
+        apply_context(&desktop, pending);
+        let state = desktop.inner.lock().unwrap();
+        assert_eq!(state.topic.as_ref().unwrap().title, generated.title);
+        assert_eq!(state.topic.as_ref().unwrap().updated_at, old.updated_at);
+        assert!(state.configured);
+    }
 }
 #[tauri::command]
 pub async fn desktop_exit_ready(
@@ -1466,7 +1590,7 @@ pub async fn desktop_exit_ready(
             crate::backup::cancel_restart(&h);
             set_error(&h, "quit_dialog_active".into());
             if window.label() == "capture" {
-                open(&h, None, true)?;
+                open(&h, true)?;
             } else {
                 show_main(&h)?;
             }

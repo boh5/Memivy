@@ -25,9 +25,8 @@ export default function DraftConflict({ draft }: { draft: ReturnType<typeof useD
         const label = key === "thisWindow" ? t("draft.thisWindow") : t("draft.otherWindow");
         return (
           <div key={key}>
-            {value?.conclusion && <p className="field-help">{label} · {value.conclusion.destination.kind === "new" ? t("draft.newMemory") : t("draft.existingMemory")} · {value.title}</p>}
+            {value?.destination && <p className="field-help">{label} · {value.destination.kind === "new" ? t("draft.newMemory") : t("draft.existingMemory")} · {value.title}</p>}
             <label className="discussion-field">{label}<textarea rows={4} readOnly value={value?.body || ""} /></label>
-            {value?.conclusion?.merged_body != null && <label className="discussion-field">{t("draft.mergedBody", { label })}<textarea rows={6} readOnly value={value.conclusion.merged_body} /></label>}
           </div>
         );
       })}

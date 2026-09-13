@@ -1,10 +1,10 @@
 [
-  {"id":"fault-01","mode":"unknown_target","expected":"invalid","reason":"不存在的目标不能写入"},
-  {"id":"fault-02","mode":"truncated","expected":"invalid_response","reason":"截断 JSON 不能生成成功回执"},
+  {"id":"fault-01","mode":"unknown_target","expected":"invalid_response","reason":"不存在的目标不能写入"},
+  {"id":"fault-02","mode":"truncated","expected":"invalid_response","reason":"截断工具参数或文字 不能生成成功回执"},
   {"id":"fault-03","mode":"empty","expected":"invalid_response","reason":"空结果保留原话"},
   {"id":"fault-04","mode":"rate_limit","expected":"status_429","reason":"限流后可明确重试"},
   {"id":"fault-05","mode":"server_error","expected":"status_500","reason":"错误正文不能泄露密钥"},
   {"id":"fault-06","mode":"disconnect","expected":"network","reason":"连接中断不阻止本地保存及搜索"},
   {"id":"fault-07","mode":"oversize","expected":"too_large","reason":"超限响应不进入记忆"},
-  {"id":"fault-08","mode":"timeout","expected":"network","reason":"执行正式 90 秒请求超时，失败不写记忆"}
+  {"id":"fault-08","mode":"timeout","expected":"network","reason":"执行宿主请求期限取消，失败不写记忆"}
 ]

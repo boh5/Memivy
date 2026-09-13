@@ -103,8 +103,8 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     s.create_conversation(&c, "私有草稿秘密").unwrap();
     s.save_conversation_draft(&c, "私有草稿秘密").unwrap();
     s.save_workspace_draft(&WorkspaceDraft {
-        conclusion: None,
-        key: "capture".into(),
+        destination: None,
+        key: "input".into(),
         request_id: id(),
         title: "私有草稿秘密".into(),
         body: "私有草稿秘密".into(),
@@ -186,10 +186,8 @@ fn draft_autosave_and_index_work_do_not_refresh_the_library() {
     let mut watcher = s.change_watcher().unwrap();
     let db = rusqlite::Connection::open(dir.path().join("memivy.db")).unwrap();
     for key in [
-        "capture".to_string(),
-        "question".into(),
-        "quick_capture".into(),
-        "quick_question".into(),
+        "input".to_string(),
+        "quick_input".into(),
         format!("discussion:{conversation}"),
         format!("memory:{}", memory.memory_id),
     ] {
@@ -203,7 +201,7 @@ fn draft_autosave_and_index_work_do_not_refresh_the_library() {
                 expected_version: None,
                 origin: None,
                 context: vec![],
-                conclusion: None,
+                destination: None,
             };
             assert!(
                 s.compare_workspace_draft(&draft, previous.as_deref())

@@ -18,10 +18,10 @@ export function dependencies(name: string, args: Record<string, unknown> = {}): 
   const record = keyOf(args.key);
   switch (name) {
     case "library_detail": return [{domain:"memory",entity:record}];
-    case "library_query": case "library_projects": case "discussion_targets":
+    case "library_query": case "library_projects":
       return [{domain:"memory"},{domain:"navigation"},{domain:"collection"}];
     case "library_topics": return [{domain:"discussion"},{domain:"collection"}];
-    case "discussion_messages": case "library_messages":
+    case "discussion_messages":
       return [{domain:"discussion",entity:String(args.topicId ?? args.id ?? "*")}];
     case "navigation_collections": return [{domain:"collection"},{domain:"memory"}];
     case "navigation_record": return [{domain:"navigation",entity:record},{domain:"collection"},{domain:"memory",entity:record}];
@@ -80,9 +80,10 @@ export function invalidateResources(changes: Dependency[], reset = false): Promi
 }
 // Explicit retry refreshes only these query families; it does not broadcast a
 // fictitious domain mutation or reset other features' interaction state.
-export function expireQueries(names: string[]): Promise<void> {
+export function expireQueries(names: string[], scope?: Dependency[]): Promise<void> {
   const work = async () => {
-    const predicate = (q: {queryKey: readonly unknown[]}) => names.includes(String(q.queryKey[0]));
+    const predicate = (q: {queryKey: readonly unknown[]; meta?: Record<string, unknown>}) => names.includes(String(q.queryKey[0])) &&
+      (!scope || affected(q.meta?.dependencies as Dependency[] ?? [], scope));
     await client.cancelQueries({predicate});
     await client.invalidateQueries({predicate,refetchType:"none"});
   };
@@ -130,8 +131,8 @@ export function useResourceBridge(onError: (error: unknown) => void) {
   }, []);
 }
 const mutations = new Set([
-  "library_capture","library_edit","library_action","library_rebuild","desktop_capture",
-  "discussion_open","discussion_ask","discussion_cancel","discussion_save","discussion_merge",
+  "library_capture","library_edit","library_action","library_rebuild",
+  "discussion_open","discussion_submit","discussion_retry","discussion_cancel","discussion_undo","discussion_save_text",
   "organization_retry","organization_collect","organization_dismiss","cleanup_save",
   "navigation_pin","navigation_collect","navigation_save_collection","navigation_archive_collection",
 ]);
@@ -142,6 +143,5 @@ export async function resourceCall<T>(name: string, args?: Record<string,unknown
   finally {
     // A commit may have succeeded even when its IPC acknowledgement failed.
     if (mutations.has(name)) await syncResources().catch(() => {});
-    if (name === "workspace_configure") await invalidateResources([{domain:"settings"}]);
   }
 }

@@ -26,6 +26,7 @@ impl From<DataError> for HostError {
             DataError::CollectionName => "collection_name",
             DataError::NavigationLimit => "navigation_limit",
             DataError::Invalid => "invalid",
+            DataError::SourceAttribution => "source_attribution",
             DataError::Unavailable => "unavailable",
             DataError::Conflict => "conflict",
             DataError::RequestConflict => "request_conflict",
@@ -53,6 +54,9 @@ impl From<ProbeError> for HostError {
     }
 }
 pub const KNOWN_CODES: &[&str] = &[
+    "model_test_agent",
+    "model_test_agent_unsupported",
+    "agent_budget",
     "model_cache_path",
     "model_cache_io",
     "model_cache_mismatch",
@@ -150,6 +154,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "microphone_missing",
     "microphone_permission",
     "microphone_unavailable",
+    "microphone_start_timeout",
     "model_authentication",
     "model_configuration",
     "model_delete_failed",
@@ -175,6 +180,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "restore_busy",
     "schema",
     "search_budget",
+    "source_attribution",
     "shortcut_invalid",
     "shortcut_modifiers_required",
     "shortcut_register_failed",
@@ -195,6 +201,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "voice_draft_exists",
     "voice_endpoint_changed",
     "voice_incomplete",
+    "voice_no_audio",
+    "voice_no_transcription",
     "voice_initialization_failed",
     "voice_interrupted",
     "voice_not_loaded",

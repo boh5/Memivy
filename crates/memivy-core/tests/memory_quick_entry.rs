@@ -5,7 +5,7 @@ fn id() -> String {
 }
 fn draft(key: &str, text: &str) -> WorkspaceDraft {
     WorkspaceDraft {
-        conclusion: None,
+        destination: None,
         key: key.into(),
         request_id: id(),
         title: String::new(),
@@ -20,11 +20,11 @@ fn concurrent_drafts_and_late_consumption_are_guarded_across_store_handles() {
     let dir = tempfile::tempdir().unwrap();
     let a = MemoryStore::open(dir.path()).unwrap();
     let b = MemoryStore::open(dir.path()).unwrap();
-    let first = draft("quick_capture", " \n来自快捷入口的原话\n ");
+    let first = draft("quick_input", " \n来自快捷入口的原话\n ");
     assert!(a.compare_workspace_draft(&first, None).unwrap());
     // Idempotent after a lost acknowledgement.
     assert!(a.compare_workspace_draft(&first, None).unwrap());
-    let mut next = draft("quick_capture", "另一窗口编辑的内容");
+    let mut next = draft("quick_input", "另一窗口编辑的内容");
     next.origin = Some(Origin::User {
         app: "Safari".into(),
         project: None,
@@ -36,17 +36,17 @@ fn concurrent_drafts_and_late_consumption_are_guarded_across_store_handles() {
             .unwrap()
     );
     assert!(
-        !a.consume_workspace_draft("quick_capture", &first.request_id)
+        !a.consume_workspace_draft("quick_input", &first.request_id)
             .unwrap()
     );
     assert_eq!(
-        a.workspace_draft("quick_capture").unwrap().unwrap().body,
+        a.workspace_draft("quick_input").unwrap().unwrap().body,
         next.body
     );
     drop(a);
     drop(b);
     let restarted = MemoryStore::open(dir.path()).unwrap();
-    let restored = restarted.workspace_draft("quick_capture").unwrap().unwrap();
+    let restored = restarted.workspace_draft("quick_input").unwrap().unwrap();
     assert!(matches!(
         restored.origin,
         Some(Origin::User { uri: Some(_), .. })
@@ -60,48 +60,55 @@ fn concurrent_drafts_and_late_consumption_are_guarded_across_store_handles() {
     );
     assert!(
         restarted
-            .consume_workspace_draft("quick_capture", &next.request_id)
+            .consume_workspace_draft("quick_input", &next.request_id)
             .unwrap()
     );
 }
 #[test]
-fn capture_and_question_stay_separate_and_retries_preserve_exact_input_and_origin() {
+fn main_and_quick_drafts_stay_independent_and_retry_keeps_raw_origin() {
     let dir = tempfile::tempdir().unwrap();
     let s = MemoryStore::open(dir.path()).unwrap();
-    let mut capture = draft("quick_capture", " \n第一行\n第二行  ");
-    capture.origin = Some(Origin::User {
+    let mut quick = draft("quick_input", " \n第一行\n第二行  ");
+    quick.origin = Some(Origin::User {
         app: "Notes".into(),
         project: None,
         uri: None,
     });
-    let question = draft("quick_question", "先问一下，不能自动记住这句话");
-    for d in [&capture, &question] {
-        assert!(s.compare_workspace_draft(d, None).unwrap());
+    let main = draft("input", "主窗口尚未发送的另一个想法");
+    for draft in [&quick, &main] {
+        assert!(s.compare_workspace_draft(draft, None).unwrap());
     }
-    let request = CaptureRequest {
-        request_id: capture.request_id.clone(),
-        text: capture.body.clone(),
-        origin: capture.origin.unwrap(),
-    };
-    let saved = s.capture(&request).unwrap();
-    for _ in 0..10 {
-        assert_eq!(s.capture(&request).unwrap().memory_id, saved.memory_id);
-    }
-    assert_eq!(
-        s.memory(&saved.memory_id).unwrap().current.body,
-        capture.body
-    );
-    assert!(matches!(
-        s.capture_by_id(&saved.capture_id).unwrap().origin,
-        Origin::User { uri: None, .. }
-    ));
-    assert_eq!(s.library(&LibraryQuery::default()).unwrap().items.len(), 1);
+    let conversation = id();
+    s.create_conversation(&conversation, "快捷讨论").unwrap();
+    let execution = s
+        .begin_agent_input(
+            &quick.request_id,
+            &id(),
+            &conversation,
+            &quick.body,
+            &[],
+            quick.origin.as_ref(),
+        )
+        .unwrap();
+    s.stop_agent_input(
+        &execution.input_id,
+        &execution.attempt_id,
+        "failed",
+        Some("network"),
+    )
+    .unwrap();
+    let retried = s.retry_agent_input(&execution.input_id, &id()).unwrap();
+    assert_eq!(retried.input_text, quick.body);
+    assert_eq!(s.messages(&conversation, 0, 20).unwrap().len(), 2);
     assert!(
-        s.consume_workspace_draft("quick_capture", &capture.request_id)
+        s.library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(
+        s.consume_workspace_draft("quick_input", &quick.request_id)
             .unwrap()
     );
-    assert_eq!(
-        s.workspace_draft("quick_question").unwrap().unwrap().body,
-        question.body
-    );
+    assert_eq!(s.workspace_draft("input").unwrap().unwrap().body, main.body);
 }

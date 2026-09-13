@@ -65,12 +65,13 @@ const api = {
     if(name==='draft_write') { if(Buffer.byteLength(args.draft.title)>200) throw 'invalid title'; db.set(args.draft.key,structuredClone(args.draft)); return; }
     if(name==='draft_clear') { db.delete(args.key); return; }
     if(name==='discussion_source') return {source:args.source,text:'known source'};
-    if(name==='discussion_messages') return messageResponse ? messageResponse(args) : [];
-    if(name==='discussion_ask') return new Promise(resolve=>{askResolve=()=>resolve(topic)});
+    if(name==='discussion_messages') return (messageResponse ? messageResponse(args) : []).map(m=>({followups:[],receipts:[],progress:null,record_only:false,...m}));
+    if(name==='discussion_open') return topic;
+    if(name==='discussion_submit') return new Promise(resolve=>{askResolve=()=>resolve(topic)});
     if(name==='library_query') return {items:[row(keyA),row(keyB)],next_offset:null};
     if(name==='navigation_collections') return [];
     if(name==='navigation_record') return {pinned:false,collections:[]};
-    if(name==='library_topics' || name==='library_projects') return [];
+    if(name==='library_topics' || name==='library_projects' || name==='library_agent_changes') return [];
     if(name==='workspace_settings') return {configured:true};
     if(name==='library_detail') return {key:args.key,state:'active',title:args.key.id,body:'test',current:{id:'v-'+args.key.id,capture_ids:[],created_at:1,actor:'user'},history:[],sources:[]};
     if(name==='library_action') return {action:'undo'};
@@ -127,7 +128,18 @@ function render(f) {
   for(const node of nodes(f.tree)) if(node.props?.ref) node.props.ref.current ||= node.props.className==='discussion-messages'?list:{focus(){},scrollIntoView(){f.dom.scrolls++;list.scrollTop=Math.max(0,articles.length*100-500);}};
   for(const effect of f.effects.splice(0))effect();
 }
-function unmount(f) { f.alive=false; for(const value of f.slots)value?.cleanup?.(); for(const n of nodes(f.tree))if(n.props?.ref)n.props.ref.current=null; }
+function unmount(f) { if(composerSurfaces.has(f))unmount(composerSurfaces.get(f)); f.alive=false; for(const value of f.slots)value?.cleanup?.(); for(const n of nodes(f.tree))if(n.props?.ref)n.props.ref.current=null; }
+const composerSurfaces = new Map();
+function composer(parent) {
+  const component=load('src/workspace/CaptureForm.tsx').default;
+  if(parent.component===component)return parent;
+  const node=nodes(parent.tree).find(n=>n.type===component);
+  assert(node,'missing composer');
+  let child=composerSurfaces.get(parent);
+  if(!child||!child.alive){child=mount(component,node.props);composerSurfaces.set(parent,child);}
+  else {child.props=node.props;render(child);}
+  return child;
+}
 async function settle() {
   for(let i=0;i<8;i++){await new Promise(resolve=>setTimeout(resolve,1));for(const f of fibers)if(f.alive&&f.dirty)render(f);}
 }
@@ -150,7 +162,7 @@ function query(app) {
 }
 function find(f,predicate){const node=nodes(f.tree).find(predicate);assert(node,'missing element');return node;}
   t.after(()=>{for(const f of fibers)if(f.alive)unmount(f);});
-  return {load,mount,unmount,settle,find,query,nodes,text,db,calls,overrides,topic,keyA,keyB,
+  return {load,mount,unmount,settle,find,query,composer,nodes,text,db,calls,overrides,topic,keyA,keyB,
     async language(code){await translation.changeLanguage(code);for(const f of fibers)if(f.alive)f.dirty=true;await settle();},
     focus(){windowEvents.get('focus')?.forEach(fn=>fn());},
     key(event){windowEvents.get('keydown')?.forEach(fn=>fn(event));},

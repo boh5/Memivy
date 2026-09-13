@@ -52,11 +52,7 @@ pub struct LibraryPage {
 pub struct LibrarySource {
     pub id: String,
     pub capture: Option<RawCapture>,
-}
-#[derive(Debug, Serialize)]
-pub struct ReviewedConclusion {
-    pub title: String,
-    pub body: String,
+    pub conversation_available: Option<bool>,
 }
 #[derive(Debug, Serialize)]
 pub struct LibraryDetail {
@@ -64,7 +60,6 @@ pub struct LibraryDetail {
     pub state: String,
     pub title: String,
     pub body: String,
-    pub reviewed_conclusion: Option<ReviewedConclusion>,
     pub current: Option<Version>,
     pub history: Vec<Version>,
     pub history_count: usize,
@@ -73,15 +68,9 @@ pub struct LibraryDetail {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConclusionDraft {
-    pub destination: Destination,
-    pub merged_body: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct WorkspaceDraft {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conclusion: Option<ConclusionDraft>,
+    pub destination: Option<Destination>,
     pub key: String,
     pub request_id: String,
     pub title: String,
@@ -368,15 +357,27 @@ impl MemoryStore {
                     },
                 )
                 .transpose()?;
-            sources.push(LibrarySource { id, capture });
+            let conversation_available = match capture.as_ref().map(|raw| &raw.origin) {
+                Some(
+                    Origin::Conversation {
+                        conversation_id, ..
+                    }
+                    | Origin::Discussion {
+                        conversation_id, ..
+                    },
+                ) => Some(
+                    tx.prepare("SELECT 1 FROM conversations WHERE id=?")?
+                        .exists([conversation_id])?,
+                ),
+                _ => None,
+            };
+            sources.push(LibrarySource {
+                id,
+                capture,
+                conversation_available,
+            });
         }
-        let reviewed_conclusion = if key.kind == "capture" && state == "active" {
-            tx.query_row("SELECT i.title,COALESCE(i.merged_body,c.text) FROM conclusion_intents i JOIN captures c ON c.id=i.capture_id JOIN capture_state s ON s.capture_id=c.id WHERE i.capture_id=? AND s.understanding!='attached' AND EXISTS(SELECT 1 FROM receipts r WHERE r.capture_id=c.id AND r.action='conclusion' AND r.status='needs_review')", [&key.id], |r| Ok(ReviewedConclusion { title: r.get(0)?, body: r.get(1)? })).optional()?
-        } else {
-            None
-        };
         Ok(LibraryDetail {
-            reviewed_conclusion,
             key: key.clone(),
             state,
             title,
@@ -424,28 +425,22 @@ impl MemoryStore {
     ) -> Result<bool> {
         validate_draft_key(&draft.key)?;
         valid_id(&draft.request_id)?;
-        if draft.title.len() > 200 || draft.body.len() > 128 * 1024 || draft.context.len() > 4 {
+        if draft.title.len() > 200 || draft.body.len() > 128 * 1024 || draft.context.len() > 32 {
             return Err(DataError::Invalid);
         }
-        if let Some(review) = &draft.conclusion {
-            if !draft.key.starts_with("conclusion:") {
+        if let Some(destination) = &draft.destination {
+            if !draft.key.starts_with("save:") {
                 return Err(DataError::Invalid);
             }
             if let Destination::Existing {
                 memory_id,
                 expected_version,
-            } = &review.destination
+            } = destination
             {
                 valid_id(memory_id)?;
                 valid_id(expected_version)?;
             }
-            if let Some(body) = &review.merged_body {
-                valid_text(body, 128 * 1024)?;
-                if matches!(review.destination, Destination::New) {
-                    return Err(DataError::Invalid);
-                }
-            }
-        } else if draft.key.starts_with("conclusion:") {
+        } else if draft.key.starts_with("save:") {
             return Err(DataError::Invalid);
         }
         for source in &draft.context {
@@ -455,7 +450,7 @@ impl MemoryStore {
             valid_id(v)?;
         }
         if let Some(origin) = &draft.origin {
-            if draft.key != "quick_capture" || !matches!(origin, Origin::User { .. }) {
+            if !matches!(origin, Origin::User { .. }) {
                 return Err(DataError::Invalid);
             }
             super::records::validate_origin(origin)?;
@@ -484,8 +479,8 @@ impl MemoryStore {
             }
         }
         if let Some((kind, id)) = draft.key.split_once(':') {
-            let sql = if kind == "conclusion" {
-                "SELECT EXISTS(SELECT 1 FROM messages WHERE id=? AND status='complete')"
+            let sql = if kind == "save" {
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id=? AND role='assistant' AND status!='processing' AND length(trim(text))>0)"
             } else if kind == "discussion" {
                 "SELECT EXISTS(SELECT 1 FROM conversations WHERE id=?)"
             } else if kind == "memory" {
@@ -529,14 +524,11 @@ impl MemoryStore {
     }
 }
 fn validate_draft_key(key: &str) -> Result<()> {
-    if matches!(
-        key,
-        "capture" | "question" | "quick_capture" | "quick_question"
-    ) {
+    if matches!(key, "input" | "quick_input") {
         return Ok(());
     }
     let (kind, id) = key.split_once(':').ok_or(DataError::Invalid)?;
-    if matches!(kind, "discussion" | "conclusion") {
+    if matches!(kind, "discussion" | "save") {
         return valid_id(id);
     }
     RecordKey {

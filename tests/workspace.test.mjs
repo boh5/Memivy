@@ -2,35 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workspaceFixture } from './helpers/workspace.mjs';
 const props = f => ({topic:f.topic,revision:0,configured:true,onSettings(){},onRefresh(){},onOpenRecord(){}});
-const textarea = (f,view) => f.find(view,n=>n.type==='textarea');
+const textarea = (f,view) => f.find(f.composer(view),n=>n.type==='textarea');
 function send(f,view) { textarea(f,view).props.onKeyDown({key:'Enter',metaKey:true,ctrlKey:false,altKey:false,shiftKey:false,repeat:false,nativeEvent:{isComposing:false},keyCode:13,preventDefault(){}}); }
 
-const captureProps = sourceApp => ({quick:true,mode:'capture',sourceApp,focus:1,onSaved(){},onAsk:async()=>{},onMode(){},onEdit(){}});
+const captureProps = sourceApp => ({quick:true,sourceApp,focus:1,onSubmit:async()=>{},onEdit(){}});
 
 test('repeated empty handoffs use the new source and reset it after a capture', async t => {
   const f=workspaceFixture(t), Capture=f.load('src/workspace/CaptureForm.tsx').default;
-  f.overrides.desktop_capture=async ({request})=>({id:request.request_id,text:request.text});
-  const view=f.mount(Capture,captureProps('Safari'));await f.settle();
+  const sent=[];const submit=async input=>{sent.push(input);};
+  const view=f.mount(Capture,{...captureProps('Safari'),onSubmit:submit});await f.settle();
   for (const source of ['Notes','Chrome']) {
     // The main-window form stays mounted through successive handoffs.
-    f.render(view,{...captureProps(source),focus:2});await f.settle();
+    f.render(view,{...captureProps(source),focus:2,onSubmit:submit});await f.settle();
     textarea(f,view).props.onChange({target:{value:'交接后输入的原话'}});await f.settle();
-    assert.equal(f.db.get('quick_capture').origin.app,source);
+    assert.equal(f.db.get('quick_input').origin.app,source);
     send(f,view);await f.settle();
-    assert.equal(f.calls.filter(c=>c.name==='desktop_capture').at(-1).args.request.origin.app,source);
+    assert.equal(sent.at(-1).origin.app,source);
     assert.equal(textarea(f,view).props.value,'');
-    assert(!f.db.has('quick_capture'));
+    assert(!f.db.has('quick_input'));
   }
 });
 
 test('restored drafts retain their source and explicit URI even with an empty body', async t => {
   const f=workspaceFixture(t), Capture=f.load('src/workspace/CaptureForm.tsx').default;
   const origin={kind:'user',app:'Safari',project:null,uri:'https://example.com/selected'};
-  f.db.set('quick_capture',{key:'quick_capture',request_id:'existing',title:'',body:'',expected_version:null,origin});
+  f.db.set('quick_input',{key:'quick_input',request_id:'existing',title:'',body:'',expected_version:null,origin});
   const view=f.mount(Capture,captureProps('Notes'));await f.settle();
   f.render(view,captureProps('Chrome'));await f.settle();
   textarea(f,view).props.onChange({target:{value:'恢复后补写'}});await f.settle();
-  assert.deepEqual(f.db.get('quick_capture').origin,origin);
+  assert.deepEqual(f.db.get('quick_input').origin,origin);
 });
 
 test('a source refresh cannot relabel a draft whose first write is pending', async t => {
@@ -40,7 +40,7 @@ test('a source refresh cannot relabel a draft whose first write is pending', asy
   const view=f.mount(Capture,captureProps('Safari'));await f.settle();
   textarea(f,view).props.onChange({target:{value:'正在保存的原话'}});await f.settle();
   f.render(view,captureProps('Notes'));await f.settle();finish();await f.settle();
-  assert.equal(f.db.get('quick_capture').origin.app,'Safari');
+  assert.equal(f.db.get('quick_input').origin.app,'Safari');
   assert.equal(textarea(f,view).props.value,'正在保存的原话');
 });
 
@@ -95,21 +95,13 @@ test('loading older messages preserves the visible message and new replies still
   f.messages(()=>[msg(51)]);f.render(view,{...props(f),revision:1});await f.settle();assert.equal(view.dom.scrolls,1);
 });
 
-test('an invalid editor draft does not prevent submitting a valid quick capture', async t => {
-  const f=workspaceFixture(t), {useDraft}=f.load('src/workspace/useDraft.ts');
-  const a=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();
-  a.tree.update({title:'中文'.repeat(40),body:'无效标题的草稿'});await f.settle();f.unmount(a);
-  const App=f.load('src/workspace/App.tsx').default, app=f.mount(App);await f.settle();
-  f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.onCapture();await f.settle();
-  const Dialog=f.load('src/workspace/CaptureDialog.tsx').default;
-  const dialog=f.mount(Dialog,f.find(app,n=>n.type===Dialog).props);await f.settle();
-  const formNode=f.find(dialog,n=>typeof n.type==='function'&&n.props.mode==='capture');
-  const form=f.mount(formNode.type,formNode.props);await f.settle();
-  f.overrides.library_capture=async ({request})=>({id:'saved',text:request.text});
-  textarea(f,form).props.onChange({target:{value:'有效的首页记录'}});await f.settle();
-  const button=f.find(form,n=>n.type==='button'&&n.props.className==='send-button');button.props.onClick();await f.settle();
-  assert.equal(f.calls.filter(c=>c.name==='library_capture').at(-1).args.request.text,'有效的首页记录');
-  assert.equal(textarea(f,form).props.value,'');
+test('an invalid editor draft does not prevent submitting another valid input', async t => {
+  const f=workspaceFixture(t),{useDraft}=f.load('src/workspace/useDraft.ts');
+  const bad=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();
+  bad.tree.update({title:'中文'.repeat(101),body:'未保存的编辑'});await f.settle();
+  let sent;const view=f.mount(f.load('src/workspace/CaptureForm.tsx').default,{onSubmit:async input=>{sent=input;}});await f.settle();
+  textarea(f,view).props.onChange({target:{value:'有效的表达'}});await f.settle();send(f,view);await f.settle();
+  assert.equal(sent.text,'有效的表达');assert.equal(textarea(f,view).props.value,'');
 });
 
 test('the collapsed leaf supports accessible activation and dragging never opens it', async t => {

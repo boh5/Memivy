@@ -106,8 +106,8 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
     }
     store
         .save_workspace_draft(&WorkspaceDraft {
-            conclusion: None,
-            key: "capture".into(),
+            destination: None,
+            key: "input".into(),
             request_id: id(),
             title: String::new(),
             body: "draft_only_sentinel 草稿不是记忆".into(),
@@ -119,13 +119,17 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
     let topic = id();
     store.create_conversation(&topic, "固定测试话题").unwrap();
     let turn = store
-        .start_turn(
+        .begin_agent_input(
+            &id(),
             &id(),
             &topic,
             "question_only_sentinel 假设换个方案呢？",
             &[],
+            None,
         )
         .unwrap();
-    store.cancel_turn(&turn.id).unwrap();
+    store
+        .stop_agent_input(&turn.input_id, &turn.attempt_id, "cancelled", None)
+        .unwrap();
     result
 }

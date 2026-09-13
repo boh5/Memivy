@@ -19,21 +19,27 @@ fn main() {
     store
         .create_conversation(&topic, "木桥 · 固定讨论")
         .unwrap();
-    let source = SourceRef::Version(store.memory(&seeded.records["history"]).unwrap().current.id);
-    let turn = store
-        .start_turn(
-            &id(),
+    let input = id();
+    let attempt = id();
+    store
+        .begin_agent_input(
+            &input,
+            &attempt,
             &topic,
             "木桥现在先做什么？",
-            std::slice::from_ref(&source),
+            &[seeded.records["history"].clone()],
+            None,
         )
         .unwrap();
     store
-        .finish_turn(
-            &turn.id,
-            "木桥现在先做桌面端。\n\n接着想：可以先验证首次记录后能否找回。",
-            &[source],
+        .append_agent_text(
+            &input,
+            &attempt,
+            "木桥现在先做桌面端。可以先验证首次记录后能否找回。",
         )
+        .unwrap();
+    store
+        .finish_agent_input(&input, &attempt, false, &[])
         .unwrap();
     store.check_integrity().unwrap();
     fs::write(dir.join("fixture.json"),serde_json::to_vec_pretty(&json!({"fixture_version":fixture.version,"records":seeded.records,"captures":seeded.captures,"topic":topic,"note":"Synthetic baseline evidence, not user visual acceptance. MCP off; no model configuration."})).unwrap()).unwrap();

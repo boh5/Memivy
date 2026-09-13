@@ -79,6 +79,22 @@ pub(super) fn validate_origin(origin: &Origin) -> Result<()> {
                 return Err(DataError::Invalid);
             }
         }
+        Origin::Discussion {
+            conversation_id,
+            message_id,
+            app,
+            project,
+            uri,
+        } => {
+            valid_id(conversation_id)?;
+            valid_id(message_id)?;
+            valid_text(app, 200)?;
+            if project.as_ref().is_some_and(|s| s.len() > 200)
+                || uri.as_ref().is_some_and(|s| s.len() > 2048)
+            {
+                return Err(DataError::Invalid);
+            }
+        }
     }
     Ok(())
 }
@@ -98,9 +114,22 @@ pub(super) fn insert_capture(
     text: &str,
     origin: &Origin,
 ) -> Result<RawCapture> {
+    insert_capture_at(db, request, text, origin, now()?)
+}
+/// Preserve the original expression time when a conversation is archived later.
+pub(super) fn insert_capture_at(
+    db: &Connection,
+    request: &str,
+    text: &str,
+    origin: &Origin,
+    created_at: i64,
+) -> Result<RawCapture> {
     valid_id(request)?;
     valid_text(text, 128 * 1024)?;
     validate_origin(origin)?;
+    if created_at < 0 {
+        return Err(DataError::Invalid);
+    }
     let hash = fingerprint(&("capture", text, origin))?;
     let old: Option<(String, Vec<u8>)> = db
         .query_row(
@@ -116,7 +145,7 @@ pub(super) fn insert_capture(
         return raw(db, &id);
     }
     let id = id();
-    db.execute("INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,request,hash,text,encode(origin)?,now()?])?;
+    db.execute("INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,request,hash,text,encode(origin)?,created_at])?;
     db.execute("INSERT INTO capture_state(capture_id) VALUES(?)", [&id])?;
     raw(db, &id)
 }
@@ -178,20 +207,13 @@ pub(super) fn promote_unassigned_captures(db: &Connection) -> Result<()> {
             // Old failed conclusion saves are reviews, not independent memories.
             if let Origin::Conversation { message_id, .. } = &archive.origin {
                 let key = format!("conclusion:{message_id}");
-                let draft = WorkspaceDraft {
-                    key: key.clone(),
-                    request_id: id(),
-                    title,
-                    body: archive.text,
-                    expected_version: None,
-                    origin: None,
-                    context: vec![],
-                    conclusion: Some(ConclusionDraft {
-                        destination: serde_json::from_str(&destination)
-                            .map_err(|_| DataError::Integrity)?,
-                        merged_body,
-                    }),
-                };
+                // Historical schema promotion creates an inert draft; schema 16
+                // converts this saved payload to the new manual-save/edit slots.
+                let draft = serde_json::json!({
+                    "key":key,"request_id":id(),"title":title,"body":archive.text,
+                    "expected_version":null,"origin":null,"context":[],
+                    "conclusion":{"destination":serde_json::from_str::<serde_json::Value>(&destination).map_err(|_|DataError::Integrity)?,"merged_body":merged_body}
+                });
                 db.execute(
                     "INSERT OR IGNORE INTO workspace_drafts(key,payload) VALUES(?,?)",
                     params![key, encode(&draft)?],
@@ -480,7 +502,10 @@ pub(super) fn resolve_excerpt(
 impl MemoryStore {
     /// Current body, input archive, receipt and organization task commit together.
     pub fn capture(&self, r: &CaptureRequest) -> Result<CaptureResult> {
-        if matches!(r.origin, Origin::Conversation { .. }) {
+        if matches!(
+            r.origin,
+            Origin::Conversation { .. } | Origin::Discussion { .. }
+        ) {
             return Err(DataError::Invalid);
         }
         let mut db = self.connection()?;

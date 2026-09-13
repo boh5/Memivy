@@ -68,13 +68,15 @@ fn run() -> Result<()> {
         "hold-turn" => {
             let topic = Uuid::new_v4().to_string();
             store.create_conversation(&topic, "生成中退出的合成话题")?;
-            let turn = store.start_turn(
+            let turn = store.begin_agent_input(
+                &Uuid::new_v4().to_string(),
                 &Uuid::new_v4().to_string(),
                 &topic,
                 "普通问题不能变成记忆",
                 &[],
+                None,
             )?;
-            println!("{}", turn.id);
+            println!("{}", turn.input_id);
             std::io::stdout().flush()?;
             loop {
                 std::thread::park();
@@ -131,14 +133,16 @@ fn run() -> Result<()> {
             }
             let r = store.apply_organization(
                 &task,
-                &OrganizationProposal {
-                    action: "keep".into(),
-                    target: String::new(),
+                &MemoryWriteArgs {
+                    destination: Destination::New,
                     title: "恢复后整理".into(),
-                    addition: task.memory.body.clone(),
-                    changes: vec![],
-                    keywords: vec![],
-                    reason: "合成进程验证".into(),
+                    parts: vec![MemoryWritePart {
+                        text: task.memory.body.clone(),
+                        sources: vec![MemorySourceQuote {
+                            source_id: task.capture_id.clone(),
+                            quote: task.memory.body.trim().chars().take(512).collect(),
+                        }],
+                    }],
                 },
             )?;
             println!(

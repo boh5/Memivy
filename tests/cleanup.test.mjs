@@ -56,15 +56,6 @@ test('editor shortcut saves the very last input without waiting for a render', a
   assert.equal(received,'最后一次输入');
 });
 
-test('Escape dismisses hovered tooltips even when keyboard focus is elsewhere', async t => {
-  const f=workspaceFixture(t), Tooltip=f.load('src/workspace/IconButton.tsx').ActionTooltip;
-  const view=f.mount(Tooltip,{label:'整理正文',children:null}); await f.settle();
-  f.key({key:'Escape'}); await f.settle();
-  assert.match(view.tree.props.className,/tooltip-dismissed/);
-  view.tree.props.onFocus(); await f.settle();
-  assert.doesNotMatch(view.tree.props.className,/tooltip-dismissed/);
-});
-
 test('lost save acknowledgement can replay the exact request after a head refresh', async t => {
   const {f,props,Cleanup} = setup(t); let firstRequest, attempts=0, saved=0;
   f.overrides.cleanup_generate = async () => '审核稿';

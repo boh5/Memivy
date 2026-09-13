@@ -53,7 +53,7 @@ fn schema8_promotes_only_independent_inputs_and_preserves_archive_and_review_bou
         expected_version: None,
         origin: None,
         context: vec![],
-        conclusion: None,
+        destination: None,
     };
     db.execute(
         "INSERT INTO workspace_drafts(key,payload) VALUES(?,?)",
@@ -188,13 +188,16 @@ fn schema8_promotes_only_independent_inputs_and_preserves_archive_and_review_bou
         memory
     );
     let draft = store
-        .workspace_draft(&format!("conclusion:{message}"))
+        .workspace_draft(&format!("save:{message}"))
         .unwrap()
         .unwrap();
     assert_eq!(draft.body, "旧版保存失败的结论");
-    let review = draft.conclusion.unwrap();
-    assert_eq!(review.destination, destination);
-    assert_eq!(review.merged_body.as_deref(), Some("完整审核融合稿"));
+    assert_eq!(draft.destination, Some(destination));
+    let editor = store
+        .workspace_draft(&format!("memory:{memory}"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(editor.body, "完整审核融合稿");
     assert!(store.claim_organization().unwrap().is_none());
     assert_eq!(store.capture_by_id(&old).unwrap().text, "原始报价 100 EUR");
     assert!(

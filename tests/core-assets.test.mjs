@@ -46,8 +46,8 @@ test('visual fixture records current source authority and actual supported sizes
   assert.ok(contract.evidence_fields.includes('source_sha256'));
 });
 
-test('conclusion contract points to executable regressions, not missing checklist items', () => {
-  const contract = read('tests/assets/conclusion_contract.json');
+test('agent memory contract points to executable regressions, not missing checklist items', () => {
+  const contract = read('tests/assets/agent_memory_contract.json');
   unique(contract.cases);
   for (const c of contract.cases) {
     const source = readFileSync(new URL(`../${c.file}`, import.meta.url), 'utf8');

@@ -54,3 +54,12 @@ test('duplicate notification hints with an unchanged cursor do not refetch data'
   await r.resourceCall('library_detail',{key:{kind:'memory',id:'a'}});
   assert.equal(reads,1);assert.equal(cursor.sequence,3);
 });
+test('stream updates expire only their conversation and retain other cached reads',async t=>{
+  const calls=[];
+  const r=fixture(t,async(name,args)=>{calls.push([name,args.id??args.key?.id]);return {text:'reply'};});
+  const read=id=>r.resourceCall('discussion_messages',{id});
+  await read('a');await read('b');await r.resourceCall('library_detail',{key:{kind:'memory',id:'note'}});
+  await r.expireQueries(['discussion_messages'],[{domain:'discussion',entity:'a'}]);
+  await read('a');await read('b');await r.resourceCall('library_detail',{key:{kind:'memory',id:'note'}});
+  assert.deepEqual(calls,[['discussion_messages','a'],['discussion_messages','b'],['library_detail','note'],['discussion_messages','a']]);
+});

@@ -49,14 +49,16 @@ fn organize(s: &MemoryStore, record: &RecordKey) -> Result<Receipt> {
     assert_eq!(task.memory.memory_id, record.id);
     s.apply_organization(
         &task,
-        &OrganizationProposal {
-            action: "keep".into(),
-            target: String::new(),
+        &MemoryWriteArgs {
+            destination: Destination::New,
             title: task.memory.title.clone(),
-            addition: task.memory.body.clone(),
-            changes: vec![],
-            keywords: vec![],
-            reason: "保留原记忆".into(),
+            parts: vec![MemoryWritePart {
+                text: task.memory.body.clone(),
+                sources: vec![MemorySourceQuote {
+                    source_id: task.capture_id.clone(),
+                    quote: task.memory.body.trim().chars().take(512).collect(),
+                }],
+            }],
         },
     )
 }
@@ -158,8 +160,15 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     assert!(s.create_conversation(&topic, "聊聊").is_err());
     s.archive_collection(&c, true, 2).unwrap();
     assert!(
-        s.scoped_discussion_sources(&["面试".into()], &[], Some(&c))
-            .is_err()
+        s.search(&SearchRequest {
+            query: "面试".into(),
+            scope: SearchScope {
+                collection_id: Some(c.clone()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .is_err()
     );
     assert_eq!(s.library_detail(&m).unwrap().body, "面试原话");
     s.archive_collection(&c, false, 3).unwrap();
@@ -174,7 +183,7 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     );
 }
 #[test]
-fn scoped_rag_filters_before_ranking_excludes_history_and_rejects_outside_seeds() {
+fn explicit_topic_search_filters_before_ranking_and_keeps_history_separate() {
     let (_d, s) = setup();
     let (inside, r) = memory(&s, "木桥最初计划离线");
     let c = collection(&s, "木桥");
@@ -193,7 +202,20 @@ fn scoped_rag_filters_before_ranking_excludes_history_and_rejects_outside_seeds(
         outsider = Some(memory(&s, "木桥外部干扰记录").1);
     }
     let sources = s
-        .scoped_discussion_sources(&["木桥".into()], &[], Some(&c))
+        .search(&SearchRequest {
+            query: "木桥".into(),
+            scope: SearchScope {
+                collection_id: Some(c.clone()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .map(|r| {
+            r.items
+                .into_iter()
+                .map(|h| h.evidence.source)
+                .collect::<Vec<_>>()
+        })
         .unwrap();
     assert!(!sources.is_empty());
     assert!(sources.contains(&SourceRef::Version(current.after_version.unwrap())));
@@ -210,22 +232,12 @@ fn scoped_rag_filters_before_ranking_excludes_history_and_rejects_outside_seeds(
             }
         }
     }));
-    assert!(
-        s.scoped_discussion_sources(
-            &["木桥".into()],
-            &[SourceRef::Version(outsider.unwrap().after_version.unwrap())],
-            Some(&c)
-        )
-        .is_err()
-    );
-    let topic = id();
-    s.create_scoped_conversation(&topic, "木桥", Some(&c))
+    // Conversation focus can include an outside memory; it is not a read filter.
+    let outside = outsider.unwrap();
+    let focused = s
+        .agent_focused_memories(&[SourceRef::Version(outside.after_version.unwrap())])
         .unwrap();
-    let turn = id();
-    s.start_turn(&turn, &topic, "方向？", &[]).unwrap();
-    s.bind_discussion_evidence(&turn, &sources).unwrap();
-    s.collect_record(&c, &inside, false).unwrap();
-    assert!(s.finish_turn(&turn, "旧的回答", &sources).is_err());
+    assert_eq!(focused, vec![outside.memory_id.unwrap()]);
 }
 #[test]
 fn collection_list_and_recommendation_exclusion_apply_before_limit() {
@@ -381,9 +393,21 @@ fn navigation_performance_10000_records() {
                 assert_eq!(s.organization_states(&status_keys).unwrap().len(), 100);
             } else if mode == "scoped_rag" {
                 assert_eq!(
-                    s.scoped_discussion_sources(&["蓝鲸旅行".into()], &[], Some(&collection))
-                        .unwrap()
-                        .len(),
+                    s.search(&SearchRequest {
+                        query: "蓝鲸旅行".into(),
+                        scope: SearchScope {
+                            collection_id: Some(collection.clone()),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .map(|r| r
+                        .items
+                        .into_iter()
+                        .map(|h| h.evidence.source)
+                        .collect::<Vec<_>>())
+                    .unwrap()
+                    .len(),
                     1
                 );
             } else {
@@ -604,15 +628,15 @@ fn related_memories_keep_collection_discussions_within_their_scope() {
         .unwrap();
     assert_eq!(related.len(), 1);
     assert_eq!(related[0].memory_id, inside.id);
-    s.scoped_discussion_sources(
-        &[],
-        &[
+    assert_eq!(
+        s.agent_focused_memories(&[
             SourceRef::Version(seed_receipt.after_version.clone().unwrap()),
-            related[0].source.clone(),
-        ],
-        Some(&c),
-    )
-    .unwrap();
+            related[0].source.clone()
+        ])
+        .unwrap()
+        .len(),
+        2
+    );
     s.collect_record(&c, &inside, false).unwrap();
     assert!(
         s.related_memories_in_collection(

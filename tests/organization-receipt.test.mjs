@@ -37,9 +37,11 @@ test('background revisions preserve an open immutable change comparison', async 
   const props={record:{kind:'memory',id:'a'},revision:0,onOpen(){},onRefresh(){}};
   const view=f.mount(f.load('src/workspace/OrganizationReceipt.tsx').default,props);await f.settle();
   f.find(view,n=>n.type==='button'&&f.text(n)==='查看变化').props.onClick();await f.settle();
-  assert(f.find(view,n=>n.props?.title==='这次整理的变化'));
+  assert(f.find(view,n=>n.props?.title==='记忆修改'));
+  f.overrides.library_detail=async()=>({history:[{id:'v1',body:'另一段后续数据'}]});
   f.render(view,{...props,revision:1});await f.settle();
-  assert(f.find(view,n=>n.props?.title==='这次整理的变化'));
+  assert(f.text(f.find(view,n=>n.props?.title==='记忆修改')).includes('已确认的版本'));
+  assert(!f.text(view.tree).includes('另一段后续数据'));
 });
 
 test('background refresh neither unlocks nor discards an in-flight save on the same record', async t => {

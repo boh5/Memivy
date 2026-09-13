@@ -7,6 +7,7 @@
   "languageSaveError": "语言未能保存，已保留原选择。",
   "retry": "重试",
   "closeNotice": "关闭提示",
+  "sourceDiscussion": "讨论中记下",
   "sourceConclusion": "确认的讨论结论",
   "sourceCapture": "原始记录"
 }

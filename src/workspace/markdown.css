@@ -73,3 +73,5 @@
 .milkdown:has(.milkdown-link-edit[data-show=true]) .memivy-selection-tools { display: none; }
 
 .format-h1, .format-h2, .format-h3 { font-size: 12px !important; font-weight: 500; }
+.markdown-citation { display: inline; padding: 0; border: 0; color: #82702b; text-decoration: underline; text-underline-offset: 3px; font: inherit; text-align: inherit; }
+.markdown-citation:disabled { color: #9b9b9b; text-decoration-style: dotted; }

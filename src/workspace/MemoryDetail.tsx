@@ -12,6 +12,7 @@ import Markdown from "./Markdown";
 import RelatedMemories from "./RelatedMemories";
 import OrganizationReceipt from "./OrganizationReceipt";
 import MemoryCollections from "./MemoryCollections";
+import { MemoryChangeHistory } from "./MemoryChanges";
 import { notify } from "./Toast";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
@@ -44,8 +45,8 @@ function Editor({
 }) {
   const { t } = useTranslation("workspace");
   const draft = useDraft(keyOf(detail.key), {
-    title: detail.reviewed_conclusion?.title || detail.title,
-    body: detail.reviewed_conclusion?.body || detail.body,
+    title: detail.title,
+    body: detail.body,
     expected_version: detail.current?.id || null,
   });
   const [busy, setBusy] = useState(false),
@@ -168,6 +169,7 @@ export default function MemoryDetail({
   initialReceipt,
   onChanged,
   onDiscuss,
+  onOpenDiscussion,
   onBack,
   collectionId,
 }: {
@@ -179,6 +181,7 @@ export default function MemoryDetail({
   onChanged: (key?: Key, receipt?: Receipt) => void;
   onBack: () => void;
   onDiscuss: (detail: Detail, related?: Source[]) => Promise<void>;
+  onOpenDiscussion: (id: string) => Promise<void>;
 }) {
   const { t } = useTranslation("workspace");
   const revision = useResourceVersion([{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision;
@@ -437,11 +440,6 @@ export default function MemoryDetail({
               {!trashed && <OrganizationReceipt presentation="status" record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
             {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} onRefresh={() => onChanged()} />}
-            {detail.reviewed_conclusion && !cleaning && !editing && <div className="workspace-warning">
-              <p>{t("detail.reviewedWarning")}</p>
-              <details><summary>{t("detail.reviewedDetails")}</summary><h3>{detail.reviewed_conclusion.title}</h3><p className="readable-text">{detail.reviewed_conclusion.body}</p></details>
-              <p className="field-help">{t("detail.reviewedHelp")}</p>
-            </div>}
             <div className="detail-tabs" hidden={cleaning} role="tablist" aria-label={t("detail.tabsAria")}>
               <button
                 role="tab"
@@ -504,6 +502,7 @@ export default function MemoryDetail({
                 ))}
               {!cleaning && tab === "sources" && (
                 <div className="source-list">
+                  {!trashed && record.kind === "memory" && <MemoryChangeHistory memoryId={record.id} onOpenRecord={onChanged} onRefresh={() => onChanged(record)} />}
                   {detail.sources.map((s) => (
                     <article key={s.id} className="source-block">
                       <div className="section-heading">
@@ -519,6 +518,9 @@ export default function MemoryDetail({
                           <div className="readable-text">
                             <Highlight text={s.capture.text} query={query} />
                           </div>
+                          {s.capture.origin.conversation_id && <p className="source-metadata">
+                            {s.conversation_available ? <button className="quiet" onClick={() => void onOpenDiscussion(s.capture!.origin.conversation_id!)}>{t("input.openOriginalDiscussion")}</button> : t("input.originalDiscussionUnavailable")}
+                          </p>}
                           {s.capture.origin.project && (
                             <p className="source-metadata">
                               {t("detail.project", { project: s.capture.origin.project })}

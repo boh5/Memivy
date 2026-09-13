@@ -162,12 +162,10 @@ pub(crate) async fn models_test(
                 .await
                 .map_err(HostError::from)?;
             capabilities = Some(c.clone());
-            if c.multi_turn && c.structured_json {
-                "model_test_enhanced"
-            } else if c.single_tool {
-                "model_test_basic"
+            if c.supports_agent() {
+                "model_test_agent"
             } else {
-                "model_test_no_organization"
+                "model_test_agent_unsupported"
             }
             .to_string()
         }
@@ -283,6 +281,13 @@ pub(crate) async fn models_apply(
         "llm" => {
             if binding.as_ref().is_some_and(|b| b.source == Source::Local) {
                 return Err(HostError::new("model_configuration"));
+            }
+            if binding.is_some()
+                && !capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.supports_agent())
+            {
+                return Err(HostError::new("model_tools_unsupported"));
             }
             r.llm = binding;
             prune_unused(&mut r, window.app_handle());

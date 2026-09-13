@@ -3,15 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../ui";
 import { native } from "./api";
 
-/** Window chrome only: question drafts and RAG remain owned by CaptureForm/App. */
-export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOpen, onClose, onCapture, triggerRef, children }: {
+/** Window chrome only: input drafts and submission remain owned by CaptureForm/App. */
+export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOpen, onClose, onNewDiscussion, triggerRef, children }: {
   open: boolean;
   preview: string;
   scopeLabel?: string;
   scope: ReactNode;
   onOpen: () => void;
   onClose: () => void;
-  onCapture: () => void;
+  onNewDiscussion: () => void;
   children: ReactNode;
   triggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
@@ -66,8 +66,8 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
       </div>
     </div>
     <div className="titlebar-actions" data-tauri-drag-region>
-      <button className="new-capture-button" onClick={onCapture} aria-haspopup="dialog">
-        <Icon name="plus" size={15} />{t("topbar.newCapture")}<kbd>⌘ N</kbd>
+      <button className="new-capture-button" onClick={onNewDiscussion} aria-haspopup="dialog">
+        <Icon name="plus" size={15} />{t("input.newDiscussion")}<kbd>⌘ N</kbd>
       </button>
     </div>
   </header>;

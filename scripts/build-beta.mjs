@@ -15,6 +15,16 @@ function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', env });
   if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? 'could not start'}).`);
 }
+function verifyMicrophoneAccess(app) {
+  const options = { cwd: root, encoding: 'utf8', env };
+  const signature = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app], options);
+  if (signature.status !== 0) throw new Error(`The built application signature is invalid; refusing to package it. ${signature.stderr?.trim() || ''}`);
+  const signedEntitlements = spawnSync('/usr/bin/codesign', ['--display', '--entitlements', '-', '--xml', app], options);
+  const plist = spawnSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], { ...options, input: signedEntitlements.stdout });
+  if (signedEntitlements.status !== 0 || plist.status !== 0 || JSON.parse(plist.stdout)['com.apple.security.device.audio-input'] !== true) {
+    throw new Error('The built application lacks a signed audio-input entitlement set to true; refusing to package it.');
+  }
+}
 // Cargo may put outputs outside the repository. Use the same metadata and an
 // explicit architecture as Tauri; a previous default-target bundle is not evidence.
 const metadata = spawnSync('cargo', ['metadata', '--format-version', '1', '--no-deps', '--locked', '--offline'], { cwd: root, encoding: 'utf8', env });
@@ -36,7 +46,10 @@ mkdirSync(folder, { recursive: true });
 const dmg = path.join(folder, `Memivy_${version}_aarch64.dmg`);
 const stage = mkdtempSync(path.join(tmpdir(), 'memivy-beta-package-'));
 try {
-  cpSync(builtApp, path.join(stage, 'Memivy.app'), { recursive: true });
+  const stagedApp = path.join(stage, 'Memivy.app');
+  cpSync(builtApp, stagedApp, { recursive: true });
+  // Check the actual bundle that will enter the DMG, including its embedded signature.
+  verifyMicrophoneAccess(stagedApp);
   symlinkSync('/Applications', path.join(stage, 'Applications'));
   writeFileSync(path.join(stage, '安装与数据说明.txt'), `Memivy ${version} 开发测试版\n\n仅支持 Apple Silicon、macOS 26 或更新系统。\n这是 ad-hoc 签名、未经 Apple 公证的开发包。\n\n安装：将 Memivy.app 拖入 Applications，再从应用程序打开。系统若拦截，可在“系统设置 → 隐私与安全性”核对应用后按系统提供的方式允许打开；不要关闭系统安全保护。\nMCP：打开 Memivy 设置，开启 MCP 并复制配置到支持本机 stdio 的 Agent。安装位置变化后重新复制配置。\n\n升级：先退出 Memivy，并停止外部 Agent 的 Memivy MCP 连接，再用同名新应用替换旧应用；重新打开并重连。\n卸载：先关闭 MCP 开关、退出 Memivy、在外部 Agent 移除连接，再将应用移入废纸篓。\n数据默认保留在 ~/Library/Application Support/com.memivy.app/，包括 memivy.db、独立模型配置和桌面设置。移除应用不会自动删除这些文件。\n完整移除数据须用户另行主动操作；所有写入进程停止后才可复制整个数据目录作离线备份。模型配置含私密信息，不要分享。\n`);
   // Standard disk image, with an Applications link. No Finder/AppleScript or

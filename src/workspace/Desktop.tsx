@@ -2,7 +2,7 @@ import { translateCatalog } from "../i18n";
 import { useNotice } from "../i18n/react";
 import { useTranslation } from "react-i18next";
 import { useResourceBridge } from "./resources";
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type PointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import icon from "../../design-demo/brand/memivy-icon.svg";
 import { Icon } from "../ui";
@@ -11,7 +11,7 @@ import { ErrorNotice } from "./components";
 import { useDesktop, useWindowLifecycle } from "./desktopApi";
 import { finishVoiceInputs } from "./useVoice";
 import { flushDrafts } from "./useDraft";
-import CaptureForm from "./CaptureForm";
+import CaptureForm, { type InputSubmission } from "./CaptureForm";
 import Discussion from "./Discussion";
 import { installClickRecovery } from "./clickRecovery";
 import LanguageRecovery from "./LanguageRecovery";
@@ -22,7 +22,8 @@ import "./desktop.css";
 export default function Desktop() {
   const { t } = useTranslation("workspace");
   const desktop = useDesktop(), state = desktop.state;
-  const [error, setError] = useNotice(), [saved, setSaved] = useState<Key | null>(null);
+  const [error, setError] = useNotice();
+  const saved: Key | null = state?.receipt && state.last_memory ? { kind: "memory", id: state.last_memory } : null;
   const busy = useRef(false), current = useRef(state), root = useRef<HTMLDivElement>(null), composing = useRef(false);
   const drag = useRef<{ x: number; y: number; moved: boolean; tail: Promise<unknown> } | null>(null);
   const dragEnd = useRef<Promise<unknown>>(Promise.resolve()), suppressLeafClick = useRef(false);
@@ -45,7 +46,7 @@ export default function Desktop() {
   }, []);
   useEffect(() => {
     const content = composerContent.current;
-    if (!native || !state?.expanded || (state.mode === "ask" && state.topic) || !content || typeof ResizeObserver === "undefined") return;
+    if (!native || !state?.expanded || state.topic || !content || typeof ResizeObserver === "undefined") return;
     let disposed = false, previous = 0, tail = Promise.resolve();
     const measure = () => {
       // Measure intrinsic content; the outer panel adds toolbar, padding and borders.
@@ -60,13 +61,19 @@ export default function Desktop() {
     observer.observe(content);
     measure();
     return () => { disposed = true; observer.disconnect(); };
-  }, [state?.expanded, state?.generation, state?.mode, state?.topic?.id, state?.pinned]);
+  }, [state?.expanded, state?.generation, state?.topic?.id, state?.pinned]);
   const dismiss = useCallback(async (reason: string, generation = current.current?.generation) => {
     const requestedAt = Date.now();
     if (generation === undefined || dismissing.current || document.querySelector("dialog[open]")) return;
     if (busy.current) { pendingDismiss.current = { reason, generation }; return; }
     dismissing.current = true;
-    try { await finishVoiceInputs(); await flushDrafts(); if (native) await call("desktop_dismiss", { generation, reason, requestedAt }); }
+    try {
+      await finishVoiceInputs(); await flushDrafts();
+      if (reason === "saved" && current.current?.topic) {
+        const draft = await call<{body:string}|null>("draft_read", { key: `discussion:${current.current.topic.id}` });
+        if (draft?.body.trim()) return;
+      }
+      if (native) await call("desktop_dismiss", { generation, reason, requestedAt }); }
     catch (e) { setError(errorText(e)); }
     finally { dismissing.current = false; }
   }, []);
@@ -80,6 +87,7 @@ export default function Desktop() {
   useEffect(() => {
     if (!native) return;
     const events = [
+      listen<string>("desktop-record-complete", e => { if (current.current?.topic?.id === e.payload) void dismiss("saved"); }),
       listen("desktop-blur", () => { if (!composing.current) void dismiss("blur"); }),
       listen<number>("desktop-dismiss-request", e => void dismiss("explicit", e.payload)),
       listen("workspace-close-request", () => void dismiss("explicit")),
@@ -96,9 +104,8 @@ export default function Desktop() {
     try { await finishVoiceInputs(); await flushDrafts(); await call("desktop_expand", { record, settings }); }
     catch (e) { setError(errorText(e)); }
   }
-  async function ask(question: string, id: string) {
-    if (!current.current?.configured) throw { code: "desktop_model_required" };
-    const topic = await call<Topic>("discussion_ask", { id, topicId: id, question, context: [] });
+  async function submit(input: InputSubmission) {
+    const topic = await call<Topic>("discussion_submit", { ...input, topicId: current.current?.topic?.id, quick: true });
     await desktop.update({ topic_id: topic.id });
   }
   useEffect(() => { const openSettings = () => void expand(null, true); window.addEventListener("voice-settings-request", openSettings); return () => window.removeEventListener("voice-settings-request", openSettings); }, []);
@@ -144,15 +151,12 @@ export default function Desktop() {
       </header>
       <div className="desktop-content">
         <LanguageRecovery />
-        <div ref={composerContent} className={state.mode === "ask" && state.topic ? "desktop-discussion-content" : "desktop-capture-content"}>
-        {state.mode === "ask" && state.topic ? <>
-          <div className="desktop-topic-nav"><button onClick={() => void change({ mode: "capture" })}>{t("desktop.capture")}</button><span>{t("desktop.ask")}</span><button onClick={() => void change({ clear_topic: true })}>{t("desktop.newTopic")}</button></div>
-          <Discussion key={state.topic.id} compact topic={state.topic} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => {}} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
-        </> : <CaptureForm key={state.mode} quick sourceApp={state.source_app} mode={state.mode} focus={state.generation} onMode={mode => void change({ mode })} onAsk={ask}
-          onBusy={changeBusy} onReady={reportReady} onEdit={() => setSaved(null)}
-          onSaved={key => { setSaved(key); setTimeout(() => void dismiss("saved"), 0); }} />}
-        {saved && <div className="desktop-saved" role="status"><Icon name="check" size={13} /><span>{t("desktop.saved")}</span><button onClick={() => void expand(saved)}>{t("desktop.view")}</button></div>}
-        {state.mode === "ask" && !state.configured && !state.topic && <button className="connect-model-link" onClick={() => void expand(null, true)}>{t("desktop.connectModel")}</button>}
+        <div ref={composerContent} className={state.topic ? "desktop-discussion-content" : "desktop-capture-content"}>
+        {state.topic ? <>
+          <div className="desktop-topic-nav"><span>{t("input.discussion")}</span><button onClick={() => void change({ clear_topic: true })}>{t("input.newDiscussion")}</button></div>
+          <Discussion key={state.topic.id} compact quick sourceApp={state.source_app} topic={state.topic} focus={state.generation} configured={state.configured} onSettings={() => void expand(null, true)} onRefresh={() => {}} onOpenRecord={key => void expand(key)} onReady={reportReady} onBusy={changeBusy} />
+        </> : <CaptureForm quick sourceApp={state.source_app} focus={state.generation} onSubmit={submit}
+          configured={state.configured} onSettings={() => void expand(null, true)} onBusy={changeBusy} onReady={reportReady} />}
         <ErrorNotice text={error || desktop.error || (state.error ? translateCatalog(state.error, { ns: "errors" }) : "")} />
         </div>
       </div>
