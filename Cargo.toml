@@ -3,6 +3,9 @@ members = ["crates/memivy-core", "crates/memivy-mcp", "crates/memivy-embedding",
 resolver = "2"
 
 [workspace.package]
+license = "MIT"
+authors = ["Huang Bo"]
+repository = "https://github.com/boh5/memivy"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"

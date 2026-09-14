@@ -1,0 +1,90 @@
+name: Release draft
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+  package:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '26.0'
+      CARGO_BUILD_JOBS: '3'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Prepare native toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          xcrun --show-sdk-version
+          cmake --version
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" show
+      - run: npm ci
+      - run: cargo fetch --locked
+      - name: Verify tag and source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/check-release.mjs "$RELEASE_TAG"
+          git merge-base --is-ancestor HEAD origin/main
+      - run: npm run build:release
+      - name: Check packaged MCP
+        run: python3 scripts/verify_mcp.py --binary target/aarch64-apple-darwin/release/bundle/macos/Memivy.app/Contents/MacOS/memivy-mcp
+      - name: Prepare assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir release-assets
+          cp target/release/bundle/dmg/*.dmg target/release/bundle/dmg/*.sha256 release-assets/
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const version = process.env.RELEASE_TAG.slice(1);
+          const sections = readFileSync('CHANGELOG.md', 'utf8').split(/(?=^## )/m);
+          const section = sections.find(text => text.split(/\r?\n/, 1)[0] === `## ${version}`);
+          if (!section || !section.slice(section.indexOf('\n') + 1).trim()) {
+            throw new Error(`Missing release notes for ${version}`);
+          }
+          writeFileSync('release-assets/release-notes.md', section.trim() + '\n');
+          NODE
+          printf '\nSource commit: %s\n' "$(git rev-parse HEAD)" >> release-assets/release-notes.md
+          cd release-assets
+          shasum -a 256 -c *.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14
+  draft:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download this run's artifact and create draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh run download "$RUN_ID" --name release-assets --dir release-assets
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; inspect it manually instead of replacing assets.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*.sha256 --verify-tag --draft --title "Memivy $RELEASE_TAG" --notes-file release-assets/release-notes.md

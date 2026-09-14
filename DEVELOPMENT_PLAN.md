@@ -1059,3 +1059,21 @@ Astra 首轮发现五组问题：本地语音标签、恢复结果中文、错�
 复审修复：应用内恢复备份曾残留按 schema 数字判断向量能力的分支，归一版本后跳过索引重置。新增含实际合成向量的应用恢复回归，先复现修订号未变化，再移除版本条件，恢复时始终清空派生向量并刷新修订。发布基线同时使用独立 application ID `0x4d454d59`，避免版本重新从 1 编号时发生格式身份碰撞；无旧格式识别或兼容分支。补充错误 application ID 的打开、写入及备份恢复拒绝测试。复审重新从 HEAD 迁移生成参考数据库，核对 170 个保留结构对象、初始数据和运行时 FTS 重建结构一致。
 
 复审后验证：全工作区离线测试 **263 通过、2 忽略、0 失败**；fmt、全目标 Clippy（warnings denied）、diff 检查通过。重建后的 memory_probe／memivy-mcp 通过记忆库多进程、核心强杀故障和 MCP stdio 三套进程检查。本次未做原生 UI／真实模型验收，未提交或推送。
+
+
+## 2026-09-14 GitHub 0.1.0 发布准备
+
+用户确认 MIT / Huang Bo、`boh5/memivy`、`0.1.0` / `v0.1.0`，不标记预发布；采用免费 ad-hoc 签名，不购买 Apple Developer，不做公证。本轮授权为「先做出来我看看」，仅制作本地可审查结果，未提交、推送、创建远程仓库或发布。
+
+- 添加中英文 README、MIT、安装/升级/隐私/贡献/安全说明、变更记录、问题和 PR 模板、Dependabot 配置。GitHub 链接为预定发布位置，当前尚未发布；未使用私人资料截图或旧样机图片充当正式界面。
+- CI 在 `macos-26` 跑现有合成回归及恢复进程检查。tag 工作流复用 CI，核对版本与 main 历史，构建同源码 app/三个 sidecar、检查包内 MCP，生成草稿 Release。Action 固定 SHA；构建只读 token，上传任务仅 contents write / actions read；不替换已存在版本。
+- `build:release` 替代旧 beta 名称，保留签名与 audio-input 检查，补齐所有 workspace/npm/lock/Tauri/tag 版本校验；主应用及 DMG 均附许可证。第三方依赖声明从锁定依赖与上游许可快照生成，模型权重不入包。少数上游只提供许可声明，保留来源与范围，不声称法律审查完成。
+- 实际验证：release 元数据及 actionlint 通过；Rust fmt / 严格 Clippy 通过，workspace all-targets **264 通过、2 ignored**；前端构建与 i18n 通过；完整 UI **238/238**。首次沙箱运行仅 Vite 文件监视测试出现 EMFILE，提高句柄上限仍失败；同测试与完整 UI 在沙箱外通过。其余 core-assets 阶段均通过，保留首次 suite 的失败记录，不覆盖证据。
+- 合成 MemoryStore、组织恢复、核心故障、MCP 检查通过；另跑 live MCP 备份恢复通过。打包回归验证新产物选择、篡改拒绝、麦克风 entitlement、版本和缺失辅助进程等边界。
+- Gitleaks 8.30.1 扫描全部 30 个可达提交及导出的待公开源码均无发现；npm audit 0。cargo-audit 0.22.2 报告 vulnerabilities=0，同时有 6 项 unmaintained 和 1 项 glib unsound 信息警告。glib / proc-macro-error 不在当前 ARM64 macOS 依赖树；unic 系列经 Tauri/urlpattern 引入，保留维护观察，不借发布准备擅自升级依赖图。
+- 最终 DMG 已只读挂载复验：严格签名检查通过，包内四个可执行文件齐全，版本 0.1.0，应用内与 DMG 中的三份许可证文件一致；挂载后的真实 MCP 合成协议/并发/故障检查通过，SHA-256 与旁侧校验文件一致。
+- 本地正式 app 与 DMG 已构建。沙箱内 hdiutil 报设备未配置，获运行环境批准后在沙箱外成功生成 `target/release/bundle/dmg/Memivy_0.1.0_aarch64.dmg` 和校验文件；未进行 Apple 公证。
+- 干净临时源码目录完成 npm ci / 前端构建；本地 native 使用现有工具链和 Cargo 下载缓存，不能替代首次 GitHub runner 的冷构建证据。当前 SDK 为 27.0，部署目标仍为 26.0，不等于在 macOS 26.0 最低系统实测。
+- 尚未验证：首次 GitHub Actions 实跑、另一台 Mac 从浏览器下载安装与 Gatekeeper 放行、完整最终包原生输入/语音/升级验收。专用合成预览包已构建，原生 UI 工具多次超时，未取得正式截图；截图和外机验收待补，不使用构建成功代替。
+
+证据：`research/core-tests/20260914T112037Z-362353e8/`（第一次 suite），`/private/tmp/memivy-release-ui-verified.log`，`/private/tmp/memivy-release-complete-build.log`，`/private/tmp/memivy-release-{npm-audit,rust-audit,gitleaks,worktree-leaks}.json`；临时源码验证 `/private/tmp/memivy-source-{install,build}.log`。对外操作与最终安装验收仍按 docs/RELEASING.md 执行。

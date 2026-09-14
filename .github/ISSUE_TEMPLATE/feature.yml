@@ -1,0 +1,9 @@
+name: Feature request
+description: Explain the problem you want to solve.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and desired outcome
+    validations:
+      required: true

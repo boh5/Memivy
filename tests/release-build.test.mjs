@@ -9,9 +9,12 @@ function fixture(t) {
   const root=mkdtempSync(path.join(tmpdir(),'memivy-build-review-'));
   t.after(()=>rmSync(root,{recursive:true,force:true}));
   const put=(name,text)=>{const file=path.join(root,name);mkdirSync(path.dirname(file),{recursive:true});writeFileSync(file,text);return file;};
-  for(const name of ['prepare-mcp.mjs','build-beta.mjs','rust-env.mjs']) {
+  for(const name of ['prepare-mcp.mjs','build-release.mjs','rust-env.mjs']) {
     mkdirSync(path.join(root,'scripts'),{recursive:true});copyFileSync(`scripts/${name}`,path.join(root,'scripts',name));
   }
+  put('scripts/check-release.mjs', '');
+  put('LICENSE', 'test license');
+  put('docs/INSTALL.md', 'test instructions');
   put('src-tauri/tauri.conf.json',JSON.stringify({version:'0.1.0'}));
   put('target/release/memivy-mcp','STALE MCP');
   put('target/release/bundle/macos/Memivy.app/build-marker','STALE APP');
@@ -22,12 +25,12 @@ function fixture(t) {
     chmodSync(f,0o755);
   };
   const env={...process.env,CARGO_TARGET_DIR:target,PATH:path.join(root,'tools')+path.delimiter+process.env.PATH};
-  return {root,put,target,command,run(name){return spawnSync(process.execPath,[path.join(root,'scripts',name)],{cwd:root,env,encoding:'utf8'});}};
+  return {root,put,target,command,run(name,args=[]){return spawnSync(process.execPath,[path.join(root,'scripts',name),...args],{cwd:root,env,encoding:'utf8'});}};
 }
 const supported=process.platform==='darwin'&&process.arch==='arm64';
-function betaBuildFixture(t,{entitlement='<true/>',tamper=false}={}) {
+function releaseBuildFixture(t,{entitlement='<true/>',tamper=false}={}) {
   const f=fixture(t);
-  f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
+  f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-core',version:'0.1.0'},{name:'memivy-speech',version:'0.1.0'},{name:'memivy-mcp',version:'0.1.0'},{name:'memivy-embedding',version:'0.1.0'}]}));`);
   f.command('npm',`
     const fs=require('fs'),p=require('path'),{spawnSync}=require('child_process');
     const args=process.argv.slice(2),i=args.indexOf('--target');
@@ -56,30 +59,40 @@ test('MCP staging uses the artifact emitted by Cargo with a custom target direct
   assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin'),'utf8'),'FRESH memivy-mcp');
   assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin'),'utf8'),'FRESH memivy-embedding');
 });
+test('development helpers are built beside the default Cargo debug app', {skip:!supported}, t=>{
+  const f=fixture(t);
+  f.command('cargo',`const fs=require('fs'),p=require('path'),args=process.argv.slice(2);const name=args[args.indexOf('-p')+1],i=args.indexOf('--target');const executable=p.join(process.env.CARGO_TARGET_DIR,...(i>=0?[args[i+1]]:[]),args.includes('--release')?'release':'debug',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));`);
+  f.command('lipo','process.exit(0);');
+  const result=f.run('prepare-mcp.mjs',['--debug']);assert.equal(result.status,0,result.stderr);
+  for(const name of ['memivy-mcp','memivy-embedding','memivy-speech']) {
+    assert.equal(readFileSync(path.join(f.target,'debug',name),'utf8'),'FRESH '+name);
+  }
+});
 test('DMG packaging uses the just-built app rather than a stale default target bundle', {skip:!supported}, async t=>{
-  const f=betaBuildFixture(t);
-  const result=f.run('build-beta.mjs');assert.equal(result.status,0,result.stderr);
+  const f=releaseBuildFixture(t);
+  const result=f.run('build-release.mjs');assert.equal(result.status,0,result.stderr);
   assert.equal(readFileSync(path.join(f.root,'target/release/bundle/dmg/Memivy_0.1.0_aarch64.dmg'),'utf8'),'FRESH APP');
 });
 for(const entitlement of [null,'<false/>','<string>true</string>']) {
   test(`DMG packaging rejects a real signed bundle with audio-input ${entitlement??'absent'}`,{skip:!supported},t=>{
-    const f=betaBuildFixture(t,{entitlement}),result=f.run('build-beta.mjs');
+    const f=releaseBuildFixture(t,{entitlement}),result=f.run('build-release.mjs');
     assert.notEqual(result.status,0);assert.match(result.stderr,/audio-input entitlement set to true/);
     assert(!existsSync(path.join(f.root,'dmg-packaging-started')));
     assert(!existsSync(path.join(f.root,'target/release/bundle/dmg/Memivy_0.1.0_aarch64.dmg')));
   });
 }
 test('DMG packaging rejects a bundle modified after signing even with audio-input enabled',{skip:!supported},t=>{
-  const f=betaBuildFixture(t,{tamper:true}),result=f.run('build-beta.mjs');
+  const f=releaseBuildFixture(t,{tamper:true}),result=f.run('build-release.mjs');
   assert.notEqual(result.status,0);assert.match(result.stderr,/signature is invalid/);
   assert(!existsSync(path.join(f.root,'dmg-packaging-started')));
 });
-test('a mixed app and MCP version is rejected before running the native build', {skip:!supported}, async t=>{
+test('failed release validation stops the native build', {skip:!supported}, async t=>{
   const f=fixture(t);
-  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-mcp',version:'0.2.0'}]}));`);
+  await f.command('cargo',`console.log(JSON.stringify({target_directory:process.env.CARGO_TARGET_DIR,packages:[{name:'memivy',version:'0.1.0'},{name:'memivy-core',version:'0.1.0'},{name:'memivy-speech',version:'0.1.0'},{name:'memivy-mcp',version:'0.2.0'}]}));`);
+  f.put('scripts/check-release.mjs', "throw new Error('release validation failed');");
   await f.command('npm',`require('fs').writeFileSync('native-build-started','yes');`);
-  const result=f.run('build-beta.mjs');assert.notEqual(result.status,0);
-  assert.match(result.stderr,/versions differ/);
+  const result=f.run('build-release.mjs');assert.notEqual(result.status,0);
+  assert.match(result.stderr,/release validation failed/);
   assert(!existsSync(path.join(f.root,'native-build-started')));
 });
 test('a successful Cargo exit without an executable cannot reuse a stale MCP', {skip:!supported}, async t=>{

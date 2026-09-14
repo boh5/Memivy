@@ -8,7 +8,7 @@ process.env.PATH = withRustPath().PATH;
 const root = fileURLToPath(new URL('..', import.meta.url));
 if (process.platform !== 'darwin' || process.arch !== 'arm64' ||
     (process.env.TAURI_ENV_ARCH && !['aarch64', 'arm64'].includes(process.env.TAURI_ENV_ARCH))) {
-  throw new Error('Memivy development beta requires an Apple Silicon Mac.');
+  throw new Error('Memivy requires an Apple Silicon Mac.');
 }
 const debug = process.argv.includes('--debug') || process.env.TAURI_ENV_DEBUG === 'true';
 for (const name of ['memivy-mcp', 'memivy-embedding', 'memivy-speech']) {

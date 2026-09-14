@@ -8,6 +8,12 @@
 
 2026-09-14 用户授权发布前将数据库结构彻底合并为单一 schema 1。新库直接执行 `migrations/memory/001_initial.sql`；不保留开发期逐版本迁移、兼容转换或专用测试。开发资料库可以重新创建，后续正式迁移从 schema 2 追加。
 
+## Public distribution baseline
+
+2026-09-14 用户确认首发为 `0.1.0` / `v0.1.0`，MIT，版权署名 Huang Bo，准备发布到 `boh5/memivy`。只支持 Apple Silicon / macOS 26+；使用免费 ad-hoc 签名，未经 Apple 公证，不购买 Developer ID。正式版本不等于已完成安装验收。当前只授权先做本地可审查结果，不创建远程仓库、不推送、不发布。
+
+当前打包入口为 `npm run build:release` 与 `src-tauri/tauri.release.conf.json`，取代旧 `build:beta` 名称。新环境先 `npm ci`、`cargo fetch --locked`。公开资料见 README、docs/INSTALL.md、docs/PRIVACY.md；发布流程见 docs/RELEASING.md。工作流只生成草稿，最终公开需要明确授权和实际安装验收。用户数据从公开 schema 1 起保留，后续追加迁移。
+
 ## Repository status
 
 Memivy is a local-first, open-source, AI-native personal memory tool built around “记一下、问一问、接着想”: capture ideas, ask about existing memories, continue thinking, and explicitly save useful conclusions. The original Phase 1 technical-risk prototype was accepted on 2026-09-06. The user subsequently authorized Phase 1 v2 with a desktop companion and a minimal real conversation loop. After the model-configuration and native-focus fixes, the user confirmed on 2026-09-06 that all supplied checks passed; Phase 1 v2 is accepted within that tested prototype scope. Keep the historical evidence limits in DEVELOPMENT_PLAN.md and do not reopen this acceptance without a new issue. Product requirements are not evidence of implemented features. Do not implement later milestones or create application code as a side effect of a documentation or research task.

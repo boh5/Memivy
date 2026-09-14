@@ -1,0 +1,19 @@
+name: Bug report
+description: Tell us what went wrong and how to reproduce it.
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach private memories, databases, model configuration, API keys or recordings. Report vulnerabilities privately as described in SECURITY.md."
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Memivy version, macOS version, Apple chip
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps, expected and actual behavior
+    validations:
+      required: true

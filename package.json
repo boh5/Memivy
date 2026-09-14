@@ -11,9 +11,10 @@
     "dev:app": "npm run build:mcp && npm run tauri -- dev",
     "test:ui": "node --experimental-strip-types --test tests/*.test.mjs",
     "build:mcp": "node scripts/prepare-mcp.mjs --debug",
-    "build:beta": "node scripts/build-beta.mjs",
     "test:core-assets": "python3 scripts/verify_core_assets.py",
-    "i18n:check": "node scripts/check-i18n.mjs"
+    "i18n:check": "node scripts/check-i18n.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "release:check": "node scripts/check-release.mjs"
   },
   "dependencies": {
     "@milkdown/crepe": "7.22.1",
@@ -34,5 +35,14 @@
     "jsdom": "29.1.1",
     "typescript": "^5.9",
     "vite": "8.2.2"
+  },
+  "license": "MIT",
+  "author": "Huang Bo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boh5/memivy.git"
+  },
+  "engines": {
+    "node": ">=24.12.0 <25"
   }
 }
