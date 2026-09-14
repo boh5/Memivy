@@ -282,7 +282,7 @@ mod tests {
             assert_eq!(HostError::from(*code).code, *code);
         }
         assert_eq!(
-            HostError::from("内容已有新版本，请重新核对后再操作").code,
+            HostError::from(zh["conflict"].as_str().unwrap()).code,
             "operation_failed"
         );
     }

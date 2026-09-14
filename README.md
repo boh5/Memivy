@@ -45,12 +45,11 @@ git clone https://github.com/boh5/memivy.git
 cd memivy
 npm ci
 cargo fetch --locked
-MEMIVY_DATA_DIR="$(mktemp -d /tmp/memivy-dev.XXXXXX)" npm run dev:app
+npm run dev:app
 ```
 
-This creates a separate development library without changing your everyday notes.
-Downloaded models still use Memivy's shared cache. Keep the temporary directory's
-path if you want to reopen that development library later.
+The app uses `~/Library/Application Support/com.memivy.app/` for its data,
+including when running from source.
 `npm run dev` alone opens a browser preview; use `dev:app` for the desktop app.
 
 To build a DMG, run `npm run build:release`. The DMG and checksum are written to

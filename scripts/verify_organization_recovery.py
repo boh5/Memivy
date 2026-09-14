@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as tmp:
     data = Path(tmp) / 'data'
     def call(*args):
         return subprocess.run([PROBE, data, *args], capture_output=True, text=True, check=True, timeout=10).stdout
-    raw_text = '强杀时仍需保留的合成原话'
+    raw_text = 'Synthetic original text that must survive a forced stop'
     capture = json.loads(call('capture', str(uuid.uuid4()), raw_text))
     db = sqlite3.connect(data / 'memivy.db')
     initial_versions = db.execute('SELECT id FROM memory_versions').fetchall()

@@ -105,7 +105,7 @@ fn snippet(text: &str, query: &str) -> String {
 fn raw_title(text: &str) -> String {
     text.lines()
         .find(|line| !line.trim().is_empty())
-        .unwrap_or("输入归档")
+        .unwrap_or("Input archive")
         .trim()
         .chars()
         .take(45)

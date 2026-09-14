@@ -1715,7 +1715,7 @@ mod tests {
             configured: true,
         };
         let mut generated = old.clone();
-        generated.title = "每周的练习安排".into();
+        generated.title = "Weekly practice schedule".into();
         assert!(desktop.refresh_topic_title(&generated));
         apply_context(&desktop, pending);
         let state = desktop.inner.lock().unwrap();

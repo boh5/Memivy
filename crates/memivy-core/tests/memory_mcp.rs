@@ -155,7 +155,7 @@ fn snippets_reference_the_used_version_or_original_and_omit_old_bodies() {
             request_id: id(),
             memory_id: receipt.memory_id.clone().unwrap(),
             expected_version: receipt.after_version.clone().unwrap(),
-            title: "新版".into(),
+            title: "New version".into(),
             body: "新版正文 红茶".into(),
         })
         .unwrap();
@@ -184,7 +184,7 @@ fn watcher_detects_external_commits_without_a_model() {
 fn draft_autosave_and_index_work_do_not_refresh_the_library() {
     let (dir, s) = setup();
     let conversation = id();
-    s.create_conversation(&conversation, "草稿测试").unwrap();
+    s.create_conversation(&conversation, "Draft test").unwrap();
     let memory = s.capture(&request("编辑草稿的原始内容")).unwrap();
     let mut watcher = s.change_watcher().unwrap();
     let db = rusqlite::Connection::open(dir.path().join("memivy.db")).unwrap();

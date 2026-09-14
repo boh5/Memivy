@@ -14,7 +14,7 @@ test('repeated empty handoffs use the new source and reset it after a capture', 
   for (const source of ['Notes','Chrome']) {
     // The main-window form stays mounted through successive handoffs.
     f.render(view,{...captureProps(source),focus:2,onSubmit:submit});await f.settle();
-    textarea(f,view).props.onChange({target:{value:'交接后输入的原话'}});await f.settle();
+    textarea(f,view).props.onChange({target:{value:"Original input after handoff"}});await f.settle();
     assert.equal(f.db.get('quick_input').origin.app,source);
     send(f,view);await f.settle();
     assert.equal(sent.at(-1).origin.app,source);
@@ -29,7 +29,7 @@ test('restored drafts retain their source and explicit URI even with an empty bo
   f.db.set('quick_input',{key:'quick_input',request_id:'existing',title:'',body:'',expected_version:null,origin});
   const view=f.mount(Capture,captureProps('Notes'));await f.settle();
   f.render(view,captureProps('Chrome'));await f.settle();
-  textarea(f,view).props.onChange({target:{value:'恢复后补写'}});await f.settle();
+  textarea(f,view).props.onChange({target:{value:"Added after restore"}});await f.settle();
   assert.deepEqual(f.db.get('quick_input').origin,origin);
 });
 
@@ -38,29 +38,29 @@ test('a source refresh cannot relabel a draft whose first write is pending', asy
   let finish;
   f.overrides.draft_write=({draft})=>new Promise(resolve=>{finish=()=>{f.db.set(draft.key,structuredClone(draft));resolve(true);};});
   const view=f.mount(Capture,captureProps('Safari'));await f.settle();
-  textarea(f,view).props.onChange({target:{value:'正在保存的原话'}});await f.settle();
+  textarea(f,view).props.onChange({target:{value:"Original input being saved"}});await f.settle();
   f.render(view,captureProps('Notes'));await f.settle();finish();await f.settle();
   assert.equal(f.db.get('quick_input').origin.app,'Safari');
-  assert.equal(textarea(f,view).props.value,'正在保存的原话');
+  assert.equal(textarea(f,view).props.value,"Original input being saved");
 });
 
 test('late discussion acknowledgement preserves the reopened input and restart draft', async t => {
   const f=workspaceFixture(t), Discussion=f.load('src/workspace/Discussion.tsx').default;
   const old=f.mount(Discussion,props(f));await f.settle();
-  textarea(f,old).props.onChange({target:{value:'已发送的问题'}});await f.settle();send(f,old);await f.settle();
+  textarea(f,old).props.onChange({target:{value:"Sent question"}});await f.settle();send(f,old);await f.settle();
   f.unmount(old);
   const reopened=f.mount(Discussion,props(f));await f.settle();
-  textarea(f,reopened).props.onChange({target:{value:'切回来后的新草稿'}});await f.settle();
+  textarea(f,reopened).props.onChange({target:{value:"New draft after returning"}});await f.settle();
   f.completeAsk();await f.settle();
-  assert.equal(textarea(f,reopened).props.value,'切回来后的新草稿');
+  assert.equal(textarea(f,reopened).props.value,"New draft after returning");
   await f.load('src/workspace/useDraft.ts').flushDrafts();
-  assert.equal(f.db.get('discussion:topic-a').body,'切回来后的新草稿');
+  assert.equal(f.db.get('discussion:topic-a').body,"New draft after returning");
 });
 
 test('late acknowledgement clears the same sent draft in a reopened input', async t => {
   const f=workspaceFixture(t), Discussion=f.load('src/workspace/Discussion.tsx').default;
   const old=f.mount(Discussion,props(f));await f.settle();
-  textarea(f,old).props.onChange({target:{value:'问题'}});await f.settle();send(f,old);await f.settle();f.unmount(old);
+  textarea(f,old).props.onChange({target:{value:"Question"}});await f.settle();send(f,old);await f.settle();f.unmount(old);
   const reopened=f.mount(Discussion,props(f));await f.settle();f.completeAsk();await f.settle();
   assert.equal(textarea(f,reopened).props.value,'');assert.equal(f.db.get('discussion:topic-a').body,'');
 });
@@ -75,22 +75,22 @@ test('a receipt is shown only for its record and undo targets that record', asyn
   f.find(app,n=>n.type===Detail).props.onChanged(f.keyA,receipt);await f.settle();
   await select('b');
   const b=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
-  f.find(b,n=>n.props.role==='tab'&&f.text(n).startsWith('历史')).props.onClick();await f.settle();
-  assert(!f.nodes(b.tree).some(n=>n.type==='button'&&f.text(n)==='撤销这次修改'));f.unmount(b);
+  f.find(b,n=>n.props.role==='tab'&&f.text(n).startsWith("History")).props.onClick();await f.settle();
+  assert(!f.nodes(b.tree).some(n=>n.type==='button'&&f.text(n)==="Undo this change"));f.unmount(b);
   await select('a');const a=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
-  f.find(a,n=>n.props.role==='tab'&&f.text(n).startsWith('历史')).props.onClick();await f.settle();
-  f.find(a,n=>n.type==='button'&&f.text(n)==='撤销这次修改').props.onClick();await f.settle();
+  f.find(a,n=>n.props.role==='tab'&&f.text(n).startsWith("History")).props.onClick();await f.settle();
+  f.find(a,n=>n.type==='button'&&f.text(n)==="Undo this change").props.onClick();await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='library_action').at(-1).args.action.original_request,'edit-a');
   await select('b');await select('a');assert.equal(f.find(app,n=>n.type===Detail).props.initialReceipt,null);
 });
 
 test('loading older messages preserves the visible message and new replies still scroll', async t => {
   const f=workspaceFixture(t), Discussion=f.load('src/workspace/Discussion.tsx').default;
-  const msg=i=>({id:'m'+i,seq:i,role:i%2?'user':'assistant',status:'complete',text:'消息'+i,citations:[]});
+  const msg=i=>({id:'m'+i,seq:i,role:i%2?'user':'assistant',status:'complete',text:"Message"+i,citations:[]});
   f.messages(args=>Array.from({length:args.before?10:40},(_,i)=>msg(i+(args.before?1:11))));
   const view=f.mount(Discussion,props(f));await f.settle();view.dom.scrolls=0;view.dom.list.scrollTop=500;
   const anchor=view.dom.ordered[5], top=anchor.getBoundingClientRect().top;
-  f.find(view,n=>n.type==='button'&&f.text(n)==='查看更早的讨论').props.onClick();await f.settle();
+  f.find(view,n=>n.type==='button'&&f.text(n)==="View earlier discussion").props.onClick();await f.settle();
   assert.equal(view.dom.scrolls,0);assert.equal(anchor.getBoundingClientRect().top,top);assert.equal(view.dom.list.scrollTop,1500);
   f.messages(()=>[msg(51)]);f.render(view,{...props(f),revision:1});await f.settle();assert.equal(view.dom.scrolls,1);
 });
@@ -98,10 +98,10 @@ test('loading older messages preserves the visible message and new replies still
 test('an invalid editor draft does not prevent submitting another valid input', async t => {
   const f=workspaceFixture(t),{useDraft}=f.load('src/workspace/useDraft.ts');
   const bad=f.mount(()=>useDraft('memory:a',{title:'',body:'',expected_version:null}));await f.settle();
-  bad.tree.update({title:'中文'.repeat(101),body:'未保存的编辑'});await f.settle();
+  bad.tree.update({title:'中文'.repeat(101),body:"Unsaved edit"});await f.settle();
   let sent;const view=f.mount(f.load('src/workspace/CaptureForm.tsx').default,{onSubmit:async input=>{sent=input;}});await f.settle();
-  textarea(f,view).props.onChange({target:{value:'有效的表达'}});await f.settle();send(f,view);await f.settle();
-  assert.equal(sent.text,'有效的表达');assert.equal(textarea(f,view).props.value,'');
+  textarea(f,view).props.onChange({target:{value:"Valid input"}});await f.settle();send(f,view);await f.settle();
+  assert.equal(sent.text,"Valid input");assert.equal(textarea(f,view).props.value,'');
 });
 
 test('the collapsed leaf supports accessible activation and dragging never opens it', async t => {

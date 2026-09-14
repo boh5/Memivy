@@ -64,12 +64,15 @@ fn run() -> Result<()> {
         }
         "hold-turn" => {
             let topic = Uuid::new_v4().to_string();
-            store.create_conversation(&topic, "生成中退出的合成话题")?;
+            store.create_conversation(
+                &topic,
+                "Synthetic conversation interrupted during generation",
+            )?;
             let turn = store.begin_agent_input(
                 &Uuid::new_v4().to_string(),
                 &Uuid::new_v4().to_string(),
                 &topic,
-                "普通问题不能变成记忆",
+                "An ordinary question must not become a memory",
                 &[],
                 None,
             )?;
@@ -98,7 +101,7 @@ fn run() -> Result<()> {
                     request_id: Uuid::new_v4().to_string(),
                     memory_id: capture.memory_id,
                     expected_version: capture.version_id,
-                    title: "强杀前版本".into(),
+                    title: "Version before forced exit".into(),
                     body: request.text,
                 })?;
                 println!(
@@ -132,7 +135,7 @@ fn run() -> Result<()> {
                 &task,
                 &MemoryWriteArgs {
                     destination: Destination::New,
-                    title: "恢复后整理".into(),
+                    title: "Organization after recovery".into(),
                     parts: vec![MemoryWritePart {
                         text: task.memory.body.clone(),
                         sources: vec![MemorySourceQuote {

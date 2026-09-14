@@ -33,5 +33,6 @@
   "deleteCol": "删除列",
   "alignLeft": "左对齐",
   "alignCenter": "居中对齐",
-  "alignRight": "右对齐"
+  "alignRight": "右对齐",
+  "emptyPlaceholder": "从这里继续你的想法…"
 }

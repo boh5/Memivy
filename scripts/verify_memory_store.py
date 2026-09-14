@@ -57,16 +57,16 @@ def check(root):
     call("diagnostics")
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(
-            lambda n: call("capture", str(uuid.uuid4()), f"独立进程原话 {n}"), range(24)
+            lambda n: call("capture", str(uuid.uuid4()), f"Original text from an independent process {n}"), range(24)
         ))
         assert len({r["memory_id"] for r in results}) == 24
         retry = str(uuid.uuid4())
-        results = list(pool.map(lambda _: call("capture", retry, "同一确认重试"), range(8)))
+        results = list(pool.map(lambda _: call("capture", retry, "Retry the same confirmed request"), range(8)))
         assert len({r["memory_id"] for r in results}) == 1
 
     for command in ("hold", "hold-memory"):
         process = subprocess.Popen(
-            [PROBE, data, command, str(uuid.uuid4()), f"保存后强杀 {command}"],
+            [PROBE, data, command, str(uuid.uuid4()), f"Forced stop after saving {command}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         try:
@@ -78,7 +78,7 @@ def check(root):
         assert process.returncode == -9
         with sqlite3.connect(data / "memivy.db") as db:
             if command == "hold":
-                assert db.execute("SELECT text FROM captures WHERE id=?", (acknowledged["capture_id"],)).fetchone()[0] == f"保存后强杀 {command}"
+                assert db.execute("SELECT text FROM captures WHERE id=?", (acknowledged["capture_id"],)).fetchone()[0] == f"Forced stop after saving {command}"
             else:
                 assert db.execute("SELECT current_version_id FROM memories WHERE id=?", (acknowledged["memory_id"],)).fetchone()[0] == acknowledged["after_version"]
                 assert db.execute("SELECT count(*) FROM receipt_changes WHERE request_id=?", (acknowledged["request_id"],)).fetchone()[0] == 1
@@ -86,7 +86,7 @@ def check(root):
     # A live writer runs while the backup API copies a consistent database.
     backup = root / "live-backup.sqlite3"
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        writes = pool.submit(lambda: [call("capture", str(uuid.uuid4()), f"备份时写入 {n}") for n in range(20)])
+        writes = pool.submit(lambda: [call("capture", str(uuid.uuid4()), f"Write during backup {n}") for n in range(20)])
         call("backup", str(backup))
         writes.result(timeout=30)
     with sqlite3.connect(backup) as db:

@@ -50,7 +50,7 @@ export default function MarkdownEditor(props: Props) {
       editor.editor.use([extensions.underlineSchema, extensions.underlineMarkdown, extensions.taskListInput, extensions.numberedListInput, extensions.tableInput, extensions.editorShortcuts, extensions.editorListView, extensions.safeImageView].flat());
       editor.editor.config(ctx => ctx.update(core.editorViewOptionsCtx, prev => ({
         ...prev,
-        attributes: () => ({ role: "textbox", "aria-label": latest.current.label, "aria-multiline": "true", spellcheck: "false" }),
+        attributes: () => ({ role: "textbox", "aria-label": latest.current.label, "aria-multiline": "true", spellcheck: "false", "data-placeholder": i18n.t('emptyPlaceholder', { ns: 'editor' }) }),
         handlePaste: (_view, event) => Array.from(event.clipboardData?.files || []).length > 0,
         handleDrop: (_view, event) => Array.from(event.dataTransfer?.files || []).length > 0,
         handleClickOn: (_view, _pos, _node, _nodePos, event) => { if ((event.target as Element).closest("a")) { event.preventDefault(); return true; } return false; },
@@ -104,6 +104,7 @@ export default function MarkdownEditor(props: Props) {
           const view = ctx.get(core.editorViewCtx);
           // Attribute-only updates avoid a transaction during IME composition.
           view.dom.setAttribute('aria-label', latest.current.label);
+          view.dom.setAttribute('data-placeholder', i18n.t('emptyPlaceholder', { ns: 'editor' }));
           ctx.update(link.linkTooltipConfig.key, previous => ({ ...previous, inputPlaceholder: i18n.t('linkPlaceholder', { ns: 'editor' }) }));
         });
         extensions.localizeEditorDom(host);

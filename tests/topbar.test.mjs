@@ -12,14 +12,14 @@ test('dismiss/reopen keeps the mounted question draft, and successful submission
   bar().onOpen();await f.settle();
   const form=f.mount(Form,props());await f.settle();
   const input=()=>f.find(form,n=>n.type==='textarea');
-  input().props.onChange({target:{value:'第一行问题\n第二行背景'}});await f.settle();
+  input().props.onChange({target:{value:"First line question\nSecond line context"}});await f.settle();
   assert.equal(bar().preview,'');
   bar().onClose();await f.settle();f.render(form,props());await f.settle();
-  assert.equal(input().props.value,'第一行问题\n第二行背景');
-  assert.equal(bar().preview,'第一行问题\n第二行背景');
+  assert.equal(input().props.value,"First line question\nSecond line context");
+  assert.equal(bar().preview,"First line question\nSecond line context");
   assert.equal(f.calls.filter(c=>c.name==='discussion_submit').length,0);
   f.key({...key,key:'k',metaKey:true});await f.settle();f.render(form,props());await f.settle();
-  assert.equal(bar().open,true);assert.equal(input().props.value,'第一行问题\n第二行背景');
+  assert.equal(bar().open,true);assert.equal(input().props.value,"First line question\nSecond line context");
   input().props.onKeyDown({...key,metaKey:true});await f.settle();
   // Dismissal while IPC is pending neither duplicates the request nor consumes the draft.
   bar().onClose();await f.settle();f.render(form,props());await f.settle();assert(f.db.has('input'));
@@ -31,7 +31,7 @@ test('dismiss/reopen keeps the mounted question draft, and successful submission
 test('Escape cancels composition before dismissing, and dismissal restores trigger focus',async t=>{
   const f=workspaceFixture(t),Bar=f.load('src/workspace/WorkspaceTopBar.tsx').default;
   let closed=0,focused=0;
-  const view=f.mount(Bar,{open:true,preview:'草稿',scope:null,onOpen(){},onClose(){closed++;},onNewDiscussion(){},children:'input'});
+  const view=f.mount(Bar,{open:true,preview:"Draft",scope:null,onOpen(){},onClose(){closed++;},onNewDiscussion(){},children:'input'});
   const query=f.find(view,n=>n.props.className==='titlebar-query');
   f.find(view,n=>n.props.className==='recall-trigger').props.ref.current.focus=()=>{focused++;};
   query.props.onCompositionStart();query.props.onKeyDown({...key,key:'Escape'});assert.equal(closed,0);
@@ -55,9 +55,9 @@ test('Tab to the document dismisses without stealing focus; moving within the pa
 test('new discussion preserves the existing unsent input',async t=>{
   const f=workspaceFixture(t),App=f.load('src/workspace/App.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   const app=f.mount(App);await f.settle();const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
-  f.find(form,n=>n.type==='textarea').props.onChange({target:{value:'还没有发送的想法'}});await f.settle();
+  f.find(form,n=>n.type==='textarea').props.onChange({target:{value:"Unsent idea"}});await f.settle();
   f.key({...key,key:'n',metaKey:true});await f.settle();
-  assert.equal(f.db.get('input').body,'还没有发送的想法');
+  assert.equal(f.db.get('input').body,"Unsent idea");
   assert(f.nodes(app.tree).some(n=>n.props.topic?.id==='topic-a'));
 });
 
@@ -66,16 +66,16 @@ test('missing model does not prevent submitting and preserving the expression',a
   f.overrides.workspace_settings=async()=>({configured:false});let saved;
   f.overrides.discussion_submit=async input=>{saved=input;return f.topic;};
   const app=f.mount(App);await f.settle();const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
-  f.find(form,n=>n.type==='textarea').props.onChange({target:{value:'尚未配置模型时的表达'}});await f.settle();
+  f.find(form,n=>n.type==='textarea').props.onChange({target:{value:"Input before model setup"}});await f.settle();
   f.find(form,n=>n.type==='textarea').props.onKeyDown({...key,metaKey:true});await f.settle();
-  assert.equal(saved.text,'尚未配置模型时的表达');
+  assert.equal(saved.text,"Input before model setup");
   assert(f.nodes(app.tree).some(n=>n.props.topic?.id==='topic-a'));
   assert(!f.nodes(app.tree).some(n=>n.type===f.load('src/workspace/Settings.tsx').default));
 });
 
 test('the accessible search name includes the collection boundary and unsent-draft state',t=>{
   const f=workspaceFixture(t),Bar=f.load('src/workspace/WorkspaceTopBar.tsx').default;
-  const view=f.mount(Bar,{open:false,preview:'尚未发送',scopeLabel:'产品方向',scope:null,onOpen(){},onClose(){},onNewDiscussion(){}});
+  const view=f.mount(Bar,{open:false,preview:"Not sent yet",scopeLabel:"Product direction",scope:null,onOpen(){},onClose(){},onNewDiscussion(){}});
   const name=f.find(view,n=>n.props.className==='recall-trigger').props['aria-label'];
-  assert(name.includes('重点参考产品方向'));assert(name.includes('有未发送的草稿'));
+  assert(name.includes("focusing on Product direction"));assert(name.includes("unsent draft"));
 });

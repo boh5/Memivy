@@ -5,7 +5,7 @@ import {workspaceFixture} from './helpers/workspace.mjs';
 const key=(extra={})=>({key:'m',code:'KeyM',altKey:true,nativeEvent:{isComposing:false},preventDefault(){},stopPropagation(){},...extra});
 test('shared recorder focuses, ignores composition/repeat, and saves one complete combination immediately',async t=>{
  const f=workspaceFixture(t),changes=[];
- const view=f.mount(f.load('src/workspace/ShortcutSetting.tsx').default,{label:'快捷键',value:'Alt+KeyR',onChange:value=>changes.push(value)});
+ const view=f.mount(f.load('src/workspace/ShortcutSetting.tsx').default,{label:"Shortcut",value:'Alt+KeyR',onChange:value=>changes.push(value)});
  const recorder=()=>f.find(view,n=>n.props.className?.includes('shortcut-recorder'));
  let focused=false;recorder().props.onClick({currentTarget:{focus(){focused=true}}});await f.settle();assert(focused);
  for(const event of [key({key:'Alt'}),key({repeat:true}),key({nativeEvent:{isComposing:true}})])recorder().props.onKeyDown(event);
@@ -17,7 +17,7 @@ test('shared recorder focuses, ignores composition/repeat, and saves one complet
 });
 for(const exit of ['Escape','Tab','blur'])test(`recorder ${exit} exits without changing the binding`,async t=>{
  const f=workspaceFixture(t),changes=[];
- const view=f.mount(f.load('src/workspace/ShortcutSetting.tsx').default,{label:'快捷键',value:'Alt+KeyM',onChange:value=>changes.push(value)});
+ const view=f.mount(f.load('src/workspace/ShortcutSetting.tsx').default,{label:"Shortcut",value:'Alt+KeyM',onChange:value=>changes.push(value)});
  const recorder=()=>f.find(view,n=>n.props.className?.includes('shortcut-recorder'));
  recorder().props.onClick({currentTarget:{focus(){}}});await f.settle();
  if(exit==='blur')recorder().props.onBlur();else recorder().props.onKeyDown(key({key:exit,preventDefault(){assert.notEqual(exit,'Tab')}}));

@@ -719,8 +719,9 @@ mod request_read_tests {
                 })
                 .unwrap()
         };
-        let deleted = capture("主片段：不得上传。额外片段：只能在本机处理。");
-        let retained = capture("另一条仍有效的记忆。");
+        let deleted =
+            capture("Main span: uploads forbidden. Additional span: process locally only.");
+        let retained = capture("Another memory that is still available.");
         let db = store.connection().unwrap();
         let make_spans = |source: SourceRef| {
             let mut evidence = resolve_excerpt(&db, &source, 9, &[], Some(0)).unwrap();
@@ -760,7 +761,7 @@ mod request_read_tests {
         }
         assert_eq!(
             context["items"][1]["evidence"]["text"],
-            "另一条仍有效的记忆。"
+            "Another memory that is still available."
         );
         let reads = request_reads(&messages).unwrap();
         assert_eq!(reads.len(), 1);
@@ -802,21 +803,36 @@ mod write_attribution_tests {
     fn quoted_parts_preserve_exact_composition_and_only_return_raw_source_ids() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();
-        let old = capture(&store, "原来每周4小时。\n不允许上传录音。");
-        let source = capture(&store, "现在每周8小时，尚未上线。");
+        let old = capture(
+            &store,
+            "Previously 4 hours per week.\nDo not upload recordings.",
+        );
+        let source = capture(&store, "Now 8 hours per week, not launched yet.");
         let previous = store.memory(&old.memory_id).unwrap().current;
         let write = MemoryWriteArgs {
             destination: Destination::Existing {
                 memory_id: old.memory_id,
                 expected_version: previous.id.clone(),
             },
-            title: "当前约束".into(),
+            title: "Current constraints".into(),
             parts: vec![
-                part("此前每周4小时；", &previous.id, "原来每周4小时。"),
-                part("现在每周8小时。\n", &source.capture_id, "现在每周8小时"),
-                part("尚未上线。\n", &source.capture_id, "尚未上线"),
+                part(
+                    "Previously 4 hours per week; ",
+                    &previous.id,
+                    "Previously 4 hours per week.",
+                ),
+                part(
+                    "Now 8 hours per week.\n",
+                    &source.capture_id,
+                    "Now 8 hours per week",
+                ),
+                part(
+                    "Not launched yet.\n",
+                    &source.capture_id,
+                    "not launched yet",
+                ),
                 MemoryWritePart {
-                    text: "不允许上传录音。\n".into(),
+                    text: "Do not upload recordings.\n".into(),
                     sources: vec![],
                 },
             ],
@@ -828,11 +844,11 @@ mod write_attribution_tests {
         .unwrap();
         assert_eq!(
             body,
-            "此前每周4小时；现在每周8小时。\n尚未上线。\n不允许上传录音。\n"
+            "Previously 4 hours per week; Now 8 hours per week.\nNot launched yet.\nDo not upload recordings.\n"
         );
         assert_eq!(ids, vec![source.capture_id.clone()]);
         let mut wrong_quote = write;
-        wrong_quote.parts[1].sources[0].quote = "现在每周80小时".into();
+        wrong_quote.parts[1].sources[0].quote = "Now 80 hours per week".into();
         assert_eq!(
             resolve_memory_write(&wrong_quote, Some(&previous), |id| Ok(store
                 .capture_by_id(id)?
@@ -847,24 +863,29 @@ mod write_attribution_tests {
         let store = MemoryStore::open(dir.path()).unwrap();
         let old = capture(
             &store,
-            "不允许上传录音。\n仅考虑收费，尚未决定。\n保留离线模式。",
+            "Do not upload recordings.\nOnly considering paid access, not decided.\nKeep offline mode.",
         );
-        let source = capture(&store, "补充：每周8小时。");
+        let source = capture(&store, "Addition: 8 hours per week.");
         let previous = store.memory(&old.memory_id).unwrap().current;
         let write = MemoryWriteArgs {
             destination: Destination::Existing {
                 memory_id: old.memory_id,
                 expected_version: previous.id.clone(),
             },
-            title: "约束".into(),
+            title: "Constraints".into(),
             parts: vec![
                 MemoryWritePart {
-                    text: "不允许上传录音。\n仅考虑收费，尚未决定。\n".into(),
+                    text: "Do not upload recordings.\nOnly considering paid access, not decided.\n"
+                        .into(),
                     sources: vec![],
                 },
-                part("每周8小时。\n", &source.capture_id, "每周8小时"),
+                part(
+                    "8 hours per week.\n",
+                    &source.capture_id,
+                    "8 hours per week",
+                ),
                 MemoryWritePart {
-                    text: "保留离线模式。\n".into(),
+                    text: "Keep offline mode.\n".into(),
                     sources: vec![],
                 },
             ],
@@ -876,7 +897,7 @@ mod write_attribution_tests {
         };
         assert!(validate(&write).is_ok());
         let mut changed = write.clone();
-        changed.parts[0].text = "允许上传录音。\n".into();
+        changed.parts[0].text = "Upload recordings.\n".into();
         assert_eq!(validate(&changed), Err(DataError::SourceAttribution));
         let mut reordered = write.clone();
         reordered.parts.swap(0, 2);
@@ -886,7 +907,7 @@ mod write_attribution_tests {
         assert_eq!(validate(&no_raw), Err(DataError::SourceAttribution));
         no_raw
             .parts
-            .push(part("\n ", &source.capture_id, "每周8小时"));
+            .push(part("\n ", &source.capture_id, "8 hours per week"));
         assert_eq!(validate(&no_raw), Err(DataError::SourceAttribution));
         let mut formatting = write;
         formatting.parts.push(MemoryWritePart {
@@ -902,8 +923,8 @@ mod write_attribution_tests {
         let raw = "甲".repeat(1001);
         let mut write = MemoryWriteArgs {
             destination: Destination::New,
-            title: "合成文字".into(),
-            parts: vec![part("合成文字", &source_id, &"甲".repeat(1000))],
+            title: "Synthetic text".into(),
+            parts: vec![part("Synthetic text", &source_id, &"甲".repeat(1000))],
         };
         assert!(resolve_memory_write(&write, None, |_| Ok(raw.clone())).is_ok());
         write.parts[0].sources[0].quote = raw.clone();

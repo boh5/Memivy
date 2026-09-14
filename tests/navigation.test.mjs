@@ -16,20 +16,20 @@ test('a stale list request cannot replace a newer filter result',async t=>{
   f.overrides.library_query=()=>new Promise(r=>resolves.push(r));
   const props={trash:false,active:true,selected:null,revision:0,onSelect(){},onCapture(){},onRefresh(){}};
   const view=f.mount(List,props);await f.settle();f.render(view,{...props,revision:1});await f.settle();
-  resolves[1]({items:[{key:f.keyB,title:'新的结果',snippet:'',origin:null,updated_at:1}],next_offset:null});await f.settle();
-  resolves[0]({items:[{key:f.keyA,title:'迟到旧结果',snippet:'',origin:null,updated_at:1}],next_offset:null});await f.settle();
-  assert(f.text(view.tree).includes('新的结果'));assert(!f.text(view.tree).includes('迟到旧结果'));
+  resolves[1]({items:[{key:f.keyB,title:"New result",snippet:'',origin:null,updated_at:1}],next_offset:null});await f.settle();
+  resolves[0]({items:[{key:f.keyA,title:"Late old result",snippet:'',origin:null,updated_at:1}],next_offset:null});await f.settle();
+  assert(f.text(view.tree).includes("New result"));assert(!f.text(view.tree).includes("Late old result"));
 });
 
 test('query handoff reads the existing quick-question draft before acknowledging',async t=>{
   const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};f.overrides.desktop_state=async()=>null;f.overrides.desktop_handoff_ready=async()=>{};
-  f.db.set('quick_input',{key:'quick_input',request_id:'handoff-query',title:'',body:'小窗里没问完的问题',expected_version:null});
+  f.db.set('quick_input',{key:'quick_input',request_id:'handoff-query',title:'',body:"Unfinished quick window question",expected_version:null});
   const app=f.mount(App);await f.settle();
   f.emit('desktop-route',{generation:42,quick:true,topic:null,record:null,settings:false});await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='desktop_handoff_ready').length,0);
   const form=f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
-  assert.equal(input(f,form).props.value,'小窗里没问完的问题');
+  assert.equal(input(f,form).props.value,"Unfinished quick window question");
   assert.equal(f.calls.filter(c=>c.name==='desktop_handoff_ready').length,1);
   assert.equal(f.calls.find(c=>c.name==='desktop_handoff_ready').args.generation,42);
 });
@@ -38,13 +38,13 @@ test('new desktop questions do not inherit the collection open in the main windo
   const f=workspaceFixture(t,{native:true}),App=f.load('src/workspace/App.tsx').default,Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default,Form=f.load('src/workspace/CaptureForm.tsx').default;
   f.overrides.backup_result=async()=>null;f.overrides.desktop_ready=async()=>{};f.overrides.desktop_state=async()=>null;
   f.overrides.desktop_update=async()=>null;f.overrides.discussion_submit=async()=>f.topic;
-  f.overrides.navigation_collections=async()=>[{id:'scope',name:'产品',revision:1}];
+  f.overrides.navigation_collections=async()=>[{id:'scope',name:"Product",revision:1}];
   const app=f.mount(App);await f.settle();
   f.find(app,n=>n.type===Sidebar).props.onCollection('scope');await f.settle();
-  assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 产品'));
+  assert(f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes("Focusing on Product"));
   f.emit('desktop-route',{generation:43,quick:true,topic:null,record:null,settings:false});await f.settle();
-  assert(!f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes('重点参考 产品'));
-  await f.find(f.query(app),n=>n.type===Form).props.onSubmit({text:'全库问题',id:'desktop-question',context:[]});await f.settle();
+  assert(!f.text(f.find(f.query(app),n=>n.type===f.load('src/workspace/WorkspaceTopBar.tsx').default).props.scope).includes("Focusing on Product"));
+  await f.find(f.query(app),n=>n.type===Form).props.onSubmit({text:"Library-wide question",id:'desktop-question',context:[]});await f.settle();
   assert.equal(f.calls.find(c=>c.name==='discussion_submit').args.collectionId,null);
 });
 
@@ -67,13 +67,13 @@ test('generated topic titles refresh the open discussion without replacing its c
   const before=f.find(app,n=>n.type===Discussion);
   const discussion=f.mount(Discussion,before.props);await f.settle();
   const composer=f.composer(discussion);await f.settle();
-  input(f,composer).props.onChange({target:{value:'还没有发送的下一句'}});await f.settle();
-  topic={...topic,title:'每周二十分钟的折纸练习'};revision++;
+  input(f,composer).props.onChange({target:{value:"Next unsent sentence"}});await f.settle();
+  topic={...topic,title:"Twenty minutes of origami each week"};revision++;
   f.render(app,{});await f.settle();
   const after=f.find(app,n=>n.type===Discussion);
   assert.equal(after.key,before.key);assert.equal(after.props.topic.title,topic.title);
   f.render(discussion,after.props);await f.settle();
-  assert.equal(input(f,f.composer(discussion)).props.value,'还没有发送的下一句');
+  assert.equal(input(f,f.composer(discussion)).props.value,"Next unsent sentence");
 });
 
 for (const quick of [false, true]) test(`discussion submission uses the ${quick ? 'handed-off application' : 'main window'} as its source`,async t=>{
@@ -90,8 +90,8 @@ for (const quick of [false, true]) test(`discussion submission uses the ${quick 
   await f.settle();
   const discussion=f.mount(Discussion,f.find(app,n=>n.type===Discussion).props);await f.settle();
   const composer=f.composer(discussion);await f.settle();
-  input(f,composer).props.onChange({target:{value:'每周安排二十分钟练习。'}});await f.settle();
-  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==='发送').props.onClick();await f.settle();
+  input(f,composer).props.onChange({target:{value:"Practice for twenty minutes each week."}});await f.settle();
+  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==="Send").props.onClick();await f.settle();
   assert.equal(f.calls.find(c=>c.name==='discussion_submit').args.origin.app,quick?'Safari':'Memivy');
 });
 
@@ -103,7 +103,7 @@ for (const target of ['topic','library']) test(`local ${target} navigation ends 
   f.overrides.desktop_state=async()=>({...previewDesktop,topic:f.topic,source_app:'Safari'});
   f.overrides.desktop_handoff_ready=async()=>{};f.overrides.desktop_update=async()=>previewDesktop;
   f.overrides.discussion_submit=async()=>({...f.topic,id:'other-topic'});
-  const original={key:`discussion:${f.topic.id}`,request_id:'handoff-original',title:'',body:'小窗未发送的原话',expected_version:null,origin:{kind:'user',app:'Safari'}};
+  const original={key:`discussion:${f.topic.id}`,request_id:'handoff-original',title:'',body:"Unsent quick window original",expected_version:null,origin:{kind:'user',app:'Safari'}};
   f.db.set(original.key,structuredClone(original));
   const app=f.mount(App);await f.settle();
   f.emit('desktop-route',{generation:45,quick:true,topic:f.topic,record:null,settings:false});await f.settle();
@@ -113,8 +113,8 @@ for (const target of ['topic','library']) test(`local ${target} navigation ends 
   const surface=target==='topic'?f.mount(Discussion,f.find(app,n=>n.type===Discussion).props):null;
   if(surface) await f.settle();
   const composer=surface?f.composer(surface):f.mount(Form,f.find(f.query(app),n=>n.type===Form).props);await f.settle();
-  input(f,composer).props.onChange({target:{value:'这条表达来自主窗口。'}});await f.settle();
-  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==='发送').props.onClick();await f.settle();
+  input(f,composer).props.onChange({target:{value:"This input came from the main window."}});await f.settle();
+  await f.find(composer,n=>n.type==='button'&&n.props['aria-label']==="Send").props.onClick();await f.settle();
   const sent=f.calls.find(c=>c.name==='discussion_submit');
   assert.equal(sent.args.quick,false);assert.equal(sent.args.origin.app,'Memivy');
   assert(!f.calls.some(c=>c.name==='desktop_update'),'local input must not replace the quick-entry topic');

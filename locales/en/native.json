@@ -10,5 +10,7 @@
   "captureWindow": "Memivy · Quick entry",
   "backupSave": "Back up memories, original captures, history, discussions and drafts, excluding model keys. Choose a new filename.",
   "backupOpen": "Choose a Memivy backup to validate before confirming library restoration.",
-  "quickInput": "Share an idea or ask"
+  "quickInput": "Share an idea or ask",
+  "exportDefaultName": "Memory",
+  "exportMessage": "Save this note’s title and current text as Markdown."
 }

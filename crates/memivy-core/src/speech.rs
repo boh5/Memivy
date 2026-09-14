@@ -71,7 +71,7 @@ impl SpeechCache {
                 self.blob(m).with_extension("incomplete"),
             ] {
                 if p.symlink_metadata().is_ok() {
-                    fs::remove_file(p).map_err(|_| "模型文件无法删除")?;
+                    fs::remove_file(p).map_err(|_| "Cannot remove the model file")?;
                 }
             }
         }
@@ -106,17 +106,17 @@ impl SpeechCache {
                     &keep,
                 )
                 .await?;
-                fs::rename(partial, self.blob(m)).map_err(|_| "模型缓存写入失败")?;
+                fs::rename(partial, self.blob(m)).map_err(|_| "Cannot write the model cache")?;
             }
             let snapshot = self.path(m);
             private_dir(snapshot.parent().unwrap())?;
             let temp = snapshot.with_extension("link.tmp");
             if temp.symlink_metadata().is_ok() {
-                fs::remove_file(&temp).map_err(|_| "模型快照不可写")?;
+                fs::remove_file(&temp).map_err(|_| "Cannot write the model snapshot")?;
             }
             std::os::unix::fs::symlink(PathBuf::from("../../blobs").join(m.sha256), &temp)
-                .map_err(|_| "模型快照不可写")?;
-            fs::rename(temp, snapshot).map_err(|_| "模型快照不可写")?;
+                .map_err(|_| "Cannot write the model snapshot")?;
+            fs::rename(temp, snapshot).map_err(|_| "Cannot write the model snapshot")?;
         }
         Ok(())
     }
@@ -124,9 +124,9 @@ impl SpeechCache {
 pub fn transcript(raw: &str) -> Result<String> {
     let (_, text) = raw
         .split_once("<asr_text>")
-        .ok_or("语音模型未返回有效转写，请重试")?;
+        .ok_or("The speech model returned no valid transcript; try again")?;
     if text.contains("<|") || text.len() > 16000 {
-        return Err("语音模型输出不完整，请重试".into());
+        return Err("The speech model output is incomplete; try again".into());
     }
     Ok(text.trim().to_owned())
 }

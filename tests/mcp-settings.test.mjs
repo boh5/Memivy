@@ -5,11 +5,11 @@ import {workspaceFixture} from './helpers/workspace.mjs';
 test('MCP settings only report an acknowledged switch; failed changes preserve state', async t => {
   const f=workspaceFixture(t,{native:true});
   f.overrides.mcp_settings=async()=>({enabled:false,executable_available:true,configuration:'{}'});
-  f.overrides.mcp_set_enabled=async()=>{throw '数据库正忙';};
+  f.overrides.mcp_set_enabled=async()=>{throw "Database busy";};
   const view=f.mount(f.load('src/workspace/McpSettings.tsx').default);await f.settle();
   f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
   assert.equal(f.find(view,n=>n.type==='input').props.checked,false);
-  assert(f.find(view,n=>n.props?.text==='数据库正忙'));
+  assert(f.find(view,n=>n.props?.text==="Database busy"));
   f.overrides.mcp_set_enabled=async()=>{f.overrides.mcp_settings=async()=>({enabled:true,executable_available:true,configuration:'{}'});};
   f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
   assert.equal(f.find(view,n=>n.type==='input').props.checked,true);
@@ -21,10 +21,10 @@ test('local diagnostic does not claim an Agent connection and switch changes inv
   f.overrides.mcp_diagnose=async()=>({server_version:'0.1.0',protocol_version:'2025-11-25',tools:['memory_capture','memory_search'],enabled:false,scope:'local_stdio_only'});
   f.overrides.mcp_set_enabled=async()=>{};
   const view=f.mount(f.load('src/workspace/McpSettings.tsx').default);await f.settle();
-  f.find(view,n=>n.type==='button'&&f.text(n)==='检查本地 MCP').props.onClick();await f.settle();
-  assert(f.text(view.tree).includes('不代表外部 Agent 已连接'));
-  assert(f.text(view.tree).includes('无法保存或搜索记忆'));
-  const diagnostic=f.find(view,n=>n.props.role==='status'&&f.text(n).includes('MCP 检查通过'));
+  f.find(view,n=>n.type==='button'&&f.text(n)==="Check connection").props.onClick();await f.settle();
+  assert(f.text(view.tree).includes("Try saving and searching from your other AI app to check its connection"));
+  assert(f.text(view.tree).includes("Saving and searching memories are unavailable"));
+  const diagnostic=f.find(view,n=>n.props.role==='status'&&f.text(n).includes("MCP check passed"));
   const diagnosticText=f.text(diagnostic);
   f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
   assert(!f.nodes(view.tree).some(n=>n.props.role==='status'&&f.text(n)===diagnosticText));
@@ -34,7 +34,7 @@ test('the settings modal cannot close while the MCP section has an unfinished re
   const f=workspaceFixture(t,{native:true,timers:{setTimeout,clearTimeout,setInterval:()=>1,clearInterval:()=>{}}});let closed=0;
   f.overrides.workspace_settings=async()=>({configured:false,base_url:'',model:'',has_key:false,disable_reasoning:false});
   const view=f.mount(f.load('src/workspace/Settings.tsx').default,{onClose(){closed++;},onChanged(){}});await f.settle();
-  f.find(view,n=>n.type==='button'&&f.text(n)==='外部连接').props.onClick();await f.settle();
+  f.find(view,n=>n.type==='button'&&f.text(n)==="External access").props.onClick();await f.settle();
   const section=f.find(view,n=>n.type?.name==='McpSettings');
   assert.equal(typeof section.props.onBusyChange,'function');
   section.props.onBusyChange(true);await f.settle();
@@ -46,11 +46,11 @@ test('the settings modal cannot close while the MCP section has an unfinished re
 test('a write error reconciles a switch that already reached disk and releases the modal', async t => {
   const f=workspaceFixture(t,{native:true}),busy=[];let enabled=false;
   f.overrides.mcp_settings=async()=>({enabled,executable_available:true,configuration:'{}'});
-  f.overrides.mcp_set_enabled=async()=>{enabled=true;throw '同步失败';};
+  f.overrides.mcp_set_enabled=async()=>{enabled=true;throw "Synchronization failed";};
   const view=f.mount(f.load('src/workspace/McpSettings.tsx').default,{onBusyChange:v=>busy.push(v)});await f.settle();
   f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
   assert.equal(f.find(view,n=>n.type==='input').props.checked,true);
-  assert(f.find(view,n=>n.props?.text==='同步失败'));
+  assert(f.find(view,n=>n.props?.text==="Synchronization failed"));
   assert.deepEqual(busy,[true,false]);
 });
 

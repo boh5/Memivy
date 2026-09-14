@@ -16,7 +16,7 @@ fn capture_request(text: &str) -> CaptureRequest {
         request_id: id(),
         text: text.into(),
         origin: Origin::User {
-            app: "测试".into(),
+            app: "Test app".into(),
             project: None,
             uri: None,
         },
@@ -36,17 +36,17 @@ fn edit(store: &MemoryStore, r: &Receipt, text: &str) -> Receipt {
             request_id: id(),
             memory_id: r.memory_id.clone().unwrap(),
             expected_version: r.after_version.clone().unwrap(),
-            title: "修改后".into(),
+            title: "Edited".into(),
             body: text.into(),
         })
         .unwrap()
 }
 const SAVED_TEXT: &str = "  确认后修改的结论\n逐字保留🙂  ";
-const SAVED_TITLE: &str = "用户确认的名称";
+const SAVED_TITLE: &str = "User-approved name";
 fn finished_turn(store: &MemoryStore, evidence: &[SourceRef]) -> (String, Turn) {
     let conversation = id();
     store
-        .create_conversation(&conversation, "继续讨论")
+        .create_conversation(&conversation, "Continue discussion")
         .unwrap();
     let run = store
         .begin_agent_input(&id(), &id(), &conversation, "只是一个假设", &[], None)
@@ -954,7 +954,7 @@ fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() 
 #[test]
 fn stale_manual_save_target_leaves_no_archive_or_new_memory() {
     let (_dir, store) = setup();
-    let (_, target) = new_memory(&store, "旧版");
+    let (_, target) = new_memory(&store, "Old version");
     let (_, turn) = finished_turn(&store, &[]);
     edit(&store, &target, "已改版");
     for destination in [
@@ -1027,7 +1027,7 @@ fn cancellation_and_explicit_restart_recovery_fence_late_results() {
     let (_dir, store) = setup();
     let conversation = id();
     store
-        .create_conversation(&conversation, "失败恢复")
+        .create_conversation(&conversation, "Failure recovery")
         .unwrap();
     let run = store
         .begin_agent_input(&id(), &id(), &conversation, "第一次", &[], None)
@@ -1090,7 +1090,9 @@ fn cancellation_and_explicit_restart_recovery_fence_late_results() {
 fn conversation_cursor_reads_do_not_drop_old_messages() {
     let (_dir, store) = setup();
     let conversation = id();
-    store.create_conversation(&conversation, "分页").unwrap();
+    store
+        .create_conversation(&conversation, "Pagination")
+        .unwrap();
     for _ in 0..55 {
         let t = store
             .begin_agent_input(&id(), &id(), &conversation, "问题", &[], None)
@@ -1150,7 +1152,7 @@ fn concurrent_writers_deduplicate_and_only_one_edit_wins() {
                     request_id: id(),
                     memory_id: r.memory_id.unwrap(),
                     expected_version: r.after_version.unwrap(),
-                    title: "并发".into(),
+                    title: "Concurrent edit".into(),
                     body: format!("作者{i}"),
                 })
             })
@@ -1300,7 +1302,7 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
     assert!(!restore.join("mcp.json").exists());
     assert_eq!(
         restored.conversation(&conversation).unwrap().title,
-        "继续讨论"
+        "Continue discussion"
     );
     assert_eq!(
         restored
@@ -1367,8 +1369,8 @@ fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() 
     assert!(memories.contains(r.after_version.as_ref().unwrap()));
     assert!(memories.contains(edited.after_version.as_ref().unwrap()));
     let chats = std::fs::read_to_string(export.join("conversations.md")).unwrap();
-    assert!(chats.contains("不是长期记忆"));
-    assert!(chats.contains("角色：assistant"));
+    assert!(chats.contains("not durable memories"));
+    assert!(chats.contains("Role: assistant"));
     for entry in std::fs::read_dir(&export).unwrap() {
         assert!(
             !std::fs::read_to_string(entry.unwrap().path())
@@ -1391,7 +1393,7 @@ fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() 
     assert!(
         std::fs::read_to_string(export.join("conversations.md"))
             .unwrap()
-            .contains("来源已删除或不可用")
+            .contains("Source deleted or unavailable")
     );
     assert!(
         !std::fs::read_to_string(export.join("captures.md"))

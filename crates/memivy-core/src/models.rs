@@ -157,7 +157,7 @@ impl Registry {
             let m = ModelConfig::read(legacy).map_err(Error::from)?;
             r.connections.push(Connection {
                 id: "existing".into(),
-                name: "已有模型连接".into(),
+                name: "Existing model connection".into(),
                 base_url: m.base_url,
                 api_key: m.api_key,
             });

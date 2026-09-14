@@ -91,11 +91,11 @@ fn refs(
         };
         let _ = writeln!(
             out,
-            "- 来源 {kind}:{id}（{}）",
+            "- Source {kind}:{id} ({})",
             if available {
-                "可用"
+                "Available"
             } else {
-                "来源已删除或不可用"
+                "Source deleted or unavailable"
             }
         );
     }
@@ -181,6 +181,7 @@ impl MemoryStore {
     }
 
     /// Markdown contains active records, all their versions and source metadata.
+    /// Archive headings use English; original user content is preserved verbatim.
     /// Conversations are a separate file and never become searchable memories.
     /// Trash and erased content are excluded; the database backup includes trash.
     pub fn export_markdown(&self, target: impl AsRef<Path>) -> Result<()> {
@@ -193,14 +194,15 @@ impl MemoryStore {
         }
         let mut db = self.connection()?;
         let tx = db.transaction()?; // One read snapshot across every exported file.
-        let mut captures =
-            String::from("# 原始记录\n\n原话逐字保留；不包含回收站和已永久删除的内容。\n");
+        let mut captures = String::from(
+            "# Original captures\n\nOriginal words are preserved verbatim. Trash and permanently deleted content are excluded.\n",
+        );
         let ids:Vec<String>=tx.prepare("SELECT c.id FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='active' ORDER BY c.created_at,c.id")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         for id in &ids {
             let c = raw(&tx, id)?;
             let _ = write!(
                 captures,
-                "\n## Capture {id}\n\n时间：{}；整理状态：{}\n\n来源：\n",
+                "\n## Capture {id}\n\nTime: {}; organization status: {}\n\nSources:\n",
                 c.created_at, c.understanding
             );
             block(&mut captures, &encode(&c.origin)?);
@@ -208,18 +210,21 @@ impl MemoryStore {
             refs(&mut captures, &tx, "capture_citations", "capture_id", id)?;
         }
         let mut memories = String::from(
-            "# 记忆与完整版本历史\n\n只包含有效记忆。恢复旧版本也会留下新的历史记录。\n",
+            "# Memories and complete version history\n\nOnly active memories are included. Restoring an older version also creates a new history entry.\n",
         );
         let memory_ids:Vec<(String,String)>=tx.prepare("SELECT id,current_version_id FROM memories WHERE state='active' ORDER BY created_at,id")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         for (memory, head) in &memory_ids {
-            let _ = write!(memories, "\n## Memory {memory}\n\n当前版本：{head}\n");
+            let _ = write!(
+                memories,
+                "\n## Memory {memory}\n\nCurrent version: {head}\n"
+            );
             let versions:Vec<String>=tx.prepare("SELECT id FROM memory_versions WHERE memory_id=? AND body IS NOT NULL ORDER BY rowid")?.query_map([memory],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
             for id in versions {
                 let v = version(&tx, &id)?;
                 let _ = write!(
                     memories,
-                    "\n### Version {id}\n\n上版：{}；时间：{}；作者：{}；动作：{}\n",
-                    v.parent_id.as_deref().unwrap_or("无"),
+                    "\n### Version {id}\n\nParent: {}; time: {}; author: {}; action: {}\n",
+                    v.parent_id.as_deref().unwrap_or("None"),
                     v.created_at,
                     v.actor,
                     v.reason
@@ -228,19 +233,19 @@ impl MemoryStore {
                 block(&mut memories, &v.body);
                 for source in v.capture_ids {
                     let status = match raw(&tx, &source) {
-                        Ok(_) => "可用",
-                        Err(DataError::Unavailable) => "来源已删除或不可用",
+                        Ok(_) => "Available",
+                        Err(DataError::Unavailable) => "Source deleted or unavailable",
                         Err(e) => return Err(e),
                     };
                     let _ = writeln!(
                         memories,
-                        "- 原话 Capture {source}（{status}；见 captures.md）"
+                        "- Original capture {source} ({status}; see captures.md)"
                     );
                 }
             }
         }
         let mut conversations = String::from(
-            "# 本地会话（不是长期记忆）\n\n问题、回答和草稿不会自动进入记忆搜索。引用固定到当时使用的版本。\n",
+            "# Local conversations (not durable memories)\n\nQuestions, answers and drafts are not automatically included in memory search. Citations refer to the versions used at the time.\n",
         );
         let conversations_ids: Vec<(String, String, String)> = tx
             .prepare("SELECT id,title,draft FROM conversations ORDER BY created_at,id")?
@@ -250,7 +255,7 @@ impl MemoryStore {
             let _ = write!(conversations, "\n## Conversation {conversation}\n");
             block(&mut conversations, title);
             if !draft.is_empty() {
-                conversations.push_str("草稿：\n");
+                conversations.push_str("Draft:\n");
                 block(&mut conversations, draft);
             }
             let mut rows = tx.prepare(
@@ -267,7 +272,7 @@ impl MemoryStore {
                 let (id, role, status, text) = row?;
                 let _ = write!(
                     conversations,
-                    "\n### Message {id}\n\n角色：{role}；状态：{status}\n"
+                    "\n### Message {id}\n\nRole: {role}; status: {status}\n"
                 );
                 block(&mut conversations, &text);
                 refs(
@@ -408,7 +413,7 @@ fn rollback_restore(root: &Path, pending: &PendingRestore) -> Result<()> {
         root,
         &RestoreResult {
             restored: false,
-            message: "恢复未完成，已退回恢复前的内容。".into(),
+            message: "Restore did not complete; the previous content was recovered.".into(),
             message_code: Some("restore_rolled_back".into()),
             error_code: None,
             previous_backup: Some(backup),
@@ -491,7 +496,8 @@ impl MemoryStore {
                 root,
                 &RestoreResult {
                     restored: true,
-                    message: "已恢复备份，恢复前的内容也已保留。".into(),
+                    message: "Backup restored. The previous content has also been preserved."
+                        .into(),
                     message_code: Some("restore_completed".into()),
                     error_code: None,
                     previous_backup: Some(previous_path(root, &pending.id)),
@@ -510,7 +516,9 @@ impl MemoryStore {
                         root,
                         &RestoreResult {
                             restored: false,
-                            message: format!("恢复未完成，原记忆库保留。{error}"),
+                            message: format!(
+                                "Restore did not complete; the original library was preserved. {error}"
+                            ),
                             message_code: Some("restore_failed_preserved".into()),
                             error_code: Some(restore_error_code(&error).into()),
                             previous_backup: None,
@@ -565,7 +573,7 @@ impl MemoryStore {
             root,
             &RestoreResult {
                 restored: true,
-                message: "已恢复备份，恢复前的内容也已保留。".into(),
+                message: "Backup restored. The previous content has also been preserved.".into(),
                 message_code: Some("restore_completed".into()),
                 error_code: None,
                 previous_backup: Some(backup),
@@ -594,11 +602,11 @@ mod restore_tests {
                 })
                 .unwrap()
             };
-            capture(&store, "备份中的旧内容");
+            capture(&store, "Older content in the backup");
             let backup = dir.path().join("chosen.db");
             store.backup(&backup).unwrap();
             let prepared = store.prepare_restore(&backup).unwrap();
-            capture(&store, "必须找回的最新内容");
+            capture(&store, "Latest content that must be recovered");
             store.arm_restore(&prepared.id).unwrap();
             private_dir(&dir.path().join("recovery")).unwrap();
             store

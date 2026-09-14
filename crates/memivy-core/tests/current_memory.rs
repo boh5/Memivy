@@ -18,7 +18,7 @@ fn request(text: &str) -> CaptureRequest {
 fn proposal(task: &OrganizationTask, text: &str) -> MemoryWriteArgs {
     MemoryWriteArgs {
         destination: Destination::New,
-        title: "整理后".into(),
+        title: "Organized".into(),
         parts: vec![MemoryWritePart {
             text: text.into(),
             sources: vec![MemorySourceQuote {
@@ -101,7 +101,7 @@ fn automatic_organization_keeps_identity_and_yields_to_a_draft() {
             destination: None,
             key: format!("memory:{}", saved.memory_id),
             request_id: id(),
-            title: "用户标题".into(),
+            title: "User title".into(),
             body: "用户正在修改".into(),
             expected_version: Some(saved.version_id.clone()),
             origin: None,
@@ -182,7 +182,7 @@ fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
     let store = MemoryStore::open(dir.path()).unwrap();
     let target = store.capture(&request("目标原正文")).unwrap();
     let topic = id();
-    store.create_conversation(&topic, "讨论").unwrap();
+    store.create_conversation(&topic, "Discussion").unwrap();
     let run = store
         .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
         .unwrap();
@@ -199,7 +199,7 @@ fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
     let draft = WorkspaceDraft {
         key: format!("save:{}", run.assistant_message_id),
         request_id: id(),
-        title: "手动标题".into(),
+        title: "Manual title".into(),
         body: "  用户选择的文字\n原样保留 🙂  ".into(),
         expected_version: None,
         origin: None,
@@ -212,7 +212,7 @@ fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
             request_id: id(),
             memory_id: target.memory_id.clone(),
             expected_version: target.version_id,
-            title: "其他编辑".into(),
+            title: "Other edit".into(),
             body: "目标已改动".into(),
         })
         .unwrap();
@@ -265,7 +265,7 @@ fn manual_save_consumes_its_draft_atomically_and_replay_preserves_a_newer_draft(
     let store = MemoryStore::open(dir.path()).unwrap();
     let target = store.capture(&request("原正文")).unwrap();
     let topic = id();
-    store.create_conversation(&topic, "讨论").unwrap();
+    store.create_conversation(&topic, "Discussion").unwrap();
     let run = store
         .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
         .unwrap();
@@ -281,7 +281,7 @@ fn manual_save_consumes_its_draft_atomically_and_replay_preserves_a_newer_draft(
         expected_version: target.version_id,
     };
     let text = "确认的文字";
-    let title = "标题";
+    let title = "Title";
     let mut draft = WorkspaceDraft {
         key: format!("save:{}", run.assistant_message_id),
         request_id: request.clone(),
@@ -401,7 +401,7 @@ fn lone_edited_pending_memory_is_persistently_paused() {
             request_id: id(),
             memory_id: saved.memory_id.clone(),
             expected_version: saved.version_id,
-            title: "手工标题".into(),
+            title: "Manual title".into(),
             body: "已经手工编辑".into(),
         })
         .unwrap();
@@ -481,7 +481,7 @@ fn deleting_a_discussion_removes_its_unsaved_selection_but_preserves_saved_memor
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let topic = id();
-    store.create_conversation(&topic, "讨论").unwrap();
+    store.create_conversation(&topic, "Discussion").unwrap();
     let run = store
         .begin_agent_input(&id(), &id(), &topic, "问题", &[], None)
         .unwrap();

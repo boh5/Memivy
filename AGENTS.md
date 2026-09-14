@@ -1,122 +1,150 @@
 # AGENTS.md
 
-## Current source boundary
+## Working scope
 
-2026-09-13 用户明确要求彻底移除旧交互样机。当前源码只保留正式 MemoryStore 应用及主窗口／桌面快捷窗口，不保留样机入口、旧 Store／conversation、旧 MCP、旧迁移和专用测试脚本，也不从旧样机目录导入模型配置。此决定取代下列历史授权记录中保留或隔离运行旧样机的要求；不得重新引入。历史验收记录仅作历史证据，设计品牌资源和正式共用的原生面板能力保留。源码清理不删除用户磁盘上的历史数据。
+Memivy is a local-first personal memory app for Apple Silicon and macOS 26+.
+Use the formal `MemoryStore` application, including the main window and desktop
+quick window. Do not restore the removed prototype, its stores, migrations, MCP
+entry points or model-configuration imports. Source cleanup must not delete user data.
 
-## Database baseline
+Keep changes focused on the user's request. Preserve unrelated work.
 
-2026-09-14 用户授权发布前将数据库结构彻底合并为单一 schema 1。新库直接执行 `migrations/memory/001_initial.sql`；不保留开发期逐版本迁移、兼容转换或专用测试。开发资料库可以重新创建，后续正式迁移从 schema 2 追加。
+If a major problem, conflicting requirement or substantial change to the agreed
+approach emerges, stop and explain it to the user before proceeding. Ask for a
+decision; do not silently reinterpret the request or perform a broad workaround.
 
-## Public distribution baseline
+Do not add platforms, cloud sync, a hosted backend, reminders or extra MCP tools without a
+scope change. Prefer existing components and direct implementations over new
+frameworks or speculative abstractions.
 
-2026-09-14 用户确认首发为 `0.1.0` / `v0.1.0`，MIT，版权署名 Huang Bo，准备发布到 `boh5/memivy`。只支持 Apple Silicon / macOS 26+；使用免费 ad-hoc 签名，未经 Apple 公证，不购买 Developer ID。正式版本不等于已完成安装验收。当前只授权先做本地可审查结果，不创建远程仓库、不推送、不发布。
+## Language and documentation
 
-当前打包入口为 `npm run build:release` 与 `src-tauri/tauri.release.conf.json`，取代旧 `build:beta` 名称。新环境先 `npm ci`、`cargo fetch --locked`。公开资料见 README、docs/INSTALL.md、docs/PRIVACY.md；发布流程见 docs/RELEASING.md。工作流只生成草稿，最终公开需要明确授权和实际安装验收。用户数据从公开 schema 1 起保留，后续追加迁移。
+- Write all project-authored code in English: identifiers, comments, docstrings,
+  prompts, tool/schema descriptions, errors, logs, command output, scripts, tests,
+  configuration, SQL, CSS and executable demos. Use English for ordinary examples.
+- Localized UI text belongs in translation resources, including native dialogs,
+  export dialog labels and language names. Preserve both English and Chinese interfaces.
+  English prompts must still follow the user's conversation language.
+- Write necessary Chinese, IME, Unicode and multilingual test or diagnostic
+  samples directly in the test/probe code. Keep test names, comments and assertion
+  explanations in English. Use separate fixtures only for actual reuse, sizable
+  datasets or file-loading tests, never solely to move Chinese out of code.
+- Language-specific terms used to match user input may remain inline. They are
+  input data, not translated UI text; do not create locale files just to hide them.
+- Preserve actual user notes, quotations, transcripts and stored history in their
+  original language. Language cleanup must not rewrite user data.
+- Development documents and README documents may use Chinese. Public documents
+  should explain what users can do and the steps they need, without internal
+  approval conversations, implementation jargon or repeated warnings.
+- Keep this file limited to current rules. Put implementation history and actual
+  check results in `DEVELOPMENT_PLAN.md`, not here. Report research in chat unless
+  the user requests a document; do not create extra reports or parallel plans.
 
-## Repository status
+## Architecture and data
 
-Memivy is a local-first, open-source, AI-native personal memory tool built around “记一下、问一问、接着想”: capture ideas, ask about existing memories, continue thinking, and explicitly save useful conclusions. The original Phase 1 technical-risk prototype was accepted on 2026-09-06. The user subsequently authorized Phase 1 v2 with a desktop companion and a minimal real conversation loop. After the model-configuration and native-focus fixes, the user confirmed on 2026-09-06 that all supplied checks passed; Phase 1 v2 is accepted within that tested prototype scope. Keep the historical evidence limits in DEVELOPMENT_PLAN.md and do not reopen this acceptance without a new issue. Product requirements are not evidence of implemented features. Do not implement later milestones or create application code as a side effect of a documentation or research task.
+- React/Tauri provides the interface; the shared Rust core owns storage and memory
+  rules. The UI and MCP must not bypass `MemoryStore` to mutate SQLite.
+- SQLite is the source of truth. Current memory text supports keyword and optional
+  semantic search. Original input and older versions remain available as evidence
+  and recovery material, not a competing primary search index.
+- Save original input locally before AI processing. Preserve originals, version
+  history and provenance. AI changes must have visible, reversible receipts.
+  Model failure must not block ordinary capture or keyword search.
+- Conversations and their compression summaries are separate from durable memories.
+  Save meaningful user expressions while distinguishing tentative ideas, decisions
+  and completed actions. Questions and AI suggestions must not become user facts.
+- Recall relevant global memories before answering and use bounded tools to read
+  further evidence. Selected notes or collections focus a discussion without
+  hiding relevant global constraints. Cite the actual source versions used.
+- Preserve user drafts, concurrent-edit checks, cancellation and retries. Undo must
+  not overwrite later edits. Deleting a conversation must preserve already saved
+  memories, their source records and grouped undo.
+- Deleted memories go to Trash and leave normal search and AI recall. Preserve
+  shared sources and independently deleted items. Empty Trash only on user action.
+  Removing a collection must not delete its memories. Collection membership is
+  manual: AI may recommend collections but must not add memories without confirmation.
+- The first public database uses schema 1 in `migrations/memory/001_initial.sql`.
+  Do not restore development-era migrations or compatibility conversions. After
+  release, keep the initial schema unchanged and add migrations from schema 2.
+- Back up the current library before restoring another backup. Keep credentials
+  and model weights out of database backups, exports, logs and repository files.
+  Credentials live in separate local configuration, not Keychain or a hosted vault.
 
-After reviewing the Phase 2 research and plan on 2026-09-06, the user said “好，做吧”, authorizing the core data layer and the proposed trash semantics. The formal core is `memivy_core::memory::MemoryStore`; the native prototype and its MCP still use the isolated Phase 1 Store. Phase 2 does not approve later UI or Agent milestones. Keep actual verification in DEVELOPMENT_PLAN.md.
+## Models, voice and MCP
 
+- Use the existing model client and bounded tool loops. Unsupported model
+  capabilities must fail clearly; do not silently switch models or revive old flows.
+- Local embedding and speech use their existing helper processes. Both share
+  Memivy's system cache: `~/Library/Caches/com.memivy.app/models/` on macOS,
+  independent of app identifier and test library. Do not use a global HF cache.
+- Voice input shares the text draft. Finish transcription before submitting and
+  preserve recoverable input on failure. Stopping recording must not send it.
+- MCP uses local stdio and exposes only `memory_capture` and `memory_search`.
+  It starts disabled. Capture requires explicit intent to save; search returns
+  bounded saved-memory results with sources, never unsaved conversations.
+- Test actual model requests, raw tool arguments and storage effects when changing
+  prompts or agent behavior. Fix controllable defects; report remaining model
+  quality observations without claiming every semantic outcome is guaranteed.
 
-On 2026-09-06 the user authorized Phase 3 with “好，实现吧”, after choosing a compact list with a wide reading pane and clarifying that the current dev source is the visual baseline. Preserve that source's home layout, Miro styles and brand; this scoped authorization does not require rebuilding or approving the older HTML Demo. The default native entry now uses formal MemoryStore data. The accepted prototype remains available through `npm run dev:prototype` with its separate Phase 1 Store; its MCP is unchanged. Formal AI/Q&A, the companion and MCP integration remain later milestones. This is implementation authorization, not user acceptance of the delivered Phase 3 build.
+## Interface and design
 
-Later in the same session the user explicitly rejected hiding the previously working “问一问” and memory-level discussion during the formal-store switch. Restore those real discussion flows on MemoryStore, including citations, cancellation/retry, continuation and reviewed conclusion saving; do not disable them just because their broader milestone was originally later. The companion, automatic AI organization and formal MCP remain separately scoped. Export is a low-frequency single-article action in the memory page’s collapsed More menu, never a prominent toolbar action or whole-library export in Settings.
+Preserve the current layout, white/yellow branding and shared Markdown editor.
+Keep formatting controls attached to text selection, with direct Markdown input.
+Do not introduce a persistent toolbar, a source-mode editor or task-management
+features as a side effect of editing document formatting.
 
-On 2026-09-07, after phase 4 research and decision review, the user agreed and explicitly authorized implementation ("好，同意。你可以开始做了吗？"). Reuse the current formal UI and shared native panel for formal MemoryStore quick capture and discussion. The approved behavior is Command+Enter to submit (Enter inserts a newline), collapse after a successful ordinary capture, keep a pinned panel ready for another capture, and continue answers while collapsed. Include the menu bar, configurable global shortcut, draggable/hideable leaf, opt-in macOS login startup, explicit sources, draft preservation and main-window handoff. This is phase 4 implementation authorization; automatic AI organization and formal MCP remain separately scoped. Record actual native verification and any remaining gaps in DEVELOPMENT_PLAN.md.
+Preserve focus, selection, scroll position, drafts and Chinese IME composition in
+both windows. Command+Enter submits; Enter inserts a newline. Run native panel
+operations on the main thread. Verify global shortcuts and window handoff natively.
 
-On 2026-09-07, the user confirmed the Phase 5 research decisions: automatic continuation supplements or locally updates existing content while preserving unaffected text; saving a conclusion to an existing memory defaults to addition, with any integrated rewrite shown for one explicit confirmation before saving. The system is still in development, so do not build legacy-data compatibility, historical batch organization, or upgrade migration flows. After reviewing remaining questions, the user asked to start coding, authorizing Phase 5 implementation on the current formal UI. See PRD 4.2/4.5 and DEVELOPMENT_PLAN Phase 5. Preserve the existing layout and shared components; formal MCP remains a later milestone.
+Reuse the selected leaf-and-m logo in `design-demo/brand/`. Keep official design
+assets unchanged unless requested. App icons are generated from those assets by
+`node scripts/generate-app-icon.mjs`; the OS supplies the packaged icon's corner mask.
+The clickable demos are visual references, not an alternate product runtime.
 
-On 2026-09-07, after Phase 6 research and review, the user explicitly authorized implementation ("好，实现它"). The approved scope is standard local stdio MCP with only `memory_capture` and `memory_search` on formal MemoryStore, a default-off master switch, bounded keyword search and provenance, settings/configuration/local diagnostics, and an Apple Silicon / macOS 26 development app and DMG. No client whitelist or per-client product integrations. The user has no Developer ID signing credentials: deliver ad-hoc signed, unnotarized development artifacts; defer Developer ID/notarization and record actual external beta evidence rather than claiming release acceptance. `memivy-mcp` is now the formal entry; the historical isolated MCP is explicitly `memivy-mcp-prototype`. Do not send beta invitations or messages without explicit authorization.
+## Setup and verification
 
-On 2026-09-08 the user approved the five-point improvement plan and explicitly requested implementation, performance checks, and self-review. Scope: internal organization Function Calling, ordinary RAG prompt constraints, relevance retrieval across current/raw/historical evidence with timestamps (no separate time retrieval), up to three local related memories below the detail body, and manual whole-library backup/restore with an automatic pre-restore copy. Reuse the current architecture/UI; no embedding, extra verification model, generic Agent loop, merge restore, or additional MCP tools. Record actual results in DEVELOPMENT_PLAN.md; implementation authorization does not imply user acceptance.
+Use the versions in `.node-version` and `rust-toolchain.toml`. Start with `npm ci`
+and `cargo fetch --locked`; offline checks require dependencies to be present.
+Ensure Cargo and CMake are on PATH.
 
-On 2026-09-08 the user approved the existing white/yellow reading design with Bear-like typography and a subtle selection toolbar, then explicitly requested implementation with Milkdown ("用Milkdown做出来我看看效果"). Use a shared Markdown editor for current memory content and conclusion review, with WYSIWYG-only editing and Markdown input shortcuts; render current/history/answer Markdown consistently. Preserve the current layout, literal raw captures, lightweight capture/question inputs, and existing draft/version/receipt semantics. This overrides the earlier rich-text deferral for this scope only; no blocks workspace, attachments, collaboration or new persistence model. Record actual visual/native checks, not user acceptance.
+- Development: `npm run dev:app` uses the normal application data directory.
+  Do not automatically override it in development launchers. For isolated tests,
+  explicitly set an absolute `MEMIVY_DATA_DIR` and
+  verify the app opened it before testing. `npm run dev` alone is a browser preview.
+- Frontend: `npm run build`, `npm run test:ui`, `npm run i18n:check`.
+- Rust: `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --offline -- -D warnings`,
+  and `cargo test --workspace --offline`.
+- Full regression: `npm run test:core-assets`, then
+  `python3 scripts/verify_restore.py`. Use synthetic isolated data.
+- Run focused checks while iterating and the relevant broader checks before
+  handoff. Use independent review, fix confirmed findings, and re-review changes
+  to agent behavior, prompts or data handling.
+- Verify UI changes visually and Tauri behavior in the native app. Build success
+  does not prove input, microphone, global-hotkey or installation behavior.
+- Never delete shared production models or use personal data to simulate failures.
+  Keep real model credentials outside the repository in a private `0600` file.
+- Keep temporary evidence under ignored `research/`. State which checks ran and
+  what remains unverified; do not claim user acceptance from tests or review.
 
-The user subsequently rejected the source-mode split and requested Mem-style direct Markdown input conversion plus practical selection formatting. Keep the accepted typography; expose paragraph/headings/list/quote/code conversion without requiring source edits, including heading-to-paragraph from the selected text. The latest user correction explicitly removes the persistent toolbar: show a single row of direct formatting buttons only for a text selection (H1/H2 and formatting icons, no dropdowns), and keep direct Markdown input conversion. The user then required the complete functionality of the supplied Mem formatting-bar screenshot and additionally requested H3: keep H1/H2/H3, bold, italic, underline, strikethrough, clear formatting, inline code, numbered/bulleted/task lists, quote, code block, link and table in that order, with the same three groups. Task checkboxes are document formatting, not a separate task/reminder system. Preserve Markdown persistence and user drafts from the first QA session.
+## Distribution and Git
 
-On 2026-09-08 the user authorized the unified workspace implementation. Merge the home/library layout, put AI/RAG retrieval and questions in one persistent top input with a separate explicit capture action, and retain the sidebar for all memories, recent discussions, trash, desktop entry and settings/data. Preserve current white/yellow branding and reading typography, shared draft/CAS/receipt semantics, and native handoff. This replaces the separate in-app keyword-search/Ask navigation requirement; internal FTS and MCP remain model-free. Follow the agreed sequence: deliver this first layout for user feedback before adding pins/review and later lightweight collections. Do not add future placeholders, new storage or model architecture as part of this first step. Record actual checks in DEVELOPMENT_PLAN.md, not user acceptance.
+The initial release is `0.1.0` / `v0.1.0`, MIT, copyright Huang Bo, for `boh5/memivy`.
+Use `npm run build:release` and `src-tauri/tauri.release.conf.json`. Packages are
+ad-hoc signed and unnotarized; no paid Apple Developer account is assumed.
+Follow `docs/RELEASING.md`: CI creates a draft, and the actual download needs
+installation checks before publication.
 
-Later in the same session the user explicitly requested completing all remaining steps now ("把这几步全部做完啊"). This supersedes the intermediate layout-feedback gate. Implement pins, on-demand review, and lightweight collections with manual membership, opt-in AI candidate recommendations, and collection-scoped RAG including follow-ups. Reuse current navigation and editor styles, preserve originals/versions/drafts and source visibility; removing collections must not delete memories or silently widen existing discussions. No notifications, automatic membership, embeddings, external sharing, or new MCP tools. Routine schema additions use the existing core database mechanism and backup path; do not introduce separate legacy or batch migration products.
+Commit only when requested, using English Conventional Commits. Do not push,
+create a remote repository, tag or publish a release without explicit authorization.
 
-On 2026-09-09 the user authorized the reviewed single-memory cleanup feature and detail-toolbar icon layout. Add in-place cleanup of the current body or editing draft, editable preview/diff/refinement, explicit one-click acceptance and reversible version history. Preserve originals, sources and draft concurrency; no whole-library cleanup or new MCP tools. Replace the shared hardcoded 2500-token cap with optional BYOM output controls and task-specific response/time boundaries. Keep final verification in DEVELOPMENT_PLAN.md; this is implementation authorization, not user acceptance.
+## References
 
-On 2026-09-10, after reviewing [`research/retrieval-2026-09-09/three-phase-plan.md`](research/retrieval-2026-09-09/three-phase-plan.md), the user authorized completing that plan. Its three stages are: (1) make Memory immediately usable while downgrading raw input/history to archive and recovery material, and expose one canonical search interface; (2) add opt-in local HF-managed Qwen3-Embedding-0.6B Q8_0 with sqlite-vec hybrid retrieval; and (3) add bounded Agent tool loops for Q&A and ingestion organization. This authorization supersedes, within this plan's scope, the older restrictions against embedding/vector retrieval, restricting retrieval to raw/history, and tool loops; raw input/history still follow the plan's archive-only search rule. Preserve the current UI and visual language. Each stage requires its scoped tests, an independent agent Review-Fix loop, and one commit after review; never auto-push. Authorization is not acceptance, and historical verification records remain unchanged.
-
-2026-09-10 后续用户明确选择 Memivy 自有统一模型缓存：使用 `~/Library/Caches/com.memivy.app/models/`，开发版、安装版和测试资料库共用。模型权重不放应用数据目录或临时资料库，不使用全局 HF 缓存；数据库、设置和向量索引仍归各资料库所有。测试不得删除共用模型来模拟故障，只对小型隔离夹具做破坏性缓存测试。此决定替代三阶段计划中旧的按资料库保存模型路径。
-
-2026-09-11 用户授权本地语音输入实现：Qwen3-ASR-0.6B Q8_0，复用 llama.cpp 的 Metal 音频编码和解码；覆盖主窗口记录/提问及桌面快捷入口，共享草稿和显式提交规则。设置提供启用、下载/续传、加载/释放、启动预加载与语音快捷键。语音验证时曾使用全局 HF 缓存；用户随后确认产品统一缓存，语音与 embedding 都使用系统缓存目录下固定 `com.memivy.app/models`，macOS 为 `~/Library/Caches/`，Windows 为 LocalAppData；通过系统路径 API 解析，不随测试应用 identifier 或资料库改变。录音分段转写，失败保留暂存，停止后完整收尾才允许提交。用户禁止创建研究报告文档，后续直接在聊天里简明汇报。此为实施授权，不代表原生验收。
-
-2026-09-12 用户通过 active goal 授权完整实施 [第二 Memory Agent 与统一输入](docs/goals/second-memory-agent-plan-goal.md)，执行证据单独记入 [progress](docs/goals/second-memory-agent-progress.md)。本轮以自然流式聊天、主动全局记忆、自动维护用户表达、长会话压缩、统一文字／语音输入及完整 A01—A17 验收为准；取代下列历史记录中正式讨论只读、结论必须审核、专题硬过滤、固定 RAG／工具能力降级的限制。旧样机继续隔离，不能作为正式产品 fallback。保留既有本地存储、原话／版本／回执、手动编辑和单篇整理；不增加 Agent SDK、平台、MCP 工具或停录自动发送。当前授权不是用户验收，独立 review-fix-review 和真实模型／原生验证均必须完成。
-
-2026-09-12 用户进一步明确：只对可控的上下文、提示词与工程执行负责，不要求保证模型能力。真实模型场景仍需运行并检查实际请求、原始工具参数和存储结果；可控缺陷必须修复，已核对边界正确后的模型语义／格式错误保留质量观察，不以样本全正确或换模型对照阻塞工程交付。此决定替代计划旧的模型样本全通过门槛，不免除原话、版本、来源、撤销、故障与原生输入验收。
-
-## Reference documents
-
-- [PRD.md](PRD.md): product requirements, current platform scope, interaction rules, and acceptance criteria.
-- [TECH_STACK.md](TECH_STACK.md): proposed architecture and technology choices; read before implementation or dependency changes.
-- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md): demo-first implementation sequence, approval record, and milestone checks; use the relevant stage for development work.
-- [DESIGN.md](DESIGN.md): the selected Miro visual reference; read before UI work. Keep the official imported file unchanged unless the user explicitly requests an update. Do not insert translations, project instructions, or a replacement design system into it.
-
-Use the relevant documents rather than duplicating them here. If a requested change conflicts with a documented decision, clarify the decision instead of silently changing product scope. Visual examples do not introduce new product features.
-
-Research the interaction before revising the clickable Demo, then use the explicitly approved Demo version as the UI implementation and acceptance baseline. Do not start later production milestones until the applicable Demo is approved and development is authorized. The existing Phase 1 scaffold does not need reinitialization. The Demo entry is `design-demo/index.html`; check its approval status and version in `DEVELOPMENT_PLAN.md` rather than assuming an existing Demo is approved.
-
-On 2026-09-05 the user explicitly authorized Phase 1 only, using Demo v0.1 as a visual reference while its functional interactions remain unapproved. This exception allows the technical prototype described in `DEVELOPMENT_PLAN.md`, not Phase 2 or production feature development. Keep prototype data separate from future production data and label it clearly.
-
-On 2026-09-06 the user accepted Phase 1 with its recorded evidence limits; do not reopen that acceptance or add further prototype checks merely because the product direction changed. The user then confirmed the personal-memory direction and authorized updating the related documents only: keep Demo v0.1 and application code unchanged in this documentation task. Detailed interaction research and Demo changes are deferred to later work. The new direction does not approve a new layout, window transition, or confirmation flow; consult PRD section 12 for open interaction questions.
-
-## Implementation boundaries
-
-2026-09-06 later authorization: after UI/UX research, the user explicitly asked to adapt the existing Phase 1 code into a usable interaction prototype and approved the proposed plan ("好，那你就做吧，做出来我看看。"). Phase 1 v2 may implement the desktop floating companion, shared capture/question input, topic continuation, grounded model answers, reviewed new-record saving and undo in isolated prototype data. This is a native interaction experiment, not approval of production Phase 2 or a requirement to redo the accepted Phase 1 baseline. Keep Demo v0.1, brand assets and the official DESIGN.md unchanged. Record actual v2 checks in DEVELOPMENT_PLAN.md.
-
-- Keep the MVP focused on unified capture/question/discussion, grounded global recall, and automatic memory maintenance of user-expressed ideas, facts and decisions with visible reversible receipts. Retain a browsable, editable memory library; Memivy must be useful without an external Agent. Do not add to-dos, reminders, voice capture, embedding, synchronization, a hosted backend, or additional platform support without an explicit scope change.
-- Save raw captures locally before starting AI processing. AI must never rewrite or delete the original input; edits to current memory content retain versions and provenance.
-- AI memory mutations must produce a visible receipt and be reversible. Model failures must not prevent capture or keyword search. Do not substitute an answer or summary for the required mutation receipt.
-- Deleting a memory moves its exclusive captures and history into trash and excludes them from normal search and AI use. Preserve shared sources and independently deleted capture state. Undoing organization preserves raw input; undoing a correction must restore both affected memories without overwriting later versions. Trash is emptied only by explicit user action.
-- SQLite is the source of truth; Markdown is export. All search uses MemoryStore with current-memory FTS5 and the separately authorized optional local embedding. Discussion proactively recalls global context before the first model call, then may search and read related current/history/source evidence by stable ID through bounded tools. Unsupported streaming/multi-turn capability stops Agent execution without old-flow fallback or model substitution.
-- Keep local conversations and compression summaries separate from durable memory search. Automatically maintain meaningful user expressions while preserving tentative, decided and executed states; questions, operations and AI suggestions must not become user facts. Archive only actual user sources of committed writes, without a second memory or organization job. Preserve versions, provenance and grouped undo after conversation deletion. Low-frequency manual saving uses the shared editor and core transaction; no old conclusion-review/fusion runtime path.
-- Ground recollections in actual captures or memory versions; distinguish new suggestions from remembered facts and acknowledge insufficient evidence. Bind citations to the versions actually used, handle deleted sources honestly, and support cancellation, failure, and retry without accidental memory writes.
-- Follow the planned shared Rust core boundary: UI and MCP must not bypass it to mutate the database or duplicate memory rules.
-- Store BYOM credentials in a separate local app-data configuration file, not Keychain or a hosted key service. Keep keys out of the content database, exports, backup metadata, logs, and repository files.
-- MCP exposes only `memory_capture` and `memory_search`; capture requires the user's explicit intent to save, and search returns bounded durable-memory results with provenance. Do not expose unsaved conversations or add Q&A, bulk-read, or mutation tools.
-
-## Change discipline
-
-- Make small, task-scoped changes. Preserve unrelated work and avoid speculative abstractions or dependencies for deferred features.
-- Borrow useful, established product patterns when they serve users. Existing competitors are not a reason to reject a feature; do not impose uniqueness as a product requirement or invent extra approval gates.
-- Update the existing relevant document when a decision changes; do not create extra reports or parallel specifications unless requested.
-- Keep research and temporary evidence under the ignored `research/` directory. Keep the maintained visual Demo in the version-controlled `design-demo/` directory. Do not force-add research or commit local credentials and runtime data.
-- Reuse shared UI components and styles when implementing the approved Demo; do not invent a separate theme for each screen. Reconfirm affected Demo screens before changing approved visuals or interactions during feature development.
-
-## Logo design
-
-- The user-selected Memivy logo is the lowercase m with a leaf on a yellow rounded tile (`#FFD02F`). The design assets are in [design-demo/brand/](design-demo/brand/). Reuse this selected logo for subsequent UI design and implementation work.
-- Use [memivy-icon.svg](design-demo/brand/memivy-icon.svg) for the standalone icon, [memivy-logo.svg](design-demo/brand/memivy-logo.svg) for the horizontal logo on light backgrounds, and [memivy-logo-dark.svg](design-demo/brand/memivy-logo-dark.svg) on dark backgrounds.
-- [memivy-icon-1024.png](design-demo/brand/memivy-icon-1024.png) provides the bitmap icon; [favicon.ico](design-demo/brand/favicon.ico) is the browser favicon.
-- The macOS 26 application package uses the full-bleed derivative in `src-tauri/icons/`, generated from the selected vector by `node scripts/generate-app-icon.mjs`. The OS supplies the app-icon corner mask; keep the original Demo assets unchanged. This export adjustment was requested on 2026-09-05 after the user observed a small icon inside the system frame.
-
-## Setup and validation
-
-Run from the repository root. Phase 1 was built with Node 24.12.0, Rust 1.98.1, and macOS 26.6.2 on Apple Silicon with Xcode Command Line Tools. `rust-toolchain.toml`, `Cargo.lock`, and `package-lock.json` pin the tested toolchain and dependency graph.
-
-- Install frontend dependencies: `npm install` (the sandbox run used `npm --cache /private/tmp/memivy-npm-cache install`).
-- Start the formal native dev app: `npm run dev:app` (Vite is started by Tauri). `npm run dev` alone is a read-only browser preview.
-- Check and build frontend: `npm run build`.
-- Check Rust: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --offline -- -D warnings`.
-- Test core behavior: `cargo test --workspace --offline`.
-- Build formal test harnesses: `cargo build -p memivy-core --example memory_probe --offline` and `cargo build -p memivy-mcp --offline`; run `python3 scripts/verify_memory_store.py` and `python3 scripts/verify_mcp.py` for isolated process/stdio checks.
-- Build a local native test bundle: `npm run tauri -- build --debug --bundles app`. Ensure `~/.cargo/bin` is in `PATH`; this session used `PATH=/Users/bo/.cargo/bin:$PATH` before the command. The current default output is `target/debug/bundle/macos/Memivy.app` and is not a signed release. Use `MEMIVY_DATA_DIR` with a temporary isolated directory for UI tests, and verify that the test process actually opened that directory before interacting.
-- Model probe: `target/debug/examples/model_probe /absolute/path/to/private-config.json` (build with `cargo build -p memivy-core --example model_probe --offline`). The file must be outside the repository, mode `0600`, and contain `base_url`, `model`, and optional `api_key`. The base URL includes the API prefix such as `/v1`; the probe appends `/chat/completions`. It sends synthetic text only and performs no memory writes.
-- Section 5 regression assets: `npm run test:core-assets` runs the offline suite and isolated process checks, including a real 90-second model timeout. Real-model synthetic evaluation is explicit: `npm run test:core-assets -- --models-only --model-config /absolute/path/to/private-model.json`. Fresh run evidence stays under ignored `research/core-tests/`; never treat structural checks or Codex review as user adjudication or native acceptance. See DEVELOPMENT_PLAN.md section 5 for fixed fixtures and remaining checks.
-- Formal library regression tests: `cargo test -p memivy-core --test memory_library --offline`; covers ranking, filters, drafts, versions, trash and index rebuild.
-- Phase 2 core tests: `cargo test -p memivy-core --test memory_data --offline`. Build the process harness with `cargo build -p memivy-core --example memory_probe --offline`, then run `python3 scripts/verify_memory_store.py`. These use temporary synthetic data; the formal default is `~/Library/Application Support/com.memivy.app/memivy.db`. Backup restore accepts only a fresh empty directory.
-
-Commands above require dependencies to have been fetched before using `--offline`. The shared native capture panel uses `src-tauri/src/capture_panel.rs` and a commit-pinned `tauri-nspanel` dependency; run all native panel operations on the main thread. Verify the current main window and quick entry in the native application; physical global-hotkey delivery requires its own check. See the relevant verification records in `DEVELOPMENT_PLAN.md`; do not infer full acceptance from a successful build.
-
-- For documentation changes, check local links, consistency with the authoritative documents, and that unrelated files remain unchanged.
-- For implementation changes, run the relevant available checks and add regression coverage for changed behavior. Prioritize raw-input preservation, failed AI calls, undo, keyword search, grounded answers, conversation/memory separation, explicit conclusion saving, cancellation, and credential leakage.
-- Verify UI changes visually. For Tauri-specific behavior, test in the target app as well as the browser, especially Chinese input, focus, and window behavior.
-- In the handoff, state what changed, which checks actually ran, and anything not verified. Do not treat a mockup, passing build, or published artifact as proof of a working release.
+- `PRD.md`: product scope and behavior.
+- `TECH_STACK.md`: architecture; read before dependency or structural changes.
+- `DESIGN.md` and `design-demo/`: visual references; do not rewrite official designs.
+- `DEVELOPMENT_PLAN.md`: implementation history and verification evidence.
+- `docs/goals/second-memory-agent-plan-goal.md` and its progress document: agent
+  behavior and acceptance scenarios. Current rules above supersede older conflicts.
+- `docs/INSTALL.md`, `docs/PRIVACY.md`, `docs/RELEASING.md`: public use and maintenance.

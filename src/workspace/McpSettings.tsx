@@ -50,6 +50,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
   return <section className="settings-section desktop-settings">
     <h3>{t('mcp.title')}</h3>
     <p>{t('mcp.description')}</p>
+    <p className="field-help">{t('mcp.privacyDescription')}</p>
     <div className="setting-line">
       <div><strong>{t('mcp.allowAccess')}</strong>{!state&&<p>{error?t('mcp.statusUnknown'):t('status.reading')}</p>}</div>
       <input type="checkbox" role="switch" className="settings-switch" aria-label={t('mcp.allowAccess')} checked={state?.enabled??false} disabled={!native||!state||busy}
@@ -76,7 +77,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
     </details>}
     {diagnostic && <div className="settings-result" role="status">
       {t('mcp.diagnosticPassed',{count:diagnostic.tools.length})}
-      <p>{t('mcp.diagnosticScope')}{diagnostic.enabled ? t('mcp.diagnosticEnabled') : t('mcp.diagnosticDisabled')}</p>
+      <p>{t('mcp.diagnosticScope')}{' '}{diagnostic.enabled ? t('mcp.diagnosticEnabled') : t('mcp.diagnosticDisabled')}</p>
     </div>}
     {notice && <p className="settings-result" role="status">{notice}</p>}
     <ErrorNotice text={error} />

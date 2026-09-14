@@ -42,7 +42,7 @@
 .markdown-editor .milkdown { position: relative; --crepe-color-surface: #fff; --crepe-color-hover: #f7f7f2; --crepe-color-selected: #fff1b8; --crepe-color-primary: #282923; --crepe-color-outline: #55564e; --crepe-color-on-background: #34352e; --crepe-shadow-1: 0 4px 20px #00000012, 0 0 0 1px #00000009; }
 .markdown-editor .ProseMirror { min-height: 270px; outline: none; padding: 0 0 14px; white-space: pre-wrap; }
 .markdown-editor .ProseMirror:focus-visible { outline: none; }
-.markdown-editor .ProseMirror > p:only-child:has(> br:only-child)::before { content: "从这里继续你的想法…"; color: #b6b7b0; pointer-events: none; position: absolute; }
+.markdown-editor .ProseMirror:has(> p:only-child > br:only-child)::before { content: attr(data-placeholder); color: #b6b7b0; pointer-events: none; position: absolute; }
 .markdown-editor .milkdown-link-edit > .link-edit { height: auto; min-height: 38px; align-items: center; padding: 5px 8px; }
 .markdown-editor .milkdown-link-edit .input-area { border: none; margin: 0; padding: 5px 6px; }
 .markdown-editor .milkdown-link-preview > .link-preview { align-items: center; }

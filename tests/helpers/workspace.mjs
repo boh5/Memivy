@@ -18,7 +18,7 @@ for (const language of ['en', 'zh-CN']) {
     resources[language][name.slice(0, -5)] = JSON.parse(fs.readFileSync(`locales/${language}/${name}`, 'utf8'));
   }
 }
-translation.init({ resources, lng: 'zh-CN', fallbackLng: 'en', defaultNS: 'common', initImmediate: false, interpolation: { escapeValue: false } });
+translation.init({ resources, lng: 'en', fallbackLng: 'en', defaultNS: 'common', initImmediate: false, interpolation: { escapeValue: false } });
 let active;
 const fibers = [];
 const hooks = {
@@ -49,7 +49,7 @@ const jsx = (type, props, key) => ({type,props:props||{},key});
 const db = new Map(), calls = [], overrides = {};
 const windowEvents = new Map(), nativeEvents = new Map();
 let askResolve, messageResponse, scrolls=0;
-const topic = {id:'topic-a',title:'测试讨论',updated_at:1};
+const topic = {id:'topic-a',title:"Test discussion",updated_at:1};
 const keyA={kind:'memory',id:'a'}, keyB={kind:'memory',id:'b'};
 const row = key => ({key,title:key.id,snippet:'test',updated_at:1,origin:null});
 const api = {
@@ -90,8 +90,8 @@ function load(file) {
     if(name==='react')return hooks;
     if(name==='react-i18next')return {useTranslation:ns=>({t:translation.getFixedT(null,ns),i18n:translation})};
     if(name==='../i18n')return {default:translation,translateCatalog:(key,options={})=>translation.exists(key,options)?translation.t(key,options):translation.t('operation_failed',{ns:'errors'})};
-    if(name==='../i18n/preferences')return {getLanguageSnapshot:()=>({preference:'zh-CN',language:'zh-CN',revision:0}),subscribeLanguage:()=>()=>{},refreshLanguage:async()=>{},setLanguagePreference:async()=>{}};
-    if(name==='../i18n/format')return {formatNumber:(value,maximumFractionDigits=0)=>new Intl.NumberFormat('zh-CN',{maximumFractionDigits}).format(value)};
+    if(name==='../i18n/preferences')return {getLanguageSnapshot:()=>({preference:'en',language:'en',revision:0}),subscribeLanguage:()=>()=>{},refreshLanguage:async()=>{},setLanguagePreference:async()=>{}};
+    if(name==='../i18n/format')return {formatNumber:(value,maximumFractionDigits=0)=>new Intl.NumberFormat('en',{maximumFractionDigits}).format(value)};
     if(name==='../i18n/react')return {useNotice:(initial='')=>{
       const [value,setValue]=hooks.useState(initial);
       return [renderMessage(value,(key,options)=>translation.t(key,options)),setValue,value];

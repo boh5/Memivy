@@ -44,37 +44,39 @@ pub use types::*;
 /// Display and Debug deliberately omit SQL, paths, content and provider errors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DataError {
-    #[error("MCP 已关闭，请在 Memivy 设置中开启后重试")]
+    #[error("MCP is disabled; enable it in Memivy Settings and try again")]
     McpDisabled,
-    #[error("本地文件操作失败，请检查权限和剩余空间")]
+    #[error("Local file operation failed; check permissions and available space")]
     Io,
-    #[error("数据库操作失败，本次写入未确认完成")]
+    #[error("Database operation failed; this write was not confirmed")]
     Database,
-    #[error("数据库正忙，本次写入未确认完成，请使用原请求重试")]
+    #[error("The database is busy; this write was not confirmed. Retry the original request")]
     Busy,
-    #[error("已有同名专题，请换一个名称")]
+    #[error("A collection with this name already exists; choose another name")]
     CollectionName,
-    #[error("置顶或专题已达到 100 项，请先整理后再添加")]
+    #[error(
+        "The limit of 100 pins or collections has been reached; remove some before adding more"
+    )]
     NavigationLimit,
-    #[error("输入无效或超过长度限制")]
+    #[error("Input is invalid or exceeds the length limit")]
     Invalid,
     #[error(
-        "请逐项引用实际用户原话；未引用来源的片段必须完整保留目标原有行，不能省略否定或更改内容"
+        "Cite actual user words for each part. Parts without citations must preserve complete existing lines without removing negation or changing content"
     )]
     SourceAttribution,
-    #[error("内容不存在、已删除或不可用")]
+    #[error("Content does not exist, was deleted, or is unavailable")]
     Unavailable,
-    #[error("内容已有新版本，请重新核对后再操作")]
+    #[error("Content has a newer version; review it before continuing")]
     Conflict,
-    #[error("同一请求标识对应不同内容，已拒绝写入")]
+    #[error("This request ID was used with different content; the write was rejected")]
     RequestConflict,
-    #[error("数据库格式不匹配或版本过新，已拒绝写入")]
+    #[error("The database format is incompatible or too new; the write was rejected")]
     Schema,
-    #[error("备份校验失败，未恢复数据")]
+    #[error("Backup validation failed; no data was restored")]
     Integrity,
-    #[error("目标已存在，请选择新的导出或恢复位置")]
+    #[error("The destination already exists; choose a new export or restore location")]
     DestinationExists,
-    #[error("这个词匹配范围太大，请增加关键词或缩小时间范围")]
+    #[error("The query matches too much content; add keywords or narrow the time range")]
     SearchBudget,
 }
 impl From<std::io::Error> for DataError {

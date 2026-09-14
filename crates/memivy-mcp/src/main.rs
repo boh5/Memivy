@@ -51,7 +51,7 @@ fn result<T: Serialize>(
     match value {
         Ok(Ok(value)) => match serde_json::to_value(value) {
             Ok(value) => CallToolResult::structured(value),
-            Err(_) => failure("internal", "结果无法编码"),
+            Err(_) => failure("internal", "Cannot encode the result"),
         },
         Ok(Err(error)) => {
             let code = match error {
@@ -67,7 +67,7 @@ fn result<T: Serialize>(
         }
         Err(_) => failure(
             "internal",
-            "本地任务未确认完成，保存时请使用原 request_id 重试",
+            "The local operation was not confirmed; retry saves with the original request_id",
         ),
     }
 }
@@ -137,7 +137,8 @@ impl ServerHandler for Memivy {
 #[tokio::main]
 async fn main() {
     let run = async {
-        let store = MemoryStore::open_environment().map_err(|_| "记忆库无法打开")?;
+        let store =
+            MemoryStore::open_environment().map_err(|_| "Cannot open the memory library")?;
         let server = Memivy {
             store,
             tool_router: Memivy::tool_router(),
@@ -161,7 +162,7 @@ async fn main() {
                         }
                     }
                     _ => {
-                        eprintln!("MCP 请求帧无效或过大");
+                        eprintln!("Invalid or oversized MCP request frame");
                         break;
                     }
                 }
@@ -170,8 +171,11 @@ async fn main() {
         let service = server
             .serve((read, tokio::io::stdout()))
             .await
-            .map_err(|_| "MCP 握手失败")?;
-        let finished = service.waiting().await.map_err(|_| "MCP 连接结束异常");
+            .map_err(|_| "MCP handshake failed")?;
+        let finished = service
+            .waiting()
+            .await
+            .map_err(|_| "MCP connection ended unexpectedly");
         input.abort();
         finished?;
         Ok::<_, &'static str>(())

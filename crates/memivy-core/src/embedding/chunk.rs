@@ -29,7 +29,7 @@ fn prefix(title: &str, heading: &str, header: &str) -> String {
 pub fn query(text: &str) -> Result<String> {
     let s = normalized(text);
     if s.chars().count() > MAX_CHARS {
-        return Err("问题过长，本次使用字面检索".into());
+        return Err("The query is too long; using keyword search".into());
     }
     Ok(s)
 }

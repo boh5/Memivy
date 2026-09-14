@@ -18,7 +18,7 @@ export default function LanguageSettings({onBusyChange}:{onBusyChange?:(busy:boo
     <div className="language-setting-row">
     <div className="language-setting-copy"><h3 id="ui-language-label">{t('language')}</h3></div>
     <div className="language-segments" role="radiogroup" aria-labelledby="ui-language-label" aria-busy={busy}>
-      {([{value:'system',label:t('system')},{value:'zh-CN',label:'简体中文'},{value:'en',label:'English'}] as const).map(option => <label key={option.value} className="language-option">
+      {([{value:'system',label:t('system')},{value:'zh-CN',label:t('languageChinese')},{value:'en',label:t('languageEnglish')}] as const).map(option => <label key={option.value} className="language-option">
         <input type="radio" name="ui-language" value={option.value} checked={snapshot.preference === option.value} disabled={busy} onChange={() => void change(option.value)} />
         <span>{option.label}</span>
       </label>)}

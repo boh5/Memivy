@@ -13,7 +13,7 @@ async function setup(t,state){
 }
 test('an existing shared model can be enabled without another download',async t=>{
  const {button}=await setup(t,{...initial,state:'disabled',downloaded:initial.bytes});
- assert.equal(button('启用语义检索').props.disabled,false);
+ assert.equal(button("Enable Semantic search").props.disabled,false);
 });
 test('confirmed model preparation continues after closing its settings',async t=>{
  const {f,view,props,button}=await setup(t,{...initial});
@@ -21,9 +21,9 @@ test('confirmed model preparation continues after closing its settings',async t=
   assert.equal(args.kind,'embedding');assert.equal(args.confirmed,true);assert.equal(args.binding.source,'local');
   props.embedding={...initial,preparing:true,state:'downloading'};return props.models;
  };
- button('下载并启用').props.onClick();await f.settle();
+ button("Download and enable").props.onClick();await f.settle();
  assert(!f.calls.some(c=>c.name==='models_apply'));
- button('确认并开始').props.onClick();await f.settle();
+ button("Confirm and start").props.onClick();await f.settle();
  assert(f.nodes(view.tree).some(n=>n.type==='progress'));
  f.unmount(view);
  assert.equal(f.calls.filter(c=>c.name==='models_apply').length,1);
@@ -34,15 +34,15 @@ test('paused downloads resume without a new model choice and failures remain ret
  f.overrides.embedding_control=async({action})=>{
   assert.equal(action,'resume');props.embedding={...props.embedding,paused:false,state:'failed',error:'model_cache_mismatch'};
  };
- button('继续').props.onClick();await f.settle();
- assert.equal(button('重试').props.disabled,false);
+ button("Resume").props.onClick();await f.settle();
+ assert.equal(button("Retry").props.disabled,false);
  assert(!f.calls.some(c=>c.name==='models_apply'));
 });
 test('partial indexing failures expose a count and retry on the active capability page',async t=>{
  const {f,view,button}=await setup(t,{...initial,enabled:true,state:'ready',processed:9,total:10,failed:1});
  f.overrides.embedding_control=async({action})=>assert.equal(action,'retry');
- assert(f.text(view.tree).includes('1 条记忆未完成处理'));
- button('重试').props.onClick();await f.settle();
+ assert(f.text(view.tree).includes("1 memory could not be processed"));
+ button("Retry").props.onClick();await f.settle();
  assert.equal(f.calls.filter(c=>c.name==='embedding_control').length,1);
 });
 
@@ -50,6 +50,6 @@ for(const state of ['indexing','paused','disabled'])test(`partial failures prese
  const preparing=state!=='disabled',paused=state==='paused';
  const {f,props,button}=await setup(t,{...initial,state,preparing,paused,failed:1,processed:1,total:10});
  const {indexLabel}=f.load('src/workspace/modelTypes.ts');
- assert.equal(indexLabel(props.embedding),state==='indexing'?'正在准备记忆搜索':paused?'已暂停':'已关闭');
- assert.equal(button(state==='indexing'?'暂停':paused?'继续':'下载并启用').props.disabled,false);
+ assert.equal(indexLabel(props.embedding),state==='indexing'?"Preparing memories for search":paused?"Paused":"Disabled");
+ assert.equal(button(state==='indexing'?"Pause":paused?"Resume":"Download and enable").props.disabled,false);
 });

@@ -602,7 +602,7 @@ mod tests {
     fn model_switch_rejects_inflight_vectors_and_supports_new_dimensions() {
         use crate::models::{Binding, Connection, Registry, Source};
         let (d, s) = setup();
-        capture(&s, "保留原文，切换模型测试");
+        capture(&s, "Preserve original text while switching models");
         s.embedding_step_with(|_| Ok(vector())).unwrap();
         let mut r = Registry::default();
         r.connections.push(Connection {
@@ -702,13 +702,13 @@ mod tests {
     #[test]
     fn edits_discard_inflight_vectors_and_changes_are_incremental() {
         let (_d, s) = setup();
-        let m = capture(&s, "旧内容");
+        let m = capture(&s, "Old content");
         s.embedding_step_with(|_| {
             s.edit_memory(&EditRequest {
                 request_id: id(),
                 memory_id: m.memory_id.clone(),
                 expected_version: m.version_id.clone(),
-                title: "新内容".into(),
+                title: "New content".into(),
                 body: "changed current body".into(),
             })
             .unwrap();
@@ -736,7 +736,7 @@ mod tests {
             request_id: id(),
             memory_id: m.memory_id.clone(),
             expected_version: v.id,
-            title: "新内容".into(),
+            title: "New content".into(),
             body: "newer current body".into(),
         })
         .unwrap();
@@ -776,7 +776,10 @@ mod tests {
     #[test]
     fn application_restore_discards_vectors_and_invalidates_index_revision() {
         let (dir, store) = setup();
-        let saved = capture(&store, "恢复后保留原文，向量重新建立");
+        let saved = capture(
+            &store,
+            "Preserve original text after restore and rebuild vectors",
+        );
         store.embedding_step_with(|_| Ok(vector())).unwrap();
         let before = meta(&store.connection().unwrap())
             .unwrap()
@@ -805,7 +808,7 @@ mod tests {
         }
         assert_eq!(
             restored.capture_by_id(&saved.capture_id).unwrap().text,
-            "恢复后保留原文，向量重新建立"
+            "Preserve original text after restore and rebuild vectors"
         );
         restored.check_integrity().unwrap();
     }

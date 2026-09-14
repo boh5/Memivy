@@ -82,7 +82,7 @@ fn pins_collections_and_restore_preserve_content_and_original_identity() {
             request_id: id(),
             expected_version: s.memory(&raw.id).unwrap().current.id,
             memory_id: raw.id.clone(),
-            title: "整理标题".into(),
+            title: "Organized title".into(),
             body: "整理正文".into(),
         })
         .unwrap();
@@ -151,13 +151,13 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     ));
     assert!(s.save_collection(&id(), "面试准备", "", None).is_err());
     let topic = id();
-    s.create_scoped_conversation(&topic, "聊聊", Some(&c))
+    s.create_scoped_conversation(&topic, "Discussion", Some(&c))
         .unwrap();
     assert_eq!(
         s.conversation(&topic).unwrap().collection_id.as_deref(),
         Some(c.as_str())
     );
-    assert!(s.create_conversation(&topic, "聊聊").is_err());
+    assert!(s.create_conversation(&topic, "Discussion").is_err());
     s.archive_collection(&c, true, 2).unwrap();
     assert!(
         s.search(&SearchRequest {
@@ -243,7 +243,7 @@ fn explicit_topic_search_filters_before_ranking_and_keeps_history_separate() {
 fn collection_list_and_recommendation_exclusion_apply_before_limit() {
     let (_d, s) = setup();
     let (member, _) = memory(&s, "相关内容 较早");
-    let c = collection(&s, "专题");
+    let c = collection(&s, "Collection");
     s.collect_record(&c, &member, true).unwrap();
     for _ in 0..45 {
         memory(&s, "相关内容 无关专题");

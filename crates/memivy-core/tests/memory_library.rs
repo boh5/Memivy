@@ -173,7 +173,7 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
         context: vec![],
         key: format!("memory:{}", raw.memory_id),
         request_id: id(),
-        title: "手动标题".into(),
+        title: "Manual title".into(),
         body: "当前编辑的内容".into(),
         expected_version: Some(raw.version_id.clone()),
         origin: None,

@@ -17,7 +17,7 @@ fn main() {
     let seeded = seed(&store, &fixture);
     let topic = id();
     store
-        .create_conversation(&topic, "木桥 · 固定讨论")
+        .create_conversation(&topic, "Woodbridge: pinned discussion")
         .unwrap();
     let input = id();
     let attempt = id();
@@ -26,7 +26,7 @@ fn main() {
             &input,
             &attempt,
             &topic,
-            "木桥现在先做什么？",
+            "What should Woodbridge do first?",
             &[seeded.records["history"].clone()],
             None,
         )
@@ -35,7 +35,7 @@ fn main() {
         .append_agent_text(
             &input,
             &attempt,
-            "木桥现在先做桌面端。可以先验证首次记录后能否找回。",
+            "Woodbridge will start with the desktop app. First check whether users can find their first saved note again.",
         )
         .unwrap();
     store

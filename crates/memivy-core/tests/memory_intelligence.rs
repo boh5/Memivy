@@ -328,7 +328,7 @@ fn explicit_selected_text_appends_exactly_and_never_schedules_organization() {
     let topic = id();
     store.create_conversation(&topic, "合成讨论").unwrap();
     let run = store
-        .begin_agent_input(&id(), &id(), &topic, "继续讨论", &[], None)
+        .begin_agent_input(&id(), &id(), &topic, "Continue discussion", &[], None)
         .unwrap();
     store
         .append_agent_text(&run.input_id, &run.attempt_id, "尚未保存的建议")

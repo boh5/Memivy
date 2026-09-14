@@ -24,20 +24,20 @@ test('background detail refresh keeps the reading toolbar enabled',async t=>{
  const view=f.mount(Detail,props);await f.settle();
  f.overrides.library_detail=()=>new Promise(()=>{});
  f.render(view,{...props,revision:1});await f.settle();
- assert.equal(f.find(view,n=>n.props.label==='编辑正文').props.disabled,false);
- assert.equal(f.find(view,n=>n.props.label==='整理正文').props.disabled,false);
+ assert.equal(f.find(view,n=>n.props.label==="Edit body").props.disabled,false);
+ assert.equal(f.find(view,n=>n.props.label==="Clean up body").props.disabled,false);
 });
 
 test('related results and selection survive refresh, but vanish when the source or scope changes',async t=>{
  const f=workspaceFixture(t),Related=f.load('src/workspace/RelatedMemories.tsx').default;
- const row={memory_id:'b',version_id:'bv',title:'相关内容',snippet:'片段',source:{kind:'version',id:'bv'}};
+ const row={memory_id:'b',version_id:'bv',title:"Related content",snippet:"Excerpt",source:{kind:'version',id:'bv'}};
  f.overrides.memory_related=()=>[row];
  const props={memoryId:'a',versionId:'av',revision:0,onOpen(){},onDiscuss(){}};
  const view=f.mount(Related,props);await wait();await f.settle();
  f.find(view,n=>n.type==='input').props.onChange({target:{checked:true}});await f.settle();
  let finish;f.overrides.memory_related=()=>new Promise(resolve=>{finish=resolve;});
  f.render(view,{...props,revision:1});await f.settle();
- assert(f.text(view.tree).includes('相关内容'));
+ assert(f.text(view.tree).includes("Related content"));
  assert.equal(f.find(view,n=>n.type==='input').props.checked,true);
  await wait();finish([]);await f.settle();assert.equal(f.find(view,n=>n.type==='input').props.checked,true);
  f.overrides.memory_related=()=>[row];f.render(view,{...props,revision:2});await wait();await f.settle();
@@ -61,10 +61,10 @@ test('transient detail failure retains reading content; explicit unavailability 
  const view=f.mount(Detail,props);await f.settle();
  f.overrides.library_detail=()=>Promise.reject({code:'busy'});
  f.render(view,{...props,revision:1});await f.settle();
- assert(f.nodes(view.tree).some(n=>n.props.label==='编辑正文'));
+ assert(f.nodes(view.tree).some(n=>n.props.label==="Edit body"));
  f.overrides.library_detail=()=>Promise.reject({code:'unavailable'});
  f.render(view,{...props,revision:2});await f.settle();
- assert(!f.nodes(view.tree).some(n=>n.props.label==='编辑正文'));
+ assert(!f.nodes(view.tree).some(n=>n.props.label==="Edit body"));
 });
 test('desktop state rejects a late snapshot after a newer native event',async t=>{
  const f=workspaceFixture(t,{native:true});let finish;
@@ -85,7 +85,7 @@ test('a background head change preserves the displayed version until explicitly 
  f.overrides.library_detail=()=>document('v2');
  f.render(view,{...props,revision:1});await f.settle();
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text==='body v1'));
- f.find(view,n=>n.type==='button'&&f.text(n)==='有新版本，查看').props.onClick();await f.settle();
+ f.find(view,n=>n.type==='button'&&f.text(n)==="New version available; view").props.onClick();await f.settle();
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text==='body v2'));
 });
 
@@ -93,7 +93,7 @@ test('the explicit list refresh button still retries after global revision remov
  const f=workspaceFixture(t),List=f.load('src/workspace/MemoryList.tsx').default;
  const view=f.mount(List,{trash:false,active:true,selected:null,onSelect(){},onCapture(){},onRefresh(){}});await f.settle();
  const before=f.calls.filter(call=>call.name==='library_query').length;
- f.find(view,n=>n.props['aria-label']==='刷新记忆列表').props.onClick();await f.settle();
+ f.find(view,n=>n.props['aria-label']==="Refresh memory list").props.onClick();await f.settle();
  assert.equal(f.calls.filter(call=>call.name==='library_query').length,before+1);
 });
 

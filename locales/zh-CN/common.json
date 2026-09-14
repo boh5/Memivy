@@ -9,5 +9,7 @@
   "closeNotice": "关闭提示",
   "sourceDiscussion": "讨论中记下",
   "sourceConclusion": "确认的讨论结论",
-  "sourceCapture": "原始记录"
+  "sourceCapture": "原始记录",
+  "languageChinese": "简体中文",
+  "languageEnglish": "English"
 }

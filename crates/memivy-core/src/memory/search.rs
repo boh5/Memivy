@@ -305,7 +305,7 @@ fn search_in(
                 }
                 Err(_) => {
                     scores = lexical_scores;
-                    degraded_reason = Some("向量检索超过预算或不可用，本次使用字面结果".into());
+                    degraded_reason = Some("Vector search exceeded its budget or is unavailable; using keyword results".into());
                     // An interrupted vector scan must not cancel bounded reads
                     // of lexical evidence already selected successfully.
                     db.progress_handler(0, None::<fn() -> bool>)?;
@@ -313,7 +313,7 @@ fn search_in(
             }
         } else {
             scores = lexical_scores;
-            degraded_reason = Some("索引配置已变化，本次使用字面结果".into());
+            degraded_reason = Some("Index configuration changed; using keyword results".into());
         }
     }
     let mut ranked: Vec<_> = scores.into_iter().collect();

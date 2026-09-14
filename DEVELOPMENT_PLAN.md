@@ -1077,3 +1077,47 @@ Astra 首轮发现五组问题：本地语音标签、恢复结果中文、错�
 - 尚未验证：首次 GitHub Actions 实跑、另一台 Mac 从浏览器下载安装与 Gatekeeper 放行、完整最终包原生输入/语音/升级验收。专用合成预览包已构建，原生 UI 工具多次超时，未取得正式截图；截图和外机验收待补，不使用构建成功代替。
 
 证据：`research/core-tests/20260914T112037Z-362353e8/`（第一次 suite），`/private/tmp/memivy-release-ui-verified.log`，`/private/tmp/memivy-release-complete-build.log`，`/private/tmp/memivy-release-{npm-audit,rust-audit,gitleaks,worktree-leaks}.json`；临时源码验证 `/private/tmp/memivy-source-{install,build}.log`。对外操作与最终安装验收仍按 docs/RELEASING.md 执行。
+
+
+## 2026-09-14 English source and repository guidance
+
+- Converted project-authored source, comments, prompts, errors, scripts, ordinary test examples and executable demos to English. Preserved localized UI catalogs and moved necessary multilingual/Unicode payloads into dedicated data fixtures without changing their original text. User libraries were not modified.
+- Localized editor placeholders, language labels and native export dialog text. Expanded the existing language check to repository code, with regression checks that reject executable files hidden under fixture or locale directories.
+- Replaced the chronological AGENTS.md with current scope, language, data, UI, verification and release rules. Historical implementation evidence remains here. Independent reviews found and resolved missing fixture references, an export assertion tied to original input and omitted manual collection membership guidance.
+- Verification: repository language check, diff check, Rust formatting and all-target Clippy passed. The full core-assets run passed all 241 UI tests, frontend build, harness build and all process checks; its initial Rust failure is retained in research/core-tests/20260914T131842Z-ae98e546. After fixes, workspace all-target tests passed (264 passed, 2 ignored); backup/restore concurrency checks also passed.
+- Built an ad-hoc signed isolated native QA app and verified its actual temporary database path before interacting. Native Chinese/English switching and saving mixed-language original input passed; screenshots confirmed readable native and demo layouts. This was pasted input, not physical IME, microphone, global-hotkey or installation acceptance.
+- Real-model review of record/question, global focus and state changes confirmed English system requests with Chinese replies and saved content, valid global-memory citations, preserved original captures and correct tentative/decided/executed distinctions. One malformed source ID was rejected and corrected on retry; verbosity and per-part source granularity remain model-quality observations. No translation-related engineering defect was found. Evidence is under ignored research/english-code/model-check.
+- The real-model pause scenario did not pass: the model mapped a continuing pause request to pause_this_turn, then wrote a tentative idea on the next turn. Independent comparison with the original prompt confirmed the continuing-pause rule was preserved in English; the actual tool call chose the wrong scope. Record this as unwanted persistence in synthetic data, not a passing pause check or a demonstrated translation defect. No semantic classifier or unrelated agent behavior change was added.
+- All four real-model cases completed (15 turns). Final all-target tests: 264 passed, 2 ignored; UI tests: 241 passed. No commit, push or release was performed.
+
+
+## 2026-09-14 Settings copy refinement
+
+Updated English and Chinese settings copy and the settings demo: AI assistant naming, local/API choices, floating button, voice model unloading, reasoning controls, restore wording and keyword/semantic search terminology. Clarified that automatic note organization does not disable memory updates during chats. Kept data-sharing information visible and moved semantic-search details into an expandable explanation. No model, storage or permission behavior changed.
+
+Validation: frontend build, repository language check, demo JavaScript syntax and diff check passed; 52 related settings, voice and localization tests passed. Browser checks covered English AI settings, Chinese settings and external access, and the updated demo. Native packaging and model calls were not rerun for this copy-only change. No commit or push.
+
+
+## 2026-09-14 Development startup recovery
+
+Confirmed startup abort: the existing default library still had development schema 17 while the public baseline accepts schema 1. A synthetic schema-17 database reproduced Tauri setup panic and exit 134. Development commands now default to a separate persistent com.memivy.app.dev directory; explicit MEMIVY_DATA_DIR overrides remain supported, and the old library is retained. Library initialization/recovery stays after single-instance admission and handles failure explicitly instead of returning an error into Tauri's native setup callback.
+
+Validation: default npm run dev:app started and remained running; lsof confirmed the development database path. A second launch returned successfully without opening its incompatible test library. With no first instance, the incompatible fixture now exits 1 with a clear error, no panic, and unchanged schema/tables. Native all-target Clippy, formatting, language and diff checks passed. Independent review caught and resolved an initial recovery-ordering risk before final verification. The unbundled dev executable was unavailable to the UI automation app selector, so no visual window acceptance is claimed. No old data was deleted or migrated; no commit or push.
+
+The user subsequently explicitly requested deletion of the old library. Verified that its schema was 17 and no process held it open, then removed the old memivy.db and checked for SQLite side files. Model configuration and shared model downloads were retained.
+
+
+## 2026-09-14 Inline multilingual test samples
+
+The user corrected the English-only rule: necessary Chinese test and diagnostic samples belong directly in code. Removed fixture maps, small sample files and lookup/formatting wrappers created solely to move Chinese out of source; retained existing shared corpora and language cases. Restored the focused UI/catalog i18n check instead of banning Chinese throughout tests. AGENTS.md now requires stopping for user input on major problems, requirement conflicts or substantial changes to the agreed approach.
+
+Validation: independent review passed; all-target Rust tests passed (264 passed, 2 ignored), followed by 64 focused tests after final cleanup. Frontend tests passed (239 total; the sandbox-blocked file-watcher test passed outside the sandbox), and the final Markdown test passed. Formatting, Clippy, i18n and diff checks passed. No app behavior change, commit or push.
+
+
+## 2026-09-14 Full change review and leftover cleanup
+
+Reviewed the full pending diff in three independent scopes: production runtime, tests/process scripts, and UI/demo/documentation. Removed the unnecessary memory/locales vocabulary files and restored the original inline arrays; also removed empty extraction directories. Cleaned remaining formatting-only test churn, restored real Chinese in samples marked CJK, and corrected demo grammar and search terminology. Model compatibility failures now state that the check failed rather than claiming the model definitively lacks a capability. No new directory, data loader or product behavior was introduced.
+
+Independent reviews found no further confirmed runtime regression. Frontend build, strict all-target Clippy, i18n, syntax and diff checks passed; 58 focused UI tests and the 7 model-settings tests passed. Full all-target Rust regression passed (264 passed, 2 ignored); evidence is in /private/tmp/memivy-full-review-rust.log. No commit or push.
+
+The user rejected automatically overriding the development data directory. Reverted the launcher change completely, removed the new startup-message suggestion, and changed README commands to plain npm run dev:app. The existing explicit override remains because MCP and restore process tests use it for isolation; existing MCP library routing is unchanged. Native dev startup passed with the normal com.memivy.app database path verified via lsof. Launcher checks, formatting, i18n and diff checks passed.

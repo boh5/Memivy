@@ -111,7 +111,7 @@ fn changed_or_new_draft_and_version_conflicts_fail_closed() {
             request_id: id(),
             memory_id: baseline.memory_id,
             expected_version: baseline.expected_version,
-            title: "新版".into(),
+            title: "New version".into(),
             body: "其他修改".into(),
         })
         .unwrap();
@@ -196,7 +196,7 @@ fn reviewed_provenance_is_immutable_and_undo_refuses_later_edits() {
             request_id: id(),
             memory_id: snapshot.memory_id.clone(),
             expected_version: receipt.after_version.clone().unwrap(),
-            title: "新版".into(),
+            title: "New version".into(),
             body: "之后的修改".into(),
         })
         .unwrap();

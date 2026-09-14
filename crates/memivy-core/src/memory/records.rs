@@ -165,7 +165,7 @@ pub(super) fn create_captured_memory(
         .text
         .lines()
         .find(|s| !s.trim().is_empty())
-        .unwrap_or("新记忆")
+        .unwrap_or("New memory")
         .trim()
         .chars()
         .take(45)
@@ -417,7 +417,7 @@ pub(super) fn resolve_excerpt(
     let (title, text, recorded_at, current): (String, String, i64, bool) = match source {
         SourceRef::Capture(id) => {
             let c = raw(db, id)?;
-            ("原始记录".into(), c.text, c.created_at, true)
+            ("Original capture".into(), c.text, c.created_at, true)
         }
         SourceRef::Version(id) => db.query_row(
             "SELECT v.title,v.body,v.created_at,v.id=m.current_version_id FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=? AND m.state='active' AND v.body IS NOT NULL",

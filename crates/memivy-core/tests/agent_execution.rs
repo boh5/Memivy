@@ -10,7 +10,9 @@ fn setup() -> (tempfile::TempDir, MemoryStore, String) {
     let root = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(root.path()).unwrap();
     let conversation = id();
-    store.create_conversation(&conversation, "讨论").unwrap();
+    store
+        .create_conversation(&conversation, "Discussion")
+        .unwrap();
     (root, store, conversation)
 }
 fn begin(store: &MemoryStore, conversation: &str, text: &str) -> AgentExecution {
@@ -46,7 +48,7 @@ fn write(
 ) -> AgentOperation {
     let request = MemoryWriteArgs {
         destination,
-        title: "计划".into(),
+        title: "Plan".into(),
         parts: vec![sourced_part(body, &run.user_message_id, &run.input_text)],
     };
     let name = "write_memory";
@@ -61,7 +63,7 @@ fn captured(store: &MemoryStore, text: &str) -> CaptureResult {
             request_id: id(),
             text: text.into(),
             origin: Origin::User {
-                app: "测试".into(),
+                app: "Test app".into(),
                 project: None,
                 uri: None,
             },
@@ -178,9 +180,9 @@ fn stale_attempt_cannot_write_complete_read_results_or_append_text() {
     let old = begin(&store, &conversation, "我有一个想法");
     let request = MemoryWriteArgs {
         destination: Destination::New,
-        title: "想法".into(),
+        title: "Idea".into(),
         parts: vec![sourced_part(
-            "新想法",
+            "New idea",
             &old.user_message_id,
             &old.input_text,
         )],
@@ -369,16 +371,16 @@ fn grouped_undo_restores_all_memories_memberships_and_multiple_updates_to_one_me
     let (_root, store, conversation) = setup();
     let collection = id();
     store
-        .save_collection(&collection, "专题", "", None)
+        .save_collection(&collection, "Collection", "", None)
         .unwrap();
     // Use the public scoped conversation entry with the same ordinary execution API.
     let scoped = id();
     store
-        .create_scoped_conversation(&scoped, "专题讨论", Some(&collection))
+        .create_scoped_conversation(&scoped, "Collection discussion", Some(&collection))
         .unwrap();
     let before = captured(&store, "原先计划");
     let run = begin(&store, &scoped, "修改计划并增加想法");
-    let created = write(&store, &run, Destination::New, "新的想法")
+    let created = write(&store, &run, Destination::New, "New idea")
         .receipt
         .unwrap();
     let updated = write(
@@ -647,7 +649,7 @@ fn persisted_summary_uses_same_conversation_sequence_and_undo_invalidates_it() {
         .finish_agent_input(&run.input_id, &run.attempt_id, true, &[])
         .unwrap();
     let through = store.turn(&run.input_id).unwrap().assistant.seq;
-    let next = begin(&store, &conversation, "继续讨论");
+    let next = begin(&store, &conversation, "Continue discussion");
     let revision = store
         .agent_conversation_context(&conversation)
         .unwrap()
@@ -966,11 +968,11 @@ fn explicit_save_reuses_receipts_and_can_undo_membership_after_conversation_dele
     let (_root, store, _) = setup();
     let collection = id();
     store
-        .save_collection(&collection, "专题", "", None)
+        .save_collection(&collection, "Collection", "", None)
         .unwrap();
     let conversation = id();
     store
-        .create_scoped_conversation(&conversation, "讨论", Some(&collection))
+        .create_scoped_conversation(&conversation, "Discussion", Some(&collection))
         .unwrap();
     let run = begin(&store, &conversation, "给我一个建议");
     store
@@ -1025,7 +1027,7 @@ fn explicit_save_reuses_receipts_and_can_undo_membership_after_conversation_dele
 fn undo_fences_an_inflight_producer_and_never_retries_its_reversed_writes() {
     let (_root, store, conversation) = setup();
     let run = begin(&store, &conversation, "记下这个想法");
-    write(&store, &run, Destination::New, "想法");
+    write(&store, &run, Destination::New, "Idea");
     let request = MemoryWriteArgs {
         destination: Destination::New,
         title: "第二条".into(),
@@ -1083,8 +1085,8 @@ fn manual_membership_change_blocks_whole_undo_without_removing_that_change() {
     store
         .save_collection(&collection, "后来加入", "", None)
         .unwrap();
-    let run = begin(&store, &conversation, "新想法");
-    let created = write(&store, &run, Destination::New, "新想法")
+    let run = begin(&store, &conversation, "New idea");
+    let created = write(&store, &run, Destination::New, "New idea")
         .receipt
         .unwrap();
     let memory = created.memory_id.unwrap();
@@ -1114,12 +1116,12 @@ fn execution_requires_the_persisted_tool_boundary_and_preserves_it_for_retry() {
                 &run.attempt_id,
                 "unpersisted",
                 "search_memories",
-                &json!({"query":"计划"})
+                &json!({"query":"Plan"})
             )
             .unwrap_err(),
         DataError::Invalid
     );
-    let op = stage(&store, &run, "search_memories", &json!({"query":"计划"}));
+    let op = stage(&store, &run, "search_memories", &json!({"query":"Plan"}));
     assert_eq!(
         store
             .checkpoint_agent(&run.input_id, &run.attempt_id, &[])
@@ -1151,7 +1153,7 @@ fn execution_requires_the_persisted_tool_boundary_and_preserves_it_for_retry() {
 fn optional_followups_cannot_downgrade_completion_or_accept_stale_attempts() {
     let (_root, store, conversation) = setup();
     let run = begin(&store, &conversation, "讨论新的想法");
-    write(&store, &run, Destination::New, "新想法");
+    write(&store, &run, Destination::New, "New idea");
     store
         .append_agent_text(&run.input_id, &run.attempt_id, "完整回答")
         .unwrap();
@@ -1219,7 +1221,7 @@ fn retry_restores_original_quick_source_and_material_fingerprint() {
     let resumed = store.retry_agent_input(&run.input_id, &id()).unwrap();
     assert_eq!(resumed.user_message_id, run.user_message_id);
     assert_eq!(resumed.focused_memory_ids, focused);
-    let receipt = write(&store, &resumed, Destination::New, "新想法")
+    let receipt = write(&store, &resumed, Destination::New, "New idea")
         .receipt
         .unwrap();
     assert!(

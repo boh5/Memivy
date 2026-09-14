@@ -33,5 +33,6 @@
   "deleteCol": "Delete column",
   "alignLeft": "Align left",
   "alignCenter": "Align center",
-  "alignRight": "Align right"
+  "alignRight": "Align right",
+  "emptyPlaceholder": "Continue your thoughts here…"
 }

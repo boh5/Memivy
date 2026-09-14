@@ -78,37 +78,37 @@ def check(binary):
             temp.write_text(json.dumps({"enabled":enabled}))
             temp.chmod(0o600)
             temp.replace(data/"mcp.json")
-        args = {"request_id":str(uuid.uuid4()),"text":"明确授权保存 MCP 合成证据\n原话不能改写。", "source_app":"Synthetic Agent","project":"测试项目","session_uri":"https://example.test/session"}
+        args = {"request_id":str(uuid.uuid4()),"text":"Explicitly authorized MCP synthetic evidence\nOriginal words must not be rewritten.", "source_app":"Synthetic Agent","project":"Test project","session_uri":"https://example.test/session"}
         names = sorted(t["name"] for t in client.call("tools/list")["tools"])
         assert names == ["memory_capture", "memory_search"]
         switch(False)
-        for name, payload in [("memory_capture",args),("memory_search",{"query":"合成证据"})]:
+        for name, payload in [("memory_capture",args),("memory_search",{"query":"synthetic evidence"})]:
             assert client.tool(name,payload,failed=True)["code"] == "mcp_disabled"
         switch(True)
         receipt = client.tool("memory_capture",args)
         assert client.tool("memory_capture",args)["capture_id"] == receipt["capture_id"]
-        assert client.tool("memory_capture",{**args,"text":"不一致重试"},failed=True)["code"] == "request_conflict"
-        hit = client.tool("memory_search",{"query":"合成证据"})["items"][0]
+        assert client.tool("memory_capture",{**args,"text":"Conflicting retry"},failed=True)["code"] == "request_conflict"
+        hit = client.tool("memory_search",{"query":"synthetic evidence"})["items"][0]
         assert hit["record"]["id"] == receipt["memory_id"]
-        assert hit["origin"]["project"] == "测试项目"
-        assert client.call("tools/call", {"name":"memory_search","arguments":{"query":"合成证据","trash":True}})["isError"]
+        assert hit["origin"]["project"] == "Test project"
+        assert client.call("tools/call", {"name":"memory_search","arguments":{"query":"synthetic evidence","trash":True}})["isError"]
         client.call("tools/call", {"name":"memory_delete","arguments":{}},error=True)
-        for payload in [{"query":""},{"query":"合成","limit":9},{"query":"合成","limit":0}]:
+        for payload in [{"query":""},{"query":"synthetic","limit":9},{"query":"synthetic","limit":0}]:
             assert client.tool("memory_search",payload,failed=True)["code"] == "invalid_input"
         # Acknowledged transaction survives abrupt MCP process death.
         client.close(kill=True)
         client = Client(binary,data,latest=True)
-        assert client.tool("memory_search",{"query":"合成证据"})["items"][0]["record"]["id"] == receipt["memory_id"]
+        assert client.tool("memory_search",{"query":"synthetic evidence"})["items"][0]["record"]["id"] == receipt["memory_id"]
         switch(False)
-        assert client.tool("memory_search",{"query":"合成证据"},failed=True)["code"] == "mcp_disabled"
+        assert client.tool("memory_search",{"query":"synthetic evidence"},failed=True)["code"] == "mcp_disabled"
         switch(True)
         # Independent MCP processes and native core write concurrently. Identical
         # retries across processes must still produce a single durable capture.
-        shared = {**args,"request_id":str(uuid.uuid4()),"text":"并发幂等合成证据"}
+        shared = {**args,"request_id":str(uuid.uuid4()),"text":"Concurrent idempotent synthetic evidence"}
         def writer(n):
             if n % 3 == 0:
                 probe = Path(os.environ.get('MEMIVY_TEST_PROBE', ROOT/'target/debug/examples/memory_probe'))
-                p = subprocess.run([str(probe),str(data),'capture',str(uuid.uuid4()),f'应用侧并发原话 {n}'],capture_output=True,text=True,timeout=12)
+                p = subprocess.run([str(probe),str(data),'capture',str(uuid.uuid4()),f'Concurrent original text from the app {n}'],capture_output=True,text=True,timeout=12)
                 assert p.returncode == 0, p.stderr
                 return None
             c = Client(binary,data,latest=bool(n%2))

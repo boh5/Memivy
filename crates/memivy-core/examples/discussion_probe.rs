@@ -122,7 +122,7 @@ async fn main() {
                 ] {
                     turns.push(ask(&s, &config, &topic, text, &focus).await);
                 }
-                rubric.push_str("第一轮只记录考虑中的想法，简短回执record_only=true；第二轮只回忆不新增事实；第三轮记录访谈3人决定但未执行，并自然回答且2-3条建议。无必需确认。");
+                rubric.push_str("Turn 1 saves only a tentative idea with a brief record_only=true receipt. Turn 2 recalls without new facts. Turn 3 saves the decision to interview three people as not yet executed and gives two or three suggestions. No mandatory confirmation.");
             }
             "global_focus" => {
                 let product = seed(
@@ -169,8 +169,17 @@ async fn main() {
                     )
                     .await,
                 );
-                turns.push(ask(&s, &config, &scoped, "补充一个限制：必须离线处理，不能上传访谈录音。按这个限制调整刚才的第一步。", &[]).await);
-                rubric.push_str("指定材料与专题两入口首次Agent请求前均已带全局10小时/5000元；答案实际使用并真实引用，不替用户作决定。后续新增离线/不上传限制及时记录并约束回答。");
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &scoped,
+                        "补充一个限制：必须离线处理，不能上传访谈录音。按这个限制调整刚才的第一步。",
+                        &[],
+                    )
+                    .await,
+                );
+                rubric.push_str("Both focused-material and collection entry points include the global 10-hour and CNY 5,000 constraints before the first Agent request. Answers must use and cite them without deciding for the user. The later offline/no-upload constraint must be saved and applied.");
             }
             "state_changes" => {
                 s.create_conversation(&topic, "收费决定").unwrap();
@@ -182,7 +191,7 @@ async fn main() {
                 ] {
                     turns.push(ask(&s, &config, &topic, text, &focus).await);
                 }
-                rubric.push_str("考虑→决定收费→尚未上线收款，朋友意见不变成用户决定，最终79元且保留未执行状态，纠正影响记忆及回答。");
+                rubric.push_str("Preserve tentative, decided, and not-yet-launched/paid states. A friend's advice must not become the user's decision. Correct the annual price to CNY 79 in memory and answers while retaining the unexecuted state.");
             }
             "pause" => {
                 seed(
@@ -200,17 +209,26 @@ async fn main() {
                 ] {
                     turns.push(ask(&s, &config, &topic, text, &focus).await);
                 }
-                rubric.push_str("第一轮无写入，第二轮正常记；第三/四轮持续暂停但仍召回已有6小时产品探索限制，第四轮回答实际使用；第五明确恢复保存真实决定，设想放弃不作为事实。");
+                rubric.push_str("Turn 1 makes no writes; turn 2 saves normally. Turns 3 and 4 remain paused but recall the existing six-hour exploration limit, which turn 4 uses. Turn 5 explicitly resumes saving the real decision; hypothetical abandonment is not a fact.");
             }
             "topic" => {
                 let outside = seed(&s, "我的资源计划", "每周个人项目最多10小时，不能额外投入。");
                 let collection = id();
                 s.save_collection(&collection, "新产品", "访谈整理", None)
                     .unwrap();
-                s.create_scoped_conversation(&topic, "新想法", Some(&collection))
+                s.create_scoped_conversation(&topic, "New idea", Some(&collection))
                     .unwrap();
-                turns.push(ask(&s,&config,&topic,"新想法：先做访谈原话标注。另有个更正：我每周可投入的时间是8小时，之前记的10小时有误。请记好。",&focus).await);
-                rubric.push_str("新想法自动加入当前专题；专题外资源计划改8小时且保留其原成员关系；没有多余capture当前Memory/二次organizer。关键原计划ID:");
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "新想法：先做访谈原话标注。另有个更正：我每周可投入的时间是8小时，之前记的10小时有误。请记好。",
+                        &focus,
+                    )
+                    .await,
+                );
+                rubric.push_str("Add the new idea to the current collection. Update the outside resource plan to eight hours without changing its collection membership. Do not capture the current Memory or start a second organizer. Original plan ID: ");
                 rubric.push_str(&outside.memory_id);
             }
             "history" => {
@@ -221,7 +239,16 @@ async fn main() {
                 );
                 focus.push(c.memory_id);
                 s.create_conversation(&topic, "回顾变化").unwrap();
-                turns.push(ask(&s, &config, &topic, "现在我每周可以投入8小时，决定恢复木桥项目。把这个变化记下来，保留当初为什么暂停的原因。", &focus).await);
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "现在我每周可以投入8小时，决定恢复木桥项目。把这个变化记下来，保留当初为什么暂停的原因。",
+                        &focus,
+                    )
+                    .await,
+                );
                 turns.push(
                     ask(
                         &s,
@@ -232,7 +259,7 @@ async fn main() {
                     )
                     .await,
                 );
-                rubric.push_str("先由AI实际更新为每周8小时决定恢复，并在当前正文保留去年因2小时而非预算暂停的原因；随后实际读取历史/原话，回答保留去年/2小时/非预算/现在8小时，版本可打开。");
+                rubric.push_str("The Agent saves the decision to resume at eight hours per week, preserving last year's two-hour constraint rather than inventing a budget issue. It then reads historical/source evidence and answers with the old and current states and openable versions.");
             }
             "long_memory" => {
                 let c = seed(
@@ -255,7 +282,7 @@ async fn main() {
                     )
                     .await,
                 );
-                rubric.push_str("通过搜索/分段读取找到末尾，准确回答离线/4800元/不上传录音；引用确实覆盖对应文字，预算未溢出。");
+                rubric.push_str("Search and paginated reading must reach the ending and answer offline/CNY 4,800/no uploads accurately. Citations must cover those words and requests must stay within budget.");
             }
             "material_changes" => {
                 let first = seed(&s, "访谈工具条件", "访谈工具必须离线处理，不允许上传录音。");
@@ -322,9 +349,18 @@ async fn main() {
                 let scoped = id();
                 s.create_scoped_conversation(&scoped, "目录翻页", Some(&collection))
                     .unwrap();
-                turns.push(ask(&s, &config, &scoped, "请再翻一页这个专题目录，任选下一页的一条记忆，读取它的正文后告诉我其中安排访谈的时间条件，并引用原文。", &[]).await);
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &scoped,
+                        "请再翻一页这个专题目录，任选下一页的一条记忆，读取它的正文后告诉我其中安排访谈的时间条件，并引用原文。",
+                        &[],
+                    )
+                    .await,
+                );
                 dataset = json!({"first_memory_id":first.memory_id,"second_memory_id":second.memory_id,"collection_id":collection,"directory_count":directory.len(),"full_directory_bytes":full_directory_bytes});
-                rubric.push_str("同一会话三轮指定材料A→A+B→B，实际初始请求反映增减；移除只停止优先带入，不抹去历史。答案按实际正文准确引用离线/不上传/每周6小时/3600元，纯提问无事实写入。完整360条目录确实超预算，初始目录标记未完整且不是正文证据；真实工具翻到下一页并读取其中正文，回答仅周六可安排访谈且引用正文。每次请求完整预算由确定性wire测试另行核对。");
+                rubric.push_str("Focused materials change A to A+B to B within one conversation and initial requests reflect each change. Removing focus does not erase history. Answers accurately cite offline/no uploads/six hours/CNY 3,600; questions cause no fact writes. The full 360-item catalog exceeds budget and is marked incomplete, never treated as body evidence. The Agent pages forward and reads a body before citing the Saturday-only schedule. Deterministic wire tests check complete request budgets separately.");
             }
             "versioned_update" => {
                 let c = seed(
@@ -334,8 +370,17 @@ async fn main() {
                 );
                 focus.push(c.memory_id.clone());
                 s.create_conversation(&topic, "预算变化").unwrap();
-                turns.push(ask(&s, &config, &topic, "把Kappa试点预算改为3800元，其他条件不变。请引用原记忆说明预算怎么变了，保存后再搜索Kappa预算确认新金额。", &focus).await);
-                rubric.push_str("本轮读取v1并写v2；v1引用仍可打开且有5000，v2立即检索出3800，保留本机处理/未上线，无凭空新事实。删除来源不可用由确定性生命周期测试完成。");
+                turns.push(
+                    ask(
+                        &s,
+                        &config,
+                        &topic,
+                        "把Kappa试点预算改为3800元，其他条件不变。请引用原记忆说明预算怎么变了，保存后再搜索Kappa预算确认新金额。",
+                        &focus,
+                    )
+                    .await,
+                );
+                rubric.push_str("Read v1 and write v2 in this turn. The v1 citation remains openable with 5,000; v2 is immediately searchable with 3,800. Retain local processing and the not-launched state without invented facts. Deterministic lifecycle tests cover deleted sources.");
             }
             "compaction" => {
                 s.create_conversation(&topic, "持续讨论").unwrap();
@@ -381,7 +426,7 @@ async fn main() {
                     )
                     .await,
                 );
-                rubric.push_str("真实压缩summary_through_seq>0；保持8小时/4800/不上传/收费未决，纠正后3800不再把4800当当前，摘要未变Memory。");
+                rubric.push_str("Real compression must produce summary_through_seq > 0. Preserve eight hours/CNY 4,800/no uploads/undecided pricing; after correction use CNY 3,800 as current. Do not turn a conversation summary into Memory.");
             }
             _ => unreachable!(),
         }

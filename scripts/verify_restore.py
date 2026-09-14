@@ -17,7 +17,7 @@ def check():
         root = Path(tmp) / 'library'
         def run(*args):
             return subprocess.run([str(probe), str(root), *map(str,args)], check=True, capture_output=True, text=True).stdout
-        run('capture',str(uuid.uuid4()),'备份时的合成记录')
+        run('capture',str(uuid.uuid4()),'Synthetic record at backup')
         (root/'mcp.json').write_text('{"enabled":true}')
         snapshot=Path(tmp)/'chosen.db';run('backup',snapshot)
         prepared=json.loads(run('prepare-restore',snapshot))
@@ -27,7 +27,7 @@ def check():
             try:
                 for i in range(100):
                     if stop.is_set():break
-                    result=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':f'后续合成记录 {i}','source_app':'Restore QA'}})
+                    result=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':f'Subsequent synthetic record {i}','source_app':'Restore QA'}})
                     if result.get('isError'):break
                     saved.append(result['structuredContent']['capture_id']);first.set()
             except BaseException as error:
@@ -38,7 +38,7 @@ def check():
         # A newly launched MCP must fail before initializing or writing this database.
         newcomer=subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(root)},input='',capture_output=True,text=True,timeout=5)
         assert newcomer.returncode!=0 and newcomer.stdout=='',newcomer.stdout
-        blocked=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':'不应写入','source_app':'Restore QA'}})
+        blocked=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':'Must not be written','source_app':'Restore QA'}})
         assert blocked.get('isError'),blocked
         outcome=json.loads(run('open-application'));assert outcome['restored'],outcome
         before=sqlite3.connect(f"file:{outcome['previous_backup']}?mode=ro",uri=True)
@@ -51,7 +51,7 @@ def check():
             assert current.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         finally: before.close();current.close()
         # The already-connected stdio server follows the stable root after restore.
-        result=client.tool('memory_search',{'query':'备份时'})
+        result=client.tool('memory_search',{'query':'backup'})
         assert result['items'],result
         client.close()
         print(json.dumps({'live_mcp_writes_preserved':len(saved),'new_mcp_startup_blocked':True,'existing_mcp_blocked_during_restore':True,'existing_mcp_reuses_restored_library':True,'integrity':'ok'},ensure_ascii=False))

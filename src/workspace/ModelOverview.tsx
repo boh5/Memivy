@@ -29,6 +29,7 @@ export default function ModelOverview({ models, embedding, voice, disabled, onCo
         <div className="model-cap-icon"><Icon name={kind === "llm" ? "spark" : kind === "embedding" ? "search" : "mic"} size={21} /></div>
         <div className="model-cap-body">
           <h3 id={`model-${kind}`}>{t(modelNames[kind])}</h3>
+          {kind === "llm" && <p className="field-help">{t("capability.assistantDescription")}</p>}
           <div className="model-cap-meta">
             {model && <span className="model-cap-name">{model}</span>}
             <span className="model-cap-status">{status}</span>

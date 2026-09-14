@@ -9,5 +9,7 @@
   "closeNotice": "Dismiss notification",
   "sourceDiscussion": "Saved during discussion",
   "sourceConclusion": "Confirmed discussion conclusion",
-  "sourceCapture": "Original capture"
+  "sourceCapture": "Original capture",
+  "languageChinese": "简体中文",
+  "languageEnglish": "English"
 }

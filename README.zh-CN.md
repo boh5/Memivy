@@ -45,11 +45,10 @@ git clone https://github.com/boh5/memivy.git
 cd memivy
 npm ci
 cargo fetch --locked
-MEMIVY_DATA_DIR="$(mktemp -d /tmp/memivy-dev.XXXXXX)" npm run dev:app
+npm run dev:app
 ```
 
-上述命令会新建独立的开发资料库，不影响日常笔记；下载的模型仍使用 Memivy 共用缓存。
-如果之后要继续使用这个开发资料库，请记下临时目录路径。
+从源码运行时，数据同样保存在 `~/Library/Application Support/com.memivy.app/`。
 `npm run dev` 只启动浏览器预览，桌面应用请使用 `dev:app`。
 
 运行 `npm run build:release` 可生成 DMG，安装包和校验文件位于

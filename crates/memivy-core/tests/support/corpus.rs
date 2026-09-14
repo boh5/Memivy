@@ -117,7 +117,9 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
         })
         .unwrap();
     let topic = id();
-    store.create_conversation(&topic, "固定测试话题").unwrap();
+    store
+        .create_conversation(&topic, "Fixture conversation")
+        .unwrap();
     let turn = store
         .begin_agent_input(
             &id(),

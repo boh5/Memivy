@@ -50,12 +50,13 @@ pub(super) fn install(app: &tauri::AppHandle) -> HostResult<()> {
         let application: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
         let delegate: Retained<AnyObject> = msg_send![&*application, delegate];
         let mut builder = ClassBuilder::new(c"MemivyApplicationDelegate", delegate.class())
-            .ok_or("无法安装退出时的草稿保护")?;
+            .ok_or("Cannot install draft protection on exit")?;
         builder.add_method(
             sel!(applicationShouldTerminate:),
             should_terminate as extern "C-unwind" fn(_, _, _) -> _,
         );
-        APP.set(app.clone()).map_err(|_| "退出保护已初始化")?;
+        APP.set(app.clone())
+            .map_err(|_| "Exit protection is already initialized")?;
         AnyObject::set_class(&delegate, builder.register());
         // Refresh AppKit's cached optional delegate-method availability.
         let _: () = msg_send![&*application, setDelegate: &*delegate];

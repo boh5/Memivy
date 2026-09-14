@@ -1024,7 +1024,9 @@ async fn memory_export(
         })
         .collect();
     let name = name.trim_matches([' ', '.']);
-    let filename = format!("{}.md", if name.is_empty() { "记忆" } else { name });
+    let default_name = crate::i18n::text(&app, "exportDefaultName");
+    let filename = format!("{}.md", if name.is_empty() { &default_name } else { name });
+    let export_message = crate::i18n::text(&app, "exportMessage");
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.run_on_main_thread(move || {
         use objc2_app_kit::{NSModalResponseOK, NSSavePanel};
@@ -1039,9 +1041,7 @@ async fn memory_export(
             "md",
         )])));
         panel.setExtensionHidden(false);
-        panel.setMessage(Some(&NSString::from_str(
-            "将这一篇的标题和当前正文保存为 Markdown。",
-        )));
+        panel.setMessage(Some(&NSString::from_str(&export_message)));
         let path = if panel.runModal() == NSModalResponseOK {
             panel
                 .URL()
@@ -1178,13 +1178,27 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             }
         }))
         .setup(|app| {
+            // Setup errors inside the native event loop become non-unwinding panics.
+            // Handle library failures explicitly, after single-instance initialization.
+            let store = match (|| -> Result<MemoryStore> {
+                let store = MemoryStore::open_application(MemoryStore::environment_root()?)?;
+                store.recover_interrupted_turns()?;
+                store.recover_organization()?;
+                Ok(store)
+            })() {
+                Ok(store) => store,
+                Err(error) => {
+                    eprintln!("Memivy could not open the library: {error}");
+                    eprintln!(
+                        "The library was not reset. Check its format and access permissions."
+                    );
+                    std::process::exit(1);
+                }
+            };
             app.manage(crate::models::ModelTests::default());
-            let store = MemoryStore::open_application(MemoryStore::environment_root()?)?;
             let config = std::env::var_os("MEMIVY_MODEL_CONFIG")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.model_config_path());
-            store.recover_interrupted_turns()?;
-            store.recover_organization()?;
             app.manage(Workspace {
                 store,
                 config,
@@ -1300,7 +1314,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
     let app = match result {
         Ok(app) => app,
         Err(_) => {
-            eprintln!("Memivy 启动失败，请检查本地环境和数据目录");
+            eprintln!("Memivy failed to start; check the local environment and data directory");
             std::process::exit(1);
         }
     };
@@ -1328,7 +1342,7 @@ mod organization_writeback_tests {
         let raw = store
             .capture(&CaptureRequest {
                 request_id: uuid::Uuid::new_v4().to_string(),
-                text: "合成锁冲突".into(),
+                text: "Synthetic lock conflict".into(),
                 origin: memivy_core::memory::Origin::User {
                     app: "QA".into(),
                     project: None,
@@ -1368,11 +1382,19 @@ mod discussion_input_tests {
         let root = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(root.path()).unwrap();
         let id = uuid::Uuid::new_v4().to_string();
-        let (_, first) =
-            persist_discussion_input(&store, &id, &id, "保留我的原话", &[], None, None).unwrap();
+        let (_, first) = persist_discussion_input(
+            &store,
+            &id,
+            &id,
+            "Preserve my original words",
+            &[],
+            None,
+            None,
+        )
+        .unwrap();
         fail_unlaunched_input(&store, &HashMap::new(), &id, "window_operation_failed").unwrap();
         let failed = store.turn(&id).unwrap();
-        assert_eq!(failed.user.text, "保留我的原话");
+        assert_eq!(failed.user.text, "Preserve my original words");
         assert_eq!(failed.assistant.status, "failed");
         assert_eq!(
             failed.assistant.error_code.as_deref(),
@@ -1403,7 +1425,7 @@ mod discussion_input_tests {
         let source = store
             .capture(&CaptureRequest {
                 request_id: uuid::Uuid::new_v4().to_string(),
-                text: "预算是80元".into(),
+                text: "The budget is 80 yuan".into(),
                 origin: Origin::User {
                     app: "QA".into(),
                     project: None,
@@ -1417,7 +1439,7 @@ mod discussion_input_tests {
             &store,
             &id,
             &id,
-            "  这个安排合适吗？\n",
+            "  Does this plan make sense?\n",
             &context,
             None,
             None,
@@ -1434,7 +1456,7 @@ mod discussion_input_tests {
             &store,
             &id,
             &id,
-            "  这个安排合适吗？\n",
+            "  Does this plan make sense?\n",
             &context,
             None,
             None,
@@ -1446,7 +1468,7 @@ mod discussion_input_tests {
         assert_eq!(replay.state, "failed");
         assert_eq!(store.messages(&id, 0, 10).unwrap().len(), 2);
         assert!(matches!(
-            persist_discussion_input(&store, &id, &id, "另一句话", &context, None, None),
+            persist_discussion_input(&store, &id, &id, "Another sentence", &context, None, None),
             Err(DataError::RequestConflict)
         ));
         assert!(matches!(
@@ -1454,7 +1476,7 @@ mod discussion_input_tests {
                 &store,
                 &id,
                 &uuid::Uuid::new_v4().to_string(),
-                "  这个安排合适吗？\n",
+                "  Does this plan make sense?\n",
                 &context,
                 None,
                 None

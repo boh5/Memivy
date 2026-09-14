@@ -138,14 +138,14 @@ export const unavailable = (error: unknown) => !!error && typeof error === "obje
 const previewId = "00000000-0000-4000-8000-000000000001";
 const previewRaw: Raw = {
   id: previewId,
-  text: "我决定先把 macOS 上的记录、查找和阅读做好。\n\n想法不用整理完整，也应该能放心留下。",
-  origin: { kind: "user", app: "Memivy", project: "产品想法" },
+  text: "I decided to focus on capturing, finding, and reading notes on macOS first.\n\nIdeas should be easy to save, even before they are fully formed.",
+  origin: { kind: "user", app: "Memivy", project: "Product ideas" },
   created_at: 1788667200000,
   understanding: "pending",
 };
 const previewRow: Row = {
   key: { kind: "capture", id: previewId },
-  title: "先把桌面体验做好",
+  title: "Focus on the desktop experience",
   snippet: previewRaw.text,
   updated_at: previewRaw.created_at,
   origin: previewRaw.origin,
@@ -187,7 +187,7 @@ export async function call<T>(
     name === "discussion_messages"
   )
     return [] as T;
-  if (name === "library_projects") return ["产品想法"] as T;
+  if (name === "library_projects") return ["Product ideas"] as T;
   if (name === "draft_read") return null as T;
   if (name === "workspace_settings")
     return {

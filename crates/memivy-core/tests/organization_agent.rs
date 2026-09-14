@@ -296,7 +296,7 @@ async fn committed_write_survives_failed_final_acknowledgement_without_requeuein
                 "write-1",
                 &MemoryWriteArgs {
                     destination: Destination::New,
-                    title: "想法".into(),
+                    title: "Idea".into(),
                     parts: vec![quoted_part("独立想法，待考虑。", &source, "独立想法")],
                 },
             )
@@ -674,7 +674,12 @@ async fn invalid_quote_is_rejected_then_corrected_without_an_intermediate_write(
             )
             .unwrap();
             assert_eq!(result["applied"], false);
-            assert!(result["error"].as_str().unwrap().contains("逐项引用"));
+            assert!(
+                result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Cite actual user words for each part")
+            );
             assert_eq!(
                 unchanged.memory(&memory).unwrap().current.id,
                 original_version

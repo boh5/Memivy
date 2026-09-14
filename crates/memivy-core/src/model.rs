@@ -1,4 +1,5 @@
 //! Bounded OpenAI-compatible requests. This module cannot mutate memories.
+const PROBE_ECHO: &str = "先留住原话";
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -55,21 +56,25 @@ impl OutputPolicy {
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ProbeError {
-    #[error("模型配置无法读取或权限不是 0600")]
+    #[error("Cannot read model configuration or its permissions are not 0600")]
     Configuration,
-    #[error("端点无效：远程必须 HTTPS，本地允许 loopback HTTP")]
+    #[error("Invalid endpoint: remote services require HTTPS; loopback HTTP is allowed")]
     Endpoint,
-    #[error("模型请求超时或连接失败")]
+    #[error("Model request timed out or failed to connect")]
     Network,
-    #[error("模型 HTTP 状态异常：{0}")]
+    #[error("Unexpected model HTTP status: {0}")]
     Status(u16),
-    #[error("模型响应超过此任务的安全大小限制")]
+    #[error("Model response exceeds the size limit for this task")]
     TooLarge,
-    #[error("模型响应不符合约定的完整协议")]
+    #[error("Model response does not satisfy the required protocol")]
     InvalidResponse,
-    #[error("模型输出被截断；请提高模型输出上限或使用支持更长输出的模型")]
+    #[error(
+        "Model output was truncated; increase the output limit or use a model with a longer output capacity"
+    )]
     Truncated,
-    #[error("模型不支持所需工具能力，请测试连接或更换模型")]
+    #[error(
+        "The model does not support the required tools; test the connection or choose another model"
+    )]
     ToolsUnsupported,
 }
 
@@ -284,7 +289,7 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
         .map_err(|_| ProbeError::Network)?;
     let mut body = json!({
         "model": config.model,
-        "messages": [{"role":"user","content":"Return exactly this JSON object, without markdown: {\"ok\":true,\"echo\":\"先留住原话\"}"}],
+        "messages": [{"role":"user","content":format!("Return exactly this JSON object, without markdown: {}", json!({"ok": true, "echo": PROBE_ECHO}))}],
         "stream": false,
         "response_format": {"type":"json_schema","json_schema": {
             "name":"memivy_probe", "strict":true,
@@ -330,7 +335,7 @@ pub async fn probe(config: ModelConfig, timeout: Duration) -> Result<ProbeReport
             .ok_or(ProbeError::InvalidResponse)?,
     )
     .map_err(|_| ProbeError::InvalidResponse)?;
-    if !answer.ok || answer.echo != "先留住原话" {
+    if !answer.ok || answer.echo != PROBE_ECHO {
         return Err(ProbeError::InvalidResponse);
     }
     Ok(ProbeReport {

@@ -2,256 +2,256 @@
 window.MEMIVY_SEED = [
   {
     id: 'first-experience',
-    title: '首次体验原则',
+    title: 'First-use principles',
     project: 'Memivy',
     tone: 'yellow',
-    updated: '今天 14:32',
-    excerpt: '先让人看见一个真实的结果，再邀请他把这里变成自己的地方。',
-    keywords: ['首次体验', '先给结果', '配置', '新用户', '分类', '上手'],
+    updated: 'Today 14:32',
+    excerpt: 'Show a useful result before asking people to make the space their own.',
+    keywords: ['first use', 'show results first', 'configuration', 'new user', 'classification', 'getting started'],
     status: 'ready',
     captures: [
       {
         id: 'first-1',
-        text: '第一次打开一个新工具，我想先知道它能替我留住什么。最好让我写下一句话，看它真的被接住，然后再慢慢认识其他功能。',
-        app: '随手记',
+        text: 'When I open a new tool, I want to see what it can keep for me. Let me write one sentence and see it saved before learning the other features.',
+        app: 'Quick note',
         project: 'Memivy',
-        time: '8 月 18 日 20:16',
-        sourceLabel: '一次随手记录'
+        time: '8 / 18   20:16',
+        sourceLabel: 'A quick note'
       },
       {
         id: 'first-2',
-        text: 'AI 产品第一次打开时，也许不该先让用户配置，而应该先让他看到一个做好的结果。看 Bear 的页面时想到，空白也可以很有吸引力，但不能让人不知道下一步做什么。',
+        text: 'Perhaps a new AI product should show a useful result before asking for configuration. Looking at Bear reminded me that an empty page can feel inviting, provided the next step is clear.',
         app: 'Safari',
         project: 'Memivy',
-        time: '9 月 3 日 10:24',
-        sourceLabel: 'Bear · 主动附带的网页',
+        time: '9 / 3   10:24',
+        sourceLabel: 'Bear · Attached webpage',
         url: 'https://bear.app/'
       },
       {
         id: 'first-3',
-        text: '把这条结论记住：这个品类的主要摩擦不是用户不会整理，而是想法尚未成熟时就被迫分类。首次体验应该先接住一句原话，让人看清它去了哪里，再在真正需要 AI 时说明配置。',
+        text: 'Remember this conclusion: the main friction is being forced to classify an idea before it has formed. First use should save one original sentence and show where it went. Explain configuration when people need AI help.',
         app: 'Codex',
         project: 'Memivy',
-        time: '今天 14:32',
-        sourceLabel: '示例会话'
+        time: 'Today 14:32',
+        sourceLabel: 'Sample conversation'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '8 月 18 日 20:16',
-        body: '第一次打开 Memivy，先给人一个可以写下想法的地方。写一句话，看见它被稳稳接住，比读完一屏功能介绍更容易理解这里有什么用。\n\n其余的事情可以晚一点再认识。一个还没想清楚的念头，也值得有个落脚的地方。',
+        time: '8 / 18   20:16',
+        body: 'When people first open Memivy, give them a place to write. Seeing one sentence safely saved explains the product better than a screen full of features.\n\nThe rest can wait. Even an unfinished thought deserves somewhere to stay.',
         sourceIds: ['first-1']
       },
       {
         number: 2,
         author: 'Memory Agent',
-        time: '9 月 3 日 10:24',
-        body: '先让人看见一个真实的结果，再邀请他把这里变成自己的地方。第一次打开 Memivy，应该能马上写下一句话，看见原话被保存；需要了解整理效果时，再打开一条明确标注的示例记忆。\n\n空白可以安静，也可以很有吸引力，但下一步要清楚。模型配置不必成为进入的门槛，等到用户想让 AI 帮忙时，再解释需要填什么。',
+        time: '9 / 3   10:24',
+        body: 'Show a useful result before asking people to make the space their own. When first opened, Memivy should let people write a sentence and see it saved. A clearly labeled sample can show what organization looks like.\n\nAn empty page can be quiet and inviting, but the next step must be clear. Model configuration should wait until people want AI help, when we can explain what to enter.',
         sourceIds: ['first-1', 'first-2']
       },
       {
         number: 3,
         author: 'Memory Agent',
-        time: '今天 14:32',
-        body: '先让人看见一个真实的结果，再邀请他把这里变成自己的地方。第一次打开 Memivy，写下一句话，就能看见原话已保存；示例记忆展示整理后的样子。\n\n想法还没长成，不必急着起标题、选目录。先接住它，找到与旧想法的联系，再清楚告诉用户放到了哪里。\n\n判断可以纠正，原话始终保留。模型配置等需要 AI 时再做，在这之前，记录和关键词搜索照常可用。',
+        time: 'Today 14:32',
+        body: 'Show a useful result before asking people to make the space their own. When people first open Memivy, one sentence produces a visible saved note; sample memories show organized content.\n\nDo not rush unfinished ideas into titles and folders. Save them, find connections, and show where they went.\n\nDecisions can be corrected and original notes stay intact. Configure models when AI is needed. Until then, capture and keyword search remain available.',
         sourceIds: ['first-1', 'first-2', 'first-3']
       }
     ]
   },
   {
     id: 'walking',
-    title: '散步的意义',
-    project: '日常',
+    title: 'Why I walk',
+    project: 'Everyday',
     tone: 'teal',
-    updated: '今天 08:46',
-    excerpt: '有些问题不是坐着想明白的，是走着走着，忽然不着急了。',
-    keywords: ['散步', '留白', '河边', '思考', '休息', '节奏'],
+    updated: 'Today 08:46',
+    excerpt: 'Some questions become easier when I stop sitting and start walking.',
+    keywords: ['walking', 'space', 'riverside', 'thinking', 'rest', 'rhythm'],
     status: 'ready',
     captures: [
       {
         id: 'walking-1',
-        text: '晚饭后沿河走了四十分钟，没有听播客。刚出门时还在脑内改页面，走到第二座桥的时候，开始注意到水面上的灯。我可能不需要每一分钟都有输入。',
-        app: '随手记',
-        project: '日常',
-        time: '9 月 2 日 21:08',
-        sourceLabel: '回家后的随手记'
+        text: 'I walked by the river for forty minutes after dinner without a podcast. By the second bridge I noticed the lights on the water. Not every minute needs new input.',
+        app: 'Quick note',
+        project: 'Everyday',
+        time: '9 / 2   21:08',
+        sourceLabel: 'A note after getting home'
       },
       {
         id: 'walking-2',
-        text: '今天早上又走了那条路。店铺卷帘门还没全拉开，卖花的人在换水。没有突然想通什么，但回家后知道昨天那个方案不用硬推了。散步不是另一项效率工具，不能连放空都要求产出。',
-        app: '随手记',
-        project: '日常',
-        time: '今天 08:46',
-        sourceLabel: '一次随手记录'
+        text: 'I walked that route again this morning. Shops were opening and the florist was changing the water. Nothing clicked suddenly, but I knew I could set the previous plan aside. A walk does not need to produce anything.',
+        app: 'Quick note',
+        project: 'Everyday',
+        time: 'Today 08:46',
+        sourceLabel: 'A quick note'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '9 月 2 日 21:08',
-        body: '晚饭后沿河走了一会儿，把耳机留在家里。刚开始还在想页面上的事，后来注意到桥和水面的灯。原来不需要每一分钟都有新的输入，给已经听见的东西一点安静，也很好。',
+        time: '9 / 2   21:08',
+        body: 'I left my headphones at home and walked by the river. Thoughts about the page gave way to bridges and lights. Quiet time lets what I have already heard settle.',
         sourceIds: ['walking-1']
       },
       {
         number: 2,
-        author: '我',
-        time: '今天 08:46',
-        body: '有些问题不是坐着想明白的，是走着走着，忽然不着急了。晚饭后沿河走的那四十分钟，并没有得出一个漂亮答案。只是到了第二座桥，脑子里还在争论的几个方案渐渐安静，我开始看见水面上的灯。它们被经过的船拉长，又慢慢聚回来。\n\n以前出门总要戴上耳机，好像路上的时间也应该收获点什么。后来发现，听过太多东西的时候，再加一段声音，并不能让我更清楚。偶尔把耳机留在家里，让刚才读到的话、没说完的对话、还拿不准的决定自己待一会儿。没有新的输入，它们反而能慢慢找到各自的位置。\n\n早晨和晚上走同一条路，像看一座城市的两种呼吸。早上店铺的卷帘门还没有全拉开，卖花的人在给桶里的水换新；晚上经过这里，花已经少了一半，门口多了两把椅子。这些很小的变化提醒我，世界一直有自己的节奏，不会因为我还没决定一个按钮放哪里，就停在那里等我。\n\n今天回家以后，突然知道昨天那个方案可以先放下。这个念头并不宏大，也没有让我立刻把事情做完，但它足够让我松开一直攥着的那一点力气。有时需要的不是再找一条论据，而是离开屏幕，给判断留一点距离。回到桌前，还想继续的事再继续，已经不重要的事就让它过去。\n\n不过，也不想把散步变成另一项效率工具。不能连放空都要求产出，连走一段路也要带回一个值得记下的洞见。哪天只是绕了个圈，买了一小袋橘子，回家时觉得风很舒服，这段时间就已经很好了。愿意走出去，不必总有一个充分的理由。\n\n先记住这件很简单的事：当脑子里太吵，试着出去走一会儿。不规定步数，不安排要想通的问题。沿着熟悉的路，慢一点，把注意力还给眼前。',
+        author: 'Me',
+        time: 'Today 08:46',
+        body: 'The forty-minute walk did not produce a perfect answer. At the second bridge the competing plans grew quiet, and I started noticing lights stretching across the water as boats passed.\n\nI used to fill every walk with headphones. After too much input, another voice rarely makes things clearer. Silence gives unfinished thoughts room to settle.\n\nThe same route feels different in the morning and evening. Shutters rise, flowers change, and chairs appear outside shops. The city keeps its own pace while I consider where to put a button.\n\nBack home, I realized I could set the plan aside. It did not finish the work for me, but it helped me relax. Sometimes judgment needs distance from the screen rather than one more argument.\n\nI do not want walking to become another productivity tool. A short loop, a bag of oranges, and a pleasant breeze can be enough. Going outside needs no elaborate reason.\n\nWhen my thoughts get noisy, I can take a walk without a step target or a problem to solve. A familiar route helps me notice what is in front of me.',
         sourceIds: ['walking-1', 'walking-2']
       }
     ]
   },
   {
     id: 'memory-boundaries',
-    title: 'AI 记忆的边界',
+    title: 'AI memory boundaries',
     project: 'Memivy',
     tone: 'rose',
-    updated: '昨天 17:20',
-    excerpt: '被记住应该是一种选择。重要的不是记得多，而是能回到当时那句话。',
-    keywords: ['AI', '记忆', '原话', '来源', '撤销', '信任', '边界'],
+    updated: 'Yesterday 17:20',
+    excerpt: 'Being remembered should be a choice. What matters is being able to return to the original words.',
+    keywords: ['AI', 'Memories', 'original notes', 'sources', 'Undo', 'trust', 'boundaries'],
     status: 'ready',
     captures: [
       {
         id: 'boundary-1',
-        text: '我不想让一个工具替我决定哪些生活值得被记下来。是我说“记住这个”，它才接过来。否则拥有更多上下文，也不一定离我更近。',
-        app: '随手记',
+        text: 'I do not want a tool to decide which moments deserve saving. It should wait until I say “remember this.” More context does not always mean better understanding.',
+        app: 'Quick note',
         project: 'Memivy',
-        time: '9 月 1 日 22:11',
-        sourceLabel: '一次随手记录'
+        time: '9 / 1   22:11',
+        sourceLabel: 'A quick note'
       },
       {
         id: 'boundary-2',
-        text: '请记住我们刚确认的边界：整理可以形成新的当前版本，原话始终保留；每次更新都应当能看见用了哪些来源，也能撤销。信任来自可以核对，不是让语气更自信。',
+        text: 'Remember our agreed boundaries: organization can create a new current version, but original notes stay intact. Each update should show its sources and support undo. Trust comes from being able to check.',
         app: 'Claude Code',
         project: 'Memivy',
-        time: '昨天 17:20',
-        sourceLabel: '示例会话'
+        time: 'Yesterday 17:20',
+        sourceLabel: 'Sample conversation'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '9 月 1 日 22:11',
-        body: '被记住应该是一种选择。我说“记住这个”，工具才接过来。拥有更多上下文，不一定意味着更了解我；先尊重我想留下什么，比什么都保存更重要。',
+        time: '9 / 1   22:11',
+        body: 'Being remembered should be a choice. When I say “remember this,” the tool can save it. Respecting what I choose matters more than collecting everything.',
         sourceIds: ['boundary-1']
       },
       {
         number: 2,
         author: 'Memory Agent',
-        time: '昨天 17:20',
-        body: '被记住应该是一种选择。我说“记住这个”，工具才接过来。拥有更多上下文，不一定意味着更了解我；先尊重我想留下什么，比什么都保存更重要。\n\nAI 可以帮我把散落的片段放到一起，但不能替换当时的那句话。整理后的版本可以生长，原话要一直留在身后，随时能够回去看看。\n\n每次更新都应说清楚用了哪些来源、做了什么，也允许我改主意。信任来自可以核对，而不是一段听起来很确定的回答。',
+        time: 'Yesterday 17:20',
+        body: 'Being remembered should be a choice. When I say “remember this,” the tool can save it. Respecting what I choose matters more than collecting everything.\n\nAI can connect scattered notes without replacing the original words. The organized version can grow while the original remains available.\n\nEach update should explain what changed and which sources it used, and let me change my mind. Trust comes from evidence, not confidence alone.',
         sourceIds: ['boundary-1', 'boundary-2']
       }
     ]
   },
   {
     id: 'city-weekend',
-    title: '周末的城市漫游',
-    project: '日常',
+    title: 'A weekend in the city',
+    project: 'Everyday',
     tone: 'coral',
-    updated: '9 月 3 日',
-    excerpt: '只选一个起点，剩下的交给街角和天气。',
-    keywords: ['周末', '城市', '漫游', '书店', '街道', '旅行'],
+    updated: '9 / 3  ',
+    excerpt: 'Choose a starting point and leave the rest to the streets and weather.',
+    keywords: ['weekend', 'city', 'wandering', 'bookshop', 'streets', 'travel'],
     status: 'ready',
     captures: [
       {
         id: 'city-1',
-        text: '上次周末最好的一段，不在提前收藏的清单里。是从书店出来拐错了一个路口，发现一条很安静的小街，还有一家只放两张桌子的面馆。下次还是只选一个起点。',
-        app: '随手记',
-        project: '日常',
-        time: '9 月 3 日 19:05',
-        sourceLabel: '一次随手记录'
+        text: 'The best part of last weekend was not on a saved list. A wrong turn after the bookshop led to a quiet street and a tiny noodle shop. Next time I will choose only a starting point.',
+        app: 'Quick note',
+        project: 'Everyday',
+        time: '9 / 3   19:05',
+        sourceLabel: 'A quick note'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '9 月 3 日 19:05',
-        body: '只选一个起点，剩下的交给街角和天气。上次从书店出来拐错了路，遇到一条很安静的小街，还有一家只放两张桌子的面馆。那一段没有在任何收藏清单里，却是整个下午最喜欢的部分。\n\n可以从一家想去的书店开始，不必把后面的每一站都排满。走累了就坐一会儿，看见有意思的门就进去。认识一座城市，有时候靠的是给偶然留下一点位置。',
+        time: '9 / 3   19:05',
+        body: 'A wrong turn after the bookshop led to a quiet street and a two-table noodle shop. That unplanned stop became my favorite part of the afternoon.\n\nStart with a bookshop worth visiting. Leave room to sit down or follow an interesting doorway. Getting to know a city sometimes means leaving space for chance.',
         sourceIds: ['city-1']
       }
     ]
   },
   {
     id: 'writing-voice',
-    title: '写作先留住声音',
-    project: '写作',
+    title: 'Keep the voice in a first draft',
+    project: 'Writing',
     tone: 'yellow',
-    updated: '9 月 2 日',
-    excerpt: '先写下那句只有此刻会说的话，顺不顺，等第二遍再想。',
-    keywords: ['写作', '声音', '初稿', '表达', '修改', '灵感'],
+    updated: '9 / 2  ',
+    excerpt: 'Write the sentence that belongs to this moment. Polish it on the second pass.',
+    keywords: ['Writing', 'voice', 'first draft', 'expression', 'revision', 'inspiration'],
     status: 'ready',
     captures: [
       {
         id: 'writing-1',
-        text: '刚才删了三遍开头，最后留下的那句太正确了，已经不像我。第一遍还是先把话说出来，别急着把棱角磨平。',
-        app: '随手记',
-        project: '写作',
-        time: '9 月 2 日 23:14',
-        sourceLabel: '写初稿时的念头'
+        text: 'I rewrote the opening three times until it sounded correct but no longer sounded like me. The first pass should let the words out before smoothing every edge.',
+        app: 'Quick note',
+        project: 'Writing',
+        time: '9 / 2   23:14',
+        sourceLabel: 'A thought while drafting'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '9 月 2 日 23:14',
-        body: '先写下那句只有此刻会说的话，顺不顺，等第二遍再想。反复改过的开头可能很正确，却不再像自己。\n\n初稿先留住声音：那个不够周全的判断，一个有点奇怪的比喻，甚至一句还没有说完的话。它们身上还有当时的温度。等整段意思站住，再慢慢修整句子，不急着把每一处棱角都磨平。',
+        time: '9 / 2   23:14',
+        body: 'Write the sentence that belongs to this moment. A polished opening can be correct while losing its voice.\n\nKeep the uncertain judgment, unusual comparison, or unfinished sentence in the first draft. Once the idea stands, refine the wording without sanding away every edge.',
         sourceIds: ['writing-1']
       }
     ]
   },
   {
     id: 'coffee',
-    title: '咖啡风味',
-    project: '日常',
+    title: 'Coffee flavors',
+    project: 'Everyday',
     tone: 'teal',
-    updated: '9 月 1 日',
-    excerpt: '放凉一点再喝，好像更容易尝到那一点像杏子的酸。',
-    keywords: ['咖啡', '风味', '杏子', '手冲', '温度'],
+    updated: '9 / 1  ',
+    excerpt: 'As it cools, I can taste a little apricot-like acidity.',
+    keywords: ['coffee', 'flavor', 'apricot', 'pour-over', 'temperature'],
     status: 'ready',
     captures: [
       {
         id: 'coffee-1',
-        text: '今天这杯刚冲好时只觉得香，放凉一点以后，才喝到一点像杏子的酸。我总是太急着给第一口下判断。',
-        app: '随手记',
-        project: '日常',
-        time: '9 月 1 日 09:27',
-        sourceLabel: '早餐桌上的随手记'
+        text: 'Freshly brewed, this coffee mainly smelled good. As it cooled, I noticed apricot-like acidity. I tend to judge the first sip too quickly.',
+        app: 'Quick note',
+        project: 'Everyday',
+        time: '9 / 1   09:27',
+        sourceLabel: 'A breakfast note'
       }
     ],
     versions: [
       {
         number: 1,
         author: 'Memory Agent',
-        time: '9 月 1 日 09:27',
-        body: '今天这杯咖啡，放凉一点以后更喜欢。刚冲好时只觉得香，温度降下来，才慢慢尝到一点像杏子的酸。\n\n先别急着给第一口下判断。同一杯东西，过几分钟再遇见，可能会有另一种样子。',
+        time: '9 / 1   09:27',
+        body: 'I enjoyed this coffee more after it cooled. The aroma came first; then a little apricot-like acidity emerged.\n\nDo not rush to judge the first sip. The same cup can taste different a few minutes later.',
         sourceIds: ['coffee-1']
       }
     ]
   },
   {
     id: 'unfinished-thought',
-    title: '一个没想清楚的念头',
-    project: '未归类',
+    title: 'An unfinished thought',
+    project: 'Unassigned',
     tone: 'rose',
-    updated: '8 月 31 日',
-    excerpt: '也许，有些东西不用马上变得有用。',
-    keywords: ['念头', '有用', '未归类'],
+    updated: '8 / 31  ',
+    excerpt: 'Perhaps some things do not need to be useful immediately.',
+    keywords: ['thought', 'useful', 'Unassigned'],
     status: 'unassigned',
     captures: [
       {
         id: 'unfinished-1',
-        text: '也许，有些东西不用马上变得有用。',
-        app: '随手记',
-        project: '未归类',
-        time: '8 月 31 日 22:38',
-        sourceLabel: '一次随手记录'
+        text: 'Perhaps some things do not need to be useful immediately.',
+        app: 'Quick note',
+        project: 'Unassigned',
+        time: '8 / 31   22:38',
+        sourceLabel: 'A quick note'
       }
     ],
     versions: []
@@ -259,7 +259,7 @@ window.MEMIVY_SEED = [
 ];
 
 window.MEMIVY_EXAMPLES = {
-  append: '关于首次体验，再记一点：人写下第一句话后，应该马上看见“已记下”。模型配置可以稍后完成，别让这个刚出现的念头等着。',
-  new: '今天发现，把喜欢的句子手抄一遍，和把它收藏起来很不一样。写到一半，才听见这句话自己的节奏。',
-  uncertain: '也许可以再留一点空白。'
+  append: 'One more first-use thought: after writing the first sentence, people should immediately see “Saved.” Model configuration can wait. Do not make a new thought wait for setup.',
+  new: 'Copying a favorite sentence by hand feels different from bookmarking it. Halfway through, I began to hear its rhythm.',
+  uncertain: 'Perhaps we can leave a little more space.'
 };

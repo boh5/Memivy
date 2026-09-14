@@ -157,7 +157,7 @@ async fn many_manual_saves_continue_normally_and_page_every_group_without_changi
                 &request,
                 &first.input_id,
                 &format!("待验证想法 {n}"),
-                "想法",
+                "Idea",
                 &Destination::New,
             )
             .unwrap();

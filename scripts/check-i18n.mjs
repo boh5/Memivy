@@ -52,20 +52,12 @@ for (const ns of namespaces) {
     }
   }
 }
-// These are literal sample contents, not UI labels. Keep the exemption exact so
-// adding a new hardcoded message to the same file still fails this check.
-const literalContents = new Map([
-  ['api.ts', new Set([
-    '我决定先把 macOS 上的记录、查找和阅读做好。\n\n想法不用整理完整，也应该能放心留下。',
-    '产品想法', '先把桌面体验做好',
-  ])],
-  ['LanguageSettings.tsx', new Set(['简体中文'])], // Language names remain in their own language.
-]);
+// Check application UI literals. Test payloads may intentionally contain Chinese.
 for (const file of fs.readdirSync(path.join(root, 'src/workspace')).filter(file => /\.tsx?$/.test(file))) {
   const source = ts.createSourceFile(file, fs.readFileSync(path.join(root, 'src/workspace', file), 'utf8'), ts.ScriptTarget.Latest, true);
   function visit(node) {
     if ((ts.isStringLiteralLike(node) || ts.isJsxText(node) || node.kind === ts.SyntaxKind.TemplateHead || node.kind === ts.SyntaxKind.TemplateMiddle || node.kind === ts.SyntaxKind.TemplateTail)
-      && /\p{Script=Han}/u.test(node.text) && !literalContents.get(file)?.has(node.text.trim())) {
+      && /\p{Script=Han}/u.test(node.text)) {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
       issues.push(`src/workspace/${file}:${line}: hardcoded UI text ${JSON.stringify(node.text.trim().slice(0, 70))}`);
     }
@@ -75,4 +67,4 @@ for (const file of fs.readdirSync(path.join(root, 'src/workspace')).filter(file 
 }
 if (issues.length) {
   console.error(issues.join('\n')); process.exitCode = 1;
-} else console.log('I18N catalogs: languages, keys, nonempty text, interpolation, plural branches and hardcoded Chinese UI text checked.');
+} else console.log('I18N catalogs and application UI text checked.');

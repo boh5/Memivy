@@ -1,54 +1,54 @@
 {
   "version": 2,
-  "scope": "现行Agent/手动保存核心验收，原生验收单独记录",
+  "scope": "Current Agent and manual-save core acceptance; native acceptance is recorded separately",
   "cases": [
     {
       "id": "save-01",
       "test": "discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance",
       "file": "crates/memivy-core/tests/memory_data.rs",
-      "check": "会话/草稿不自动成为事实；显式保存保留选择文字和来源。"
+      "check": "Conversations and drafts do not automatically become facts; explicit saving preserves selected text and provenance."
     },
     {
       "id": "save-02",
       "test": "explicit_selected_text_appends_exactly_and_never_schedules_organization",
       "file": "crates/memivy-core/tests/memory_intelligence.rs",
-      "check": "手动保存追加、不重复、不排二次整理；撤销保留原话。"
+      "check": "Manual saving appends exactly once without another organization job; undo preserves the original text."
     },
     {
       "id": "save-03",
       "test": "stale_manual_save_target_leaves_no_archive_or_new_memory",
       "file": "crates/memivy-core/tests/memory_data.rs",
-      "check": "并发版本冲突不覆盖目标、不生成额外记忆和原话归档。"
+      "check": "A version conflict does not overwrite the target or create an extra memory or source archive."
     },
     {
       "id": "save-04",
       "test": "grouped_undo_conflict_rolls_back_every_memory_and_membership",
       "file": "crates/memivy-core/tests/agent_execution.rs",
-      "check": "整次撤销任一冲突则全部不改。"
+      "check": "If any grouped undo conflicts, none of the changes are applied."
     },
     {
       "id": "save-05",
       "test": "reading_v1_then_writing_v2_keeps_the_cited_v1_available",
       "file": "crates/memivy-core/tests/agent_workflows.rs",
-      "check": "读到的版本和新写入版本分离，引用仍能打开原证据。"
+      "check": "The version read remains separate from the newly written version; citations still open the original evidence."
     },
     {
       "id": "save-06",
       "test": "source_archive_and_atomic_undo_outlive_deleted_conversation",
       "file": "crates/memivy-core/tests/agent_execution.rs",
-      "check": "删除会话后来源和整组撤销仍可用。"
+      "check": "Sources and grouped undo remain available after conversation deletion."
     },
     {
       "id": "save-07",
       "test": "streaming_cancellation_retains_visible_prefix_and_stops_before_tools",
       "file": "crates/memivy-core/tests/agent_workflows.rs",
-      "check": "取消保留已显示正文并挡住后续写入。"
+      "check": "Cancellation preserves visible text and prevents subsequent writes."
     },
     {
       "id": "save-08",
       "test": "concurrent_writers_deduplicate_and_only_one_edit_wins",
       "file": "crates/memivy-core/tests/memory_data.rs",
-      "check": "并发写入去重，版本竞争只有一方成功。"
+      "check": "Concurrent writes are deduplicated and only one competing version update succeeds."
     }
   ]
 }

@@ -1,21 +1,93 @@
 {
-  "version":1,
-  "authority":"Current application source and DESIGN.md; verification evidence is recorded in DEVELOPMENT_PLAN.md",
-  "fixture":"crates/memivy-core/tests/fixtures/core_search.json",
-  "window_sizes":[[1140,790],[760,560]],
-  "capture_unit":"macOS logical window points; record screenshot pixel size and backing scale separately",
-  "baseline_status":"Current-source evidence may be captured; human approval must be recorded separately. Never overwrite an earlier run.",
-  "cases":[
-    {"id":"visual-home","surface":"browser+native","steps":"打开首页，记录完整窗口。","check":"沿用黄色叶子 m 品牌、当前首页层级和输入区；小窗最小尺寸无控件遮挡。"},
-    {"id":"visual-library","surface":"browser+native","steps":"记忆库搜索 桌面端，打开 木桥当前方向。","check":"紧凑列表与宽正文；当前内容、原话、版本分层；旧原话不能被正文覆盖。"},
-    {"id":"visual-history","surface":"native","steps":"展开原话及版本，依次查看旧版和当前版。","check":"版本切换不改变原文；引文与实际历史一致；长文滚动不遮挡操作。"},
-    {"id":"visual-export","surface":"native","steps":"打开记忆的更多菜单，再关闭。","check":"单篇导出位于折叠的更多菜单中。"},
-    {"id":"visual-discussion","surface":"browser+native","steps":"打开 木桥 · 固定讨论，查看并展开引用。","check":"问答、来源、继续讨论共用现有样式；当前源与历史源标识准确。"},
-    {"id":"visual-review","surface":"native","steps":"在独立合成库完成一次回答；留下结论，选择已有记忆，修改文字，再取消；重新打开后明确确认并撤销。","check":"确认前不保存；默认补充；融合需核对全文；撤销保留确认原话。需要本机固定端点或明确测试模型。"},
-    {"id":"native-ime","surface":"native","steps":"切到中文输入法组词；Enter 选词和换行；Command+Enter 提交；在编辑后单击切页。","check":"组词不误提交；实际单击生效；输入焦点稳定。"},
-    {"id":"native-panel","surface":"native","steps":"物理全局快捷键展开；普通保存收起；固定后再次保存；拖动和隐藏叶子；恢复主窗口。","check":"草稿保留；固定后可继续记录；拖动不误点击；同话题交接。"},
-    {"id":"native-late-answer","surface":"native","steps":"开始回答后收起再展开；另一次停止后等待响应；生成中退出并重启。","check":"收起后继续且完成不弹出；停止后迟到响应无效；重启显示中断并可重试。"},
-    {"id":"native-mcp-refresh","surface":"native","steps":"合成库打开变化对比并输入中文草稿，通过同包 MCP 明确保存测试文本。","check":"刷新出现新内容，保留变化对比和正在编辑的草稿。"}
+  "version": 1,
+  "authority": "Current application source and DESIGN.md; verification evidence is recorded in DEVELOPMENT_PLAN.md",
+  "fixture": "crates/memivy-core/tests/fixtures/core_search.json",
+  "window_sizes": [
+    [
+      1140,
+      790
+    ],
+    [
+      760,
+      560
+    ]
   ],
-  "evidence_fields":["case_id","source_sha256","fixture_sha256","app_binary_sha256","macos","window_points","screenshot_pixels","backing_scale","screenshot_path","result:passed/failed/not_run","notes","reviewer"]
+  "capture_unit": "macOS logical window points; record screenshot pixel size and backing scale separately",
+  "baseline_status": "Current-source evidence may be captured; human approval must be recorded separately. Never overwrite an earlier run.",
+  "cases": [
+    {
+      "id": "visual-home",
+      "surface": "browser+native",
+      "steps": "Open the home view and capture the entire window.",
+      "check": "Preserve the yellow leaf-m brand, current home hierarchy, and input area; controls remain visible at the minimum quick-window size."
+    },
+    {
+      "id": "visual-library",
+      "surface": "browser+native",
+      "steps": "Search the library for the desktop term from the referenced fixture, then open its current-direction memory.",
+      "check": "Keep the compact list and wide reading pane; distinguish current content, original input, and versions; current content never overwrites original input."
+    },
+    {
+      "id": "visual-history",
+      "surface": "native",
+      "steps": "Expand original input and version history; inspect old and current versions.",
+      "check": "Changing versions does not mutate source text; citations match the actual version; long text does not obscure controls."
+    },
+    {
+      "id": "visual-export",
+      "surface": "native",
+      "steps": "Open the memory More menu, then close it.",
+      "check": "Single-memory export stays in the collapsed More menu."
+    },
+    {
+      "id": "visual-discussion",
+      "surface": "browser+native",
+      "steps": "Open the fixed discussion from the referenced fixture and expand its citations.",
+      "check": "Questions, sources, and follow-up discussion share the existing styles; current and historical sources are labeled accurately."
+    },
+    {
+      "id": "visual-review",
+      "surface": "native",
+      "steps": "In an isolated synthetic library, generate an answer, manually save selected text to an existing memory, edit and cancel; reopen, confirm, then undo.",
+      "check": "Nothing is saved before confirmation; append by default; review the complete text before an integrated rewrite; undo preserves confirmed original input. Requires a local fixed endpoint or an explicitly selected test model."
+    },
+    {
+      "id": "native-ime",
+      "surface": "native",
+      "steps": "Use a Chinese IME; select a composition candidate with Enter, insert a newline, submit with Command+Enter, then click another page after editing.",
+      "check": "Composition does not submit accidentally; physical clicks work; input focus remains stable."
+    },
+    {
+      "id": "native-panel",
+      "surface": "native",
+      "steps": "Open with the physical global shortcut; save and collapse; pin and save again; drag and hide the leaf; return to the main window.",
+      "check": "Preserve drafts; pinned capture remains ready; dragging does not trigger clicks; handoff keeps the discussion."
+    },
+    {
+      "id": "native-late-answer",
+      "surface": "native",
+      "steps": "Collapse and reopen while an answer is running; stop another answer and wait for its response; quit during generation and restart.",
+      "check": "Collapsed work continues without reopening on completion; late responses after cancellation have no effect; restart exposes interruption and retry."
+    },
+    {
+      "id": "native-mcp-refresh",
+      "surface": "native",
+      "steps": "In a synthetic library, open a change comparison and type a Chinese draft; explicitly capture test text using the MCP executable from the same app bundle.",
+      "check": "Refresh displays the new content while preserving the change comparison and active draft."
+    }
+  ],
+  "evidence_fields": [
+    "case_id",
+    "source_sha256",
+    "fixture_sha256",
+    "app_binary_sha256",
+    "macos",
+    "window_points",
+    "screenshot_pixels",
+    "backing_scale",
+    "screenshot_path",
+    "result:passed/failed/not_run",
+    "notes",
+    "reviewer"
+  ]
 }
