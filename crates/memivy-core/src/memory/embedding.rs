@@ -774,6 +774,43 @@ mod tests {
         assert!(Preferences::read(&s.root).unwrap().error.is_some());
     }
     #[test]
+    fn application_restore_discards_vectors_and_invalidates_index_revision() {
+        let (dir, store) = setup();
+        let saved = capture(&store, "恢复后保留原文，向量重新建立");
+        store.embedding_step_with(|_| Ok(vector())).unwrap();
+        let before = meta(&store.connection().unwrap())
+            .unwrap()
+            .unwrap()
+            .revision;
+        assert_eq!(store.embedding_status().unwrap().processed, 1);
+        let backup = dir.path().join("saved.db");
+        store.backup(&backup).unwrap();
+        let prepared = store.prepare_restore(&backup).unwrap();
+        store.arm_restore(&prepared.id).unwrap();
+        drop(store);
+
+        let restored = MemoryStore::open_application(dir.path()).unwrap();
+        assert!(restored.last_restore_result().unwrap().unwrap().restored);
+        let db = restored.connection().unwrap();
+        let index = meta(&db).unwrap().unwrap();
+        assert_ne!(index.revision, before);
+        assert_eq!(index.state, "building");
+        for table in ["embedding_records", "embedding_chunks"] {
+            assert_eq!(
+                db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(
+            restored.capture_by_id(&saved.capture_id).unwrap().text,
+            "恢复后保留原文，向量重新建立"
+        );
+        restored.check_integrity().unwrap();
+    }
+
+    #[test]
     fn cancellation_and_rebuild_invalidate_inflight_units() {
         let (_d, s) = setup();
         capture(&s, "first");

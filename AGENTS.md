@@ -4,6 +4,10 @@
 
 2026-09-13 用户明确要求彻底移除旧交互样机。当前源码只保留正式 MemoryStore 应用及主窗口／桌面快捷窗口，不保留样机入口、旧 Store／conversation、旧 MCP、旧迁移和专用测试脚本，也不从旧样机目录导入模型配置。此决定取代下列历史授权记录中保留或隔离运行旧样机的要求；不得重新引入。历史验收记录仅作历史证据，设计品牌资源和正式共用的原生面板能力保留。源码清理不删除用户磁盘上的历史数据。
 
+## Database baseline
+
+2026-09-14 用户授权发布前将数据库结构彻底合并为单一 schema 1。新库直接执行 `migrations/memory/001_initial.sql`；不保留开发期逐版本迁移、兼容转换或专用测试。开发资料库可以重新创建，后续正式迁移从 schema 2 追加。
+
 ## Repository status
 
 Memivy is a local-first, open-source, AI-native personal memory tool built around “记一下、问一问、接着想”: capture ideas, ask about existing memories, continue thinking, and explicitly save useful conclusions. The original Phase 1 technical-risk prototype was accepted on 2026-09-06. The user subsequently authorized Phase 1 v2 with a desktop companion and a minimal real conversation loop. After the model-configuration and native-focus fixes, the user confirmed on 2026-09-06 that all supplied checks passed; Phase 1 v2 is accepted within that tested prototype scope. Keep the historical evidence limits in DEVELOPMENT_PLAN.md and do not reopen this acceptance without a new issue. Product requirements are not evidence of implemented features. Do not implement later milestones or create application code as a side effect of a documentation or research task.

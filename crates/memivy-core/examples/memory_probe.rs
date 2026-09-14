@@ -33,12 +33,9 @@ fn run() -> Result<()> {
         let mut db = rusqlite::Connection::open(PathBuf::from(root).join("memivy.db"))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         let tx = db.transaction()?;
-        tx.execute_batch(include_str!("../../../migrations/memory/001_records.sql"))?;
-        tx.pragma_update(None, "application_id", 0x4d495659_i64)?;
-        tx.execute_batch(include_str!(
-            "../../../migrations/memory/002_conversations.sql"
-        ))?;
-        println!("migration transaction open; schema 2 not committed");
+        tx.execute_batch(include_str!("../../../migrations/memory/001_initial.sql"))?;
+        tx.pragma_update(None, "application_id", 0x4d454d59_i64)?;
+        println!("migration transaction open; schema 1 not committed");
         std::io::stdout().flush()?;
         loop {
             std::thread::park();

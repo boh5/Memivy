@@ -206,22 +206,6 @@ impl MemoryStore {
             block(&mut captures, &encode(&c.origin)?);
             block(&mut captures, &c.text);
             refs(&mut captures, &tx, "capture_citations", "capture_id", id)?;
-            if let Some((title, target, merged)) = tx
-                .query_row(
-                    "SELECT title,destination,merged_body FROM conclusion_intents WHERE capture_id=?",
-                    [id],
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)),
-                )
-                .optional()?
-            {
-                captures.push_str("\n用户确认的名称与去向：\n");
-                block(&mut captures, &title);
-                block(&mut captures, &target);
-                if let Some(body) = merged {
-                    captures.push_str("\n用户审核的完整融合正文：\n");
-                    block(&mut captures, &body);
-                }
-            }
         }
         let mut memories = String::from(
             "# 记忆与完整版本历史\n\n只包含有效记忆。恢复旧版本也会留下新的历史记录。\n",
@@ -321,7 +305,6 @@ impl MemoryStore {
         Ok(())
     }
 }
-use rusqlite::OptionalExtension;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -564,11 +547,10 @@ impl MemoryStore {
         fs::rename(staged, root.join("memivy.db"))?;
         // A restored snapshot never reuses an in-flight encoder's generation.
         let mut restored = connect(&root.join("memivy.db"), false)?;
-        if identity(&restored)? >= 10 {
-            let tx = restored.transaction()?;
-            super::embedding::reset(&tx)?;
-            tx.commit()?;
-        }
+        identity(&restored)?;
+        let tx = restored.transaction()?;
+        super::embedding::reset(&tx)?;
+        tx.commit()?;
         drop(restored);
         fs::File::open(root)?.sync_all()?;
         write_state(

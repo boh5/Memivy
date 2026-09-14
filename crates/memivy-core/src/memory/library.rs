@@ -516,9 +516,7 @@ impl MemoryStore {
     pub fn rebuild_search_index(&self) -> Result<()> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../../../migrations/memory/current_fts.sql"
-        ))?;
+        tx.execute_batch(include_str!("sql/rebuild_search.sql"))?;
         tx.commit()?;
         Ok(())
     }

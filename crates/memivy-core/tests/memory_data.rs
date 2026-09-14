@@ -1203,43 +1203,45 @@ fn lock_timeout_and_database_errors_do_not_expose_content_or_leave_partial_versi
 }
 
 #[test]
-fn memory_migration_preserves_v1_and_rejects_unrelated_future_and_partial_migrations() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("memivy.db");
-    let db = Connection::open(&path).unwrap();
-    db.execute_batch(include_str!("../../../migrations/memory/001_records.sql"))
-        .unwrap();
-    db.pragma_update(None, "application_id", 0x4d495659_i64)
-        .unwrap();
-    let capture = id();
-    db.execute("INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,x'01','迁移保留',?3,1)",params![capture,id(),serde_json::to_string(&Origin::User{app:"v1".into(),project:None,uri:None}).unwrap()]).unwrap();
-    db.execute(
-        "INSERT INTO capture_state(capture_id) VALUES(?)",
-        [&capture],
-    )
-    .unwrap();
-    // A failing later DDL must roll back every earlier statement in that migration.
-    db.execute_batch("CREATE TABLE turns (broken TEXT)")
-        .unwrap();
-    assert!(MemoryStore::open(dir.path()).is_err());
+fn database_reopens_and_rejects_unrelated_and_future_schemas() {
+    let (dir, store) = setup();
+    let saved = store.capture(&capture_request("初始化后保留")).unwrap();
+    let reopened = MemoryStore::open(dir.path()).unwrap();
+    assert_eq!(
+        reopened.capture_by_id(&saved.capture_id).unwrap().text,
+        "初始化后保留"
+    );
+    reopened.check_integrity().unwrap();
+    let db = Connection::open(store.database_path()).unwrap();
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
         1
     );
+    let application_id: i64 = db
+        .pragma_query_value(None, "application_id", |r| r.get(0))
+        .unwrap();
+    db.pragma_update(None, "application_id", 0x12345678_i64)
+        .unwrap();
     assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE name='conversations'",
-            [],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0
+        MemoryStore::open(dir.path()).unwrap_err(),
+        DataError::Schema
     );
-    db.execute_batch("DROP TABLE turns").unwrap();
-    let store = MemoryStore::open(dir.path()).unwrap();
-    assert_eq!(store.capture_by_id(&capture).unwrap().text, "迁移保留");
-    store.check_integrity().unwrap();
+    assert_eq!(
+        store
+            .capture(&capture_request("不能写其他格式库"))
+            .unwrap_err(),
+        DataError::Schema
+    );
+    let foreign_backup = dir.path().join("foreign.db");
+    db.execute("VACUUM INTO ?1", [foreign_backup.to_str().unwrap()])
+        .unwrap();
+    assert_eq!(
+        store.prepare_restore(&foreign_backup).unwrap_err(),
+        DataError::Schema
+    );
+    db.pragma_update(None, "application_id", application_id)
+        .unwrap();
     db.pragma_update(None, "user_version", 999_i64).unwrap();
     assert_eq!(
         MemoryStore::open(dir.path()).unwrap_err(),

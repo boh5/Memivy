@@ -10,8 +10,8 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 17;
-pub(super) const APPLICATION_ID: i64 = 0x4d495659;
+pub(super) const SCHEMA: i64 = 1;
+pub(super) const APPLICATION_ID: i64 = 0x4d454d59; // MEMY
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
     pub(super) root: PathBuf,
@@ -105,7 +105,7 @@ pub(super) fn connect(path: &Path, create: bool) -> Result<Connection> {
 pub(super) fn identity(db: &Connection) -> Result<i64> {
     let app: i64 = db.pragma_query_value(None, "application_id", |r| r.get(0))?;
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if app != APPLICATION_ID || !(1..=SCHEMA).contains(&version) {
+    if app != APPLICATION_ID || version != SCHEMA {
         return Err(DataError::Schema);
     }
     Ok(version)
@@ -120,9 +120,7 @@ fn initial_schema(db: &Connection) -> Result<i64> {
     )?;
     let app: i64 = db.pragma_query_value(None, "application_id", |r| r.get(0))?;
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if (app == 0 && version == 0 && tables == 0)
-        || (app == APPLICATION_ID && (1..=SCHEMA).contains(&version))
-    {
+    if (app == 0 && version == 0 && tables == 0) || (app == APPLICATION_ID && version == SCHEMA) {
         Ok(version)
     } else {
         Err(DataError::Schema)
@@ -160,122 +158,19 @@ impl MemoryStore {
             }
             return Ok(store);
         }
-        if initial > 0 && initial < 9 {
-            let backups = store.root.join("backups");
-            private_dir(&backups)?;
-            super::transfer::publish_database(
-                &db,
-                &backups.join(format!("before-schema-9-{}.db", id())),
-            )?;
-        }
-        // Journal mode must change outside a transaction. Recheck the schema
-        // after obtaining the writer lock, before executing any migration.
         db.pragma_update(None, "journal_mode", "WAL")?;
-        // SQLite's generalized ALTER TABLE sequence, confined to this opener.
-        db.pragma_update(None, "foreign_keys", false)?;
-        db.pragma_update(None, "legacy_alter_table", true)?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let version = initial_schema(&tx)?;
-        if version == 0 {
+        // Another opener may have initialized the database while we waited.
+        if initial_schema(&tx)? == 0 {
             tx.execute_batch(include_str!(
-                "../../../../migrations/memory/001_records.sql"
+                "../../../../migrations/memory/001_initial.sql"
             ))?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-        }
-        if version < 2 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/002_conversations.sql"
-            ))?;
-        }
-        if version < 3 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/003_workspace.sql"
-            ))?;
-        }
-        if version < 4 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/004_intelligence.sql"
-            ))?;
-        }
-        if version < 5 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/005_reviewed_conclusions.sql"
-            ))?;
-        }
-        if version < 6 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/006_navigation.sql"
-            ))?;
-        }
-        if version < 7 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/007_collection_feedback.sql"
-            ))?;
-        }
-        if version < 8 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/008_cleanup.sql"
-            ))?;
-        }
-        if version < 9 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/009_current_memory.sql"
-            ))?;
-            super::records::promote_unassigned_captures(&tx)?;
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/current_fts.sql"
-            ))?;
-        }
-        if version < 10 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/010_embedding.sql"
-            ))?;
-        }
-        if version < 11 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/011_agent_evidence.sql"
-            ))?;
-        }
-        if version < 12 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/012_library_revision.sql"
-            ))?;
-        }
-        if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
-            return Err(DataError::Integrity);
-        }
-        if version < 13 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/013_ui_changes.sql"
-            ))?;
-        }
-        if version < 14 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/014_model_vectors.sql"
-            ))?;
-        }
-        if version < 15 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/015_organization_reason.sql"
-            ))?;
-        }
-        if version < 16 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/016_agent_sessions.sql"
-            ))?;
-            super::agent_state::migrate_agent_drafts(&tx)?;
-        }
-        if version < 17 {
-            tx.execute_batch(include_str!(
-                "../../../../migrations/memory/017_conversation_titles.sql"
-            ))?;
         }
         if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
             return Err(DataError::Integrity);
         }
         tx.commit()?;
-        db.pragma_update(None, "foreign_keys", true)?;
-        db.pragma_update(None, "legacy_alter_table", false)?;
         if !db
             .prepare("SELECT 1 FROM sqlite_master WHERE name='record_fts' AND type='table'")?
             .exists([])?

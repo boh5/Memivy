@@ -1,8 +1,4 @@
--- Used both by the migration and explicit rebuild. Only active heads are indexed.
-DROP TRIGGER IF EXISTS capture_search_insert;
-DROP TRIGGER IF EXISTS version_search_insert;
-DROP TRIGGER IF EXISTS capture_search_erase;
-DROP TRIGGER IF EXISTS version_search_erase;
+-- Rebuild the current-memory search index.
 DROP TRIGGER IF EXISTS memory_search_head;
 DROP TRIGGER IF EXISTS memory_search_erase;
 DROP TRIGGER IF EXISTS memory_search_metadata;

@@ -5,7 +5,7 @@ fn id() -> String {
 }
 
 #[test]
-fn system_reasons_are_codes_and_historical_explanations_stay_literal() {
+fn system_reasons_are_codes() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let raw = capture(&store, "Original English capture 原始记录");
@@ -23,36 +23,6 @@ fn system_reasons_are_codes_and_historical_explanations_stay_literal() {
     let job = &store.organization_jobs(&key(&raw)).unwrap()[0];
     assert_eq!(job.reason, "");
     assert_eq!(job.reason_code, None);
-
-    // Exercise this migration's historical literal preservation independently
-    // of unrelated later schema additions.
-    let db = rusqlite::Connection::open(store.database_path()).unwrap();
-    let current_schema: i64 = db
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .unwrap();
-    db.execute(
-        "UPDATE organization_jobs SET reason='历史系统提示，不应反推代码'",
-        [],
-    )
-    .unwrap();
-    db.execute_batch("ALTER TABLE organization_jobs DROP COLUMN reason_code;")
-        .unwrap();
-    db.execute_batch(include_str!(
-        "../../../migrations/memory/015_organization_reason.sql"
-    ))
-    .unwrap();
-    db.pragma_update(None, "user_version", current_schema)
-        .unwrap();
-    drop(db);
-    drop(store);
-    let reopened = MemoryStore::open(dir.path()).unwrap();
-    let history = &reopened.organization_jobs(&key(&raw)).unwrap()[0];
-    assert_eq!(history.reason, "历史系统提示，不应反推代码");
-    assert_eq!(history.reason_code, None);
-    assert_eq!(
-        reopened.capture_by_id(&raw.capture_id).unwrap().text,
-        "Original English capture 原始记录"
-    );
 }
 fn capture(store: &MemoryStore, text: &str) -> CaptureResult {
     store

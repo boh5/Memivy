@@ -190,63 +190,6 @@ pub(super) fn create_captured_memory(
     })
 }
 
-/// One-time deterministic promotion, never historical batch AI organization.
-pub(super) fn promote_unassigned_captures(db: &Connection) -> Result<()> {
-    let captures: Vec<String> = db.prepare("SELECT c.id FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE s.availability='active' AND c.text IS NOT NULL AND NOT EXISTS(SELECT 1 FROM version_captures vc WHERE vc.capture_id=c.id) ORDER BY c.created_at,c.id")?
-        .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-    for capture in captures {
-        let archive = raw(db, &capture)?;
-        let review: Option<(String, String, Option<String>)> = db
-            .query_row(
-                "SELECT title,destination,merged_body FROM conclusion_intents WHERE capture_id=?",
-                [&capture],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        if let Some((title, destination, merged_body)) = review {
-            // Old failed conclusion saves are reviews, not independent memories.
-            if let Origin::Conversation { message_id, .. } = &archive.origin {
-                let key = format!("conclusion:{message_id}");
-                // Historical schema promotion creates an inert draft; schema 16
-                // converts this saved payload to the new manual-save/edit slots.
-                let draft = serde_json::json!({
-                    "key":key,"request_id":id(),"title":title,"body":archive.text,
-                    "expected_version":null,"origin":null,"context":[],
-                    "conclusion":{"destination":serde_json::from_str::<serde_json::Value>(&destination).map_err(|_|DataError::Integrity)?,"merged_body":merged_body}
-                });
-                db.execute(
-                    "INSERT OR IGNORE INTO workspace_drafts(key,payload) VALUES(?,?)",
-                    params![key, encode(&draft)?],
-                )?;
-            }
-            continue;
-        }
-        let saved = create_captured_memory(db, &archive)?;
-        let old_key = format!("capture:{capture}");
-        let payload: Option<String> = db
-            .query_row(
-                "SELECT payload FROM workspace_drafts WHERE key=?",
-                [&old_key],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(payload) = payload {
-            let mut draft: WorkspaceDraft =
-                serde_json::from_str(&payload).map_err(|_| DataError::Integrity)?;
-            draft.key = format!("memory:{}", saved.memory_id);
-            draft.expected_version = Some(saved.version_id.clone());
-            db.execute(
-                "INSERT INTO workspace_drafts(key,payload) VALUES(?,?)",
-                params![draft.key, encode(&draft)?],
-            )?;
-            db.execute("DELETE FROM workspace_drafts WHERE key=?", [&old_key])?;
-        }
-
-        db.execute("UPDATE record_pins SET kind='memory',record_id=?2 WHERE kind='capture' AND record_id=?1",params![capture,saved.memory_id])?;
-        db.execute("UPDATE collection_entries SET kind='memory',record_id=?2 WHERE kind='capture' AND record_id=?1",params![capture,saved.memory_id])?;
-    }
-    Ok(())
-}
 pub(super) fn version(db: &Connection, id: &str) -> Result<Version> {
     let mut v=db.query_row("SELECT id,memory_id,parent_id,title,body,actor,COALESCE(review_kind,reason),created_at FROM memory_versions WHERE id=? AND body IS NOT NULL",[id],|r|Ok(Version{id:r.get(0)?,memory_id:r.get(1)?,parent_id:r.get(2)?,title:r.get(3)?,body:r.get(4)?,actor:r.get(5)?,reason:r.get(6)?,created_at:r.get(7)?,capture_ids:vec![]}))?;
     v.capture_ids = db
@@ -940,10 +883,6 @@ fn erase_capture(db: &Connection, capture: &str) -> Result<()> {
     )?;
     db.execute(
         "UPDATE capture_state SET availability='purged',trash_owner=NULL WHERE capture_id=?",
-        [capture],
-    )?;
-    db.execute(
-        "DELETE FROM conclusion_intents WHERE capture_id=?",
         [capture],
     )?;
     // Withdrawn memories have no library/trash entry. Erase their snapshots
