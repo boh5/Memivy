@@ -1,16 +1,16 @@
-.formal-app .main-workspace {
+.memory-app .main-workspace {
   min-width: 0;
 }
-.formal-app .home-page[hidden] {
+.memory-app .home-page[hidden] {
   display: none;
 }
-.formal-app .home-page {
+.memory-app .home-page {
   padding-bottom: 50px;
 }
-.formal-app .sidebar nav button {
+.memory-app .sidebar nav button {
   min-height: 42px;
 }
-.formal-app .home-heading h1 {
+.memory-app .home-heading h1 {
   font-size: 32px;
 }
 .workspace-composer {
@@ -111,7 +111,7 @@
   letter-spacing: -0.6px;
   margin-top: 5px;
 }
-.formal-app .library-search {
+.memory-app .library-search {
   margin: 0 18px;
   padding: 0 10px;
   height: 40px;
@@ -119,7 +119,7 @@
   border-radius: 10px;
   flex-shrink: 0;
 }
-.formal-app .library-search input {
+.memory-app .library-search input {
   font-size: 12px;
   width: 0;
   min-width: 0;
@@ -632,7 +632,7 @@ mark {
   overflow-wrap: anywhere;
 }
 @media (max-width: 1050px) {
-  .formal-app .sidebar {
+  .memory-app .sidebar {
     width: 194px;
     padding-left: 12px;
     padding-right: 12px;
@@ -671,7 +671,7 @@ mark {
     padding-left: 34px;
     padding-right: 34px;
   }
-  .formal-app .home-heading h1 {
+  .memory-app .home-heading h1 {
     font-size: 28px;
   }
   .composer-top > span {
@@ -679,7 +679,7 @@ mark {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .formal-app * {
+  .memory-app * {
     transition: none !important;
     scroll-behavior: auto !important;
   }

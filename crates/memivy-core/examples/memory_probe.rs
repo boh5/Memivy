@@ -1,4 +1,4 @@
-//! Phase 2 process test harness. Uses only synthetic content and an explicit root.
+//! MemoryStore process test harness. Uses only synthetic content and an explicit root.
 use memivy_core::memory::*;
 use std::{io::Write, path::PathBuf};
 use uuid::Uuid;
@@ -90,7 +90,7 @@ fn run() -> Result<()> {
                 request_id: args.get(3).ok_or(DataError::Invalid)?.clone(),
                 text: args.get(4).ok_or(DataError::Invalid)?.clone(),
                 origin: Origin::User {
-                    app: "Phase 2 process test".into(),
+                    app: "MemoryStore process test".into(),
                     project: None,
                     uri: None,
                 },

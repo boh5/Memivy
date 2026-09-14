@@ -1,6 +1,6 @@
 {
   "identifier": "main-titlebar",
-  "description": "Allow dragging the formal main window from empty titlebar regions.",
+  "description": "Allow dragging the main window from empty titlebar regions.",
   "windows": ["main"],
   "permissions": ["core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize"]
 }

@@ -1203,7 +1203,7 @@ fn lock_timeout_and_database_errors_do_not_expose_content_or_leave_partial_versi
 }
 
 #[test]
-fn formal_migration_preserves_v1_and_rejects_unrelated_future_and_partial_migrations() {
+fn memory_migration_preserves_v1_and_rejects_unrelated_future_and_partial_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("memivy.db");
     let db = Connection::open(&path).unwrap();

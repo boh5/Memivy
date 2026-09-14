@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import threading
 import uuid
-from verify_phase6 import Client, ROOT
+from verify_mcp import Client, ROOT
 
 
 def check():

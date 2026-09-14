@@ -135,7 +135,7 @@ export default function Desktop() {
       if (native) await call("desktop_drag", { phase: "end" });
     }).catch(e => setError(errorText(e)));
   }
-  return <div ref={root} className={`formal-desktop ${state?.expanded ? "is-open" : ""}`}
+  return <div ref={root} className={`desktop-entry ${state?.expanded ? "is-open" : ""}`}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={e => { if (e.key === "Escape" && !e.repeat && !e.nativeEvent.isComposing && !composing.current && e.keyCode !== 229 && !document.querySelector("dialog[open]")) { e.preventDefault(); void dismiss("explicit"); } }}>
     {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>{t("desktop.saved")}</span><button onClick={() => void expand(state.last_memory ? { kind: "memory", id: state.last_memory } : null)}>{t("desktop.view")}</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? t("desktop.leafSavedAria", { saved: t("desktop.saved"), product: "Memivy" }) : t("desktop.leafAria", { product: "Memivy" })}

@@ -1,4 +1,4 @@
-"""Real stdio / multi-process Phase 6 checks, exclusively in temporary data.
+"""MCP stdio and multi-process checks, exclusively in temporary data.
 
 Build memivy-mcp and memivy-core's memory_probe first. An optional --binary
 points at the actual bundled sidecar. No model or client credentials required.
@@ -70,8 +70,8 @@ class Client:
         assert not stderr, stderr
 
 def check(binary):
-    with tempfile.TemporaryDirectory(prefix="memivy-phase6-") as tmp:
-        data = Path(tmp)/"formal"
+    with tempfile.TemporaryDirectory(prefix="memivy-mcp-") as tmp:
+        data = Path(tmp)/"library"
         client = Client(binary, data)
         def switch(enabled):
             temp = data/"mcp-test.tmp"

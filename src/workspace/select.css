@@ -14,4 +14,4 @@
 .workspace-select-menu [role=option]>span:first-child{min-width:0}
 .library-filters .workspace-select-trigger{min-height:34px;padding:6px 8px;font-size:11px}
 .library-filters input{height:34px;padding:5px 8px;border-radius:9px;font:inherit}
-.formal-app button:focus-visible,.workspace-dialog button:focus-visible{outline:2px solid #a58a29;outline-offset:2px}
+.memory-app button:focus-visible,.workspace-dialog button:focus-visible{outline:2px solid #a58a29;outline-offset:2px}

@@ -227,7 +227,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "window_size_invalid",
 ];
 
-// Temporary safe boundary for legacy native subsystems whose internals still return strings.
+// Map string errors from native subsystems to known error codes.
 // Never inspect translated text to infer an error type.
 impl From<String> for HostError {
     fn from(value: String) -> Self {

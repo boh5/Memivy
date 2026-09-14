@@ -241,7 +241,7 @@ memivy/
 | 搜索基础 | 一个 FTS5 trigram 索引随事实表写入/擦除维护；短词使用字面匹配。中文、英文、特殊字符、标题与原话组合、旧版本和回收站排除测试通过。排序权重、来源/时间/项目过滤和索引重建入口仍在阶段 3。 |
 | 迁移与恢复 | 正式 v1 → v2 保留已有原话，DDL 中途失败完整回滚；拒绝 Phase 1、无关和较新数据库。SQLite backup API 生成一致性备份，恢复到新空目录；版本、回收站、会话和重试记录可恢复。Markdown 同一读快照导出完整有效历史与来源，会话单独标识；备份/导出均不包含独立配置密钥。 |
 | 自动检查 | `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline` 通过。共 35 项测试：19 项新数据层测试、原有 14 项 core 测试及 2 项 host 测试；`npm run build` 通过。 |
-| 真实进程 | `cargo build -p memivy-core --example memory_probe --offline` 后运行 `python3 scripts/verify_phase2.py` 通过：24 个独立进程保存；8 次同请求并发重试只产生一条；原话及版本/回执提交后实际 SIGKILL 仍恢复；另一个进程持续写入期间备份一致；最终 47 条合成原话、1 个版本，SQLite 3.53.2，integrity 与 foreign-key 检查通过。 |
+| 真实进程 | `cargo build -p memivy-core --example memory_probe --offline` 后运行 `python3 scripts/verify_memory_store.py` 通过：24 个独立进程保存；8 次同请求并发重试只产生一条；原话及版本/回执提交后实际 SIGKILL 仍恢复；另一个进程持续写入期间备份一致；最终 47 条合成原话、1 个版本，SQLite 3.53.2，integrity 与 foreign-key 检查通过。 |
 | 范围边界 | 新接口不调用模型。未切换现有 UI/MCP、未修改 Demo、品牌或 DESIGN.md；未做本轮原生交互、真实模型质量或物理断电测试，未生成新原生包、提交或推送。正式 UI 与 MCP 接入、完整检索排序及 AI 整理由后续阶段完成。 |
 
 **同日 Review 修复与提交前验证：**
@@ -249,7 +249,7 @@ memivy/
 - 修复永久删除的隐藏副本：删除原话时同步擦除关联的已撤销版本及 FTS 正文，支持显式清空已撤销记忆；备份正文检查、失败回滚、共享内容保留及重复清空通过。
 - 修复撤销纠错后的操作中断：新回执指向恢复后的归属和新版本；新建/已有来源与目标的四种组合均连续纠错、撤销三轮，重试去重和后续编辑保护通过。
 - 修复并发首次打开误报 `Schema`：初始化元数据在同一读快照读取，写锁内再次核对。100 轮、每轮 4 个连接的回归测试通过；真实进程验证新增 8 个空库、每库 4 个进程同时打开，正常锁竞争可重试，未再误报格式错误。
-- 提交前 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline`（44 项：24 项正式数据层、14 项原有 core、6 项 host）、`npm run build` 通过；`python3 scripts/verify_phase2.py` 的首次打开、并发写入、去重、SIGKILL 和在线备份验证，以及 `python3 scripts/verify_phase1.py` 的原有进程/stdio MCP 验证均通过。测试仅使用临时合成数据；本次数据修复未改变已验收的原生交互。
+- 提交前 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`cargo test --workspace --offline`（44 项：24 项正式数据层、14 项原有 core、6 项 host）、`npm run build` 通过；`python3 scripts/verify_memory_store.py` 的首次打开、并发写入、去重、SIGKILL 和在线备份验证，以及 `python3 scripts/verify_phase1.py` 的原有进程/stdio MCP 验证均通过。测试仅使用临时合成数据；本次数据修复未改变已验收的原生交互。
 
 ### 阶段 3：按新版 Demo 实现首页与记忆库基础界面
 
@@ -283,7 +283,7 @@ memivy/
 | 版本与草稿 | 原话保存后返回确认；手工编辑创建版本并显示可撤销回执。旧版本恢复会新建版本，陈旧编辑拒绝覆盖并保留草稿；首次版本撤销返回原话。草稿写入独立表，跨导航排队、重试，退出前等待落盘；永久擦除也清理对应草稿，并拒绝迟到写入。 |
 | 搜索与数据检查 | 新增 `memory_library` 8 项回归全部通过：标题排序、限量前过滤、分页、中文短词/URL/字面特殊字符、真实来源片段、版本并发保护、草稿不进入搜索/MCP/导出、删除状态隔离、缺失索引重建。最后的独立删除来源边界修正后重跑 8 项通过。 |
 | 全部工程检查 | `npm run build`、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings` 通过。`cargo test --workspace --offline` 共 52 项通过（含正式数据 24 项、库查询 8 项、样机/模型/host 相关检查）。过程中修复了双 `generate_context!` 导致 dev/test 重复嵌入 plist 的问题，正式与样机现共用一次 context 生成。 |
-| 真实进程检查 | 构建 core 两个 probe 与 MCP 后，`verify_phase1.py`、`verify_phase2.py` 均通过：跨进程并发/幂等、确认落盘后 SIGKILL、版本/回执保留、在线备份、SQLite 完整性和 MCP stdio。使用临时合成数据，无真实模型请求。 |
+| 真实进程检查 | 构建 core 两个 probe 与 MCP 后，`verify_phase1.py`、`verify_memory_store.py` 均通过：跨进程并发/幂等、确认落盘后 SIGKILL、版本/回执保留、在线备份、SQLite 完整性和 MCP stdio。使用临时合成数据，无真实模型请求。 |
 | 原生与视觉 | 已构建并启动未签名 debug `target/debug/bundle/macos/Memivy.app`。在显式临时正式目录中实际完成中文原话保存、手工编辑、原话逐字核对、来源关键词找回、版本历史展示、首次编辑撤销、⌘N/⌘K/⌘S、退出重启草稿恢复、原生目录选择导出。1140×790 原生布局及 760×560 浏览器列表/正文/返回通过视觉核对；编辑框在草稿就绪后获取焦点。 |
 | 导出与设置 | 原生导出产生 memories/captures/conversations Markdown 与 manifest，逐项核对包含保存的正文及原话，未提交草稿不在导出中。设置提供索引重建与独立模型配置/固定文字连接测试；配置损坏不阻断记录和搜索，重新填写可显式替换不可读配置。未代测用户模型端点或改写用户凭据。 |
 | 证据边界 | 原生中文粘贴以实际输入值核对；部分自动化剪贴板调用报超时但文本已输入，不按工具返回单独判定。未逐项实测物理中文输入法候选词、全屏/多屏或大规模长时性能；回收站恢复、永久擦除、陈旧版本与索引重建的核心行为由回归测试覆盖，未将它们全部标记为原生点击实测。原型此前验收保持，不重新追加原型体验验收。 |
@@ -396,8 +396,8 @@ memivy/
 - 已接通正式 MemoryStore 自动整理：捕捉与 pending 任务原子落盘；单个后台消费者用有限候选执行一次模型调用；new/append/defer、局部更新、派生关键词、重试、回执、纠正与撤销均由 Rust 核心处理。未配置模型不阻塞捕捉和搜索，确认的讨论结论不再自动整理。
 - 问答按多个独立关键词合并排名后限量，回忆逐段关联引用，保存实际证据版本及节选位置，区分当前/历史记录和新建议。补齐已有记忆作为结论目标、默认补充、融合预览与准确保存；过时目标保留确认原话并返回可纠正状态。
 - Rust 工作区测试 **74 项通过**；UI 行为测试 **37 项通过**。新增覆盖任务抢占/恢复/去重、手动归属与模型竞争、非法局部修改、版本变化/删除、关键词重建与清理、无证据/无引用、长文实际命中片段、历史版本、结论追加/融合/撤销、过期预览与目标加载失败。`cargo fmt --all -- --check`、全目标 Clippy（warnings denied）、前端构建及原生 debug bundle 已执行。
-- `scripts/verify_phase5.py` 实际强杀已认领任务的进程，重启后沿用同一 attempt，仅生成一个版本与回执，原话逐字保留；重新执行不重复应用。`scripts/verify_phase2.py` 的并发写入、原话/版本强杀恢复、在线备份与完整性检查继续通过。
-- 固定合成整理集位于 `crates/memivy-core/tests/fixtures/phase5_cases.json`：16 个 new、16 个 append、8 个 defer。当前本机配置的 `gpt-5.6-luna` 首轮 **36/40**，其中两次 HTTP 500，两次因缺失指代而错误续接。收紧“候选次序不能解释第二个/刚才”等规则后，全组重跑 **40/40** 通过动作、目标和事务校验；本轮中位耗时约 **4.67 秒**，最大 **8.63 秒**。人工核对了变化、犹豫、否定、人物区分与提示注入案例的正文，未发现将假设变成确定事实；这不是对任意用户资料或其他模型的准确率保证。
+- `scripts/verify_organization_recovery.py` 实际强杀已认领任务的进程，重启后沿用同一 attempt，仅生成一个版本与回执，原话逐字保留；重新执行不重复应用。`scripts/verify_memory_store.py` 的并发写入、原话/版本强杀恢复、在线备份与完整性检查继续通过。
+- 固定合成整理集位于 `crates/memivy-core/tests/fixtures/organization_cases.json`：16 个 new、16 个 append、8 个 defer。当前本机配置的 `gpt-5.6-luna` 首轮 **36/40**，其中两次 HTTP 500，两次因缺失指代而错误续接。收紧“候选次序不能解释第二个/刚才”等规则后，全组重跑 **40/40** 通过动作、目标和事务校验；本轮中位耗时约 **4.67 秒**，最大 **8.63 秒**。人工核对了变化、犹豫、否定、人物区分与提示注入案例的正文，未发现将假设变成确定事实；这不是对任意用户资料或其他模型的准确率保证。
 - 真实问答链使用独立合成库：当前判断、过去变化、收费追问、新建议、无个人经历证据共 5 轮，以及一次融合预览。早期一次服务端失败；另一轮观察到组合长词造成漏搜，改为独立主题词/关注点后重跑，前 4 轮均找到相关版本，最后一轮无证据时不编造经历。所有问答与预览均未写入记忆。原始结果保存在忽略目录 `research/phase5-eval/`，可通过 `intelligence_probe`、`discussion_probe` 复核。
 - 原生实测采用 `com.memivy.phase5qa` 独立构建和 `/private/tmp/memivy-phase5-native` 合成库，明确环境变量后确认空库才输入测试文字。已看到保存后 processing、新建/补充回执、前后正文、撤销后的原话、按原话另存、从记忆讨论、逐段引用及当轮节选、结论选择已有目标、融合预览、手动修改后准确保存，并在重启后找回记忆与话题。确认前仅有 2 条捕捉；确认后恰好增加 1 条结论来源，最终版本与审核文字逐字相同。测试库检查未含配置中的 Key。后续真实端点失败时，原生界面显示保留原话和重新整理入口，点击后回到 processing，最终返回 defer，未新增重复捕捉。默认追加已有记忆也在原生端复核，结果等于此前全文加上审核的结论；保存与撤销均返回真实回执。最终测试窗口已关闭。
 - 原生启动曾受 shell 沙箱阻断；早期仅改 plist 的副本被 CUA 自动启动到默认数据上下文，未在该窗口输入或执行内容动作，核查默认库没有整理任务。之后改用独立 Tauri identifier 和明确临时数据环境，并验证空库后继续。正常运行窗口需要重启到本阶段构建；不声称旧进程已加载新代码。
@@ -436,7 +436,7 @@ memivy/
 | 层面 | 已完成证据与边界 |
 |---|---|
 | 构建与回归 | 前端 TypeScript/Vite、43 项 Node UI 回归、Rust fmt、Clippy（warnings 视为错误）、全工作区 86 项 Rust 测试通过。新增 6 项核心 MCP 回归与 2 项设置交互回归；原有测试仍通过。 |
-| 正式协议与进程 | `verify_phase6.py` 对实际打包 sidecar 通过：2025-11-25 initialize 与 2026-07-28 discover/请求元数据、两个工具、默认关闭/动态关闭、原文与来源、重试去重/冲突、非法参数与未知工具、12 个应用/MCP 并发写入、确认后 SIGKILL、应用未运行时 pending、帧限额、EOF 与 SQLite 完整性。 |
+| 正式协议与进程 | `verify_mcp.py` 对实际打包 sidecar 通过：2025-11-25 initialize 与 2026-07-28 discover/请求元数据、两个工具、默认关闭/动态关闭、原文与来源、重试去重/冲突、非法参数与未知工具、12 个应用/MCP 并发写入、确认后 SIGKILL、应用未运行时 pending、帧限额、EOF 与 SQLite 完整性。 |
 | 真实 Agent 样本 | 本机 Codex CLI 与 Claude Code 分别在独立合成库完成一次明确保存及检索；核对工具调用记录和数据库，均仅保存一次原文，未编造 project/URI。这是标准 MCP 的兼容性样本，不形成客户端白名单，也不承诺任意客户端会主动调用。 |
 | 原生设置和生命周期 | 独立 QA bundle 实测开关、配置复制、关闭时本地检查仍可用、检查不宣称 Agent 已连接；无模型时外部记录自动出现，刷新保留正在输入的中文草稿。退出后通过 MCP 保存并检索，重启后草稿仍在；三个 pending 任务通过本机固定协议端点整理为当前记忆，显示回执、版本与 Agent 原话来源。固定端点用于工程闭环，不代表模型质量测试。 |
 | 真实包 | release app 与包内 MCP 均为 arm64，Info.plist 最低系统 26.0；`codesign --verify --deep --strict` 通过。最终 DMG 只读挂载及校验通过，包含应用、Applications 链接与说明。从 DMG 复制到隔离安装目录的原始包实际启动、中文保存、同包 MCP 诊断与配置路径通过，安装副本的 MCP 再跑协议检查通过。 |
@@ -465,7 +465,7 @@ memivy/
 - 普通 RAG 的 12 条固定合成案例全部完成并保持无自动记忆写入；逐条对照冻结材料做了 Codex 自查。`qa-09` 保留收费未定与订阅假设，未再补出旧收费方式。自查不是用户语义判定，也不新增运行时核查模型。
 - 一万条合成记忆及对应原话、版本、回执与 FTS 索引的 debug 测试，每类执行 20 次：普通 FTS 查询 P95 **5.7ms**，两个中文短词查询 **113.9ms**，相关记忆 **5.9ms**。初版相关查询超过 250ms，EXPLAIN 确认连接顺序使每个命中扫描全库；修为从来源索引出发并按需补查询后通过。SQL 总预算为 250ms，不将其称为任意数据规模下的响应承诺。
 - 原生 debug 应用已实际完成：详情下方相关记忆显示与选择、进入含两份依据的现有讨论、原生保存备份、选择并校验备份、确认后的重启恢复。恢复后回到备份的 6 条记忆；副本保存了后增记忆和讨论草稿，两库完整性检查通过。发现并修正退出确认可能重复消费的问题；最终改用 Tauri 请求重启并保持恢复请求直到完成。最终包含 MCP 的 app 已再次实际确认自动重启、子进程持续运行及恢复成功界面。测试使用隔离库，不进行正式用户库恢复。
-- 实际 stdio / 跨进程测试：恢复前并发写入的 **45** 条合成原话均进入自动副本；恢复等待期间新 MCP 初始化和原连接数据调用均被阻止；恢复后原 MCP 连接直接读取同一路径的新库。见 `scripts/verify_restore.py`。最终 app 内的 MCP 二进制也通过 `verify_phase6.py --binary` 全套实际 stdio、并发写入和完整性验证。
+- 实际 stdio / 跨进程测试：恢复前并发写入的 **45** 条合成原话均进入自动副本；恢复等待期间新 MCP 初始化和原连接数据调用均被阻止；恢复后原 MCP 连接直接读取同一路径的新库。见 `scripts/verify_restore.py`。最终 app 内的 MCP 二进制也通过 `verify_mcp.py --binary` 全套实际 stdio、并发写入和完整性验证。
 - 新增覆盖 Function Calling 参数/单调用、旧版本召回与撤销隔离、相关结果过期与刷新合并、显式确认恢复、损坏与过新备份、替换前后中断回退、退出重复确认的回归。全 workspace Rust 回归、相关新增测试、Clippy `-D warnings`、前端构建及包含正式 MCP 的原生 app 构建实际通过。UI 原有文件监听测试在沙箱内遇到 EMFILE，正常 macOS 权限下完整 UI 回归 **60/60** 通过；不改动已有的 Vite 修复。
 
 原始输出保存在忽略目录 `research/five-improvements/`（模型逐项结果、源码指纹、性能、进程验证和 self-review）。保留此前性能修复与历史验收记录。尚未在另一台 Mac 验证，也未模拟真实磁盘耗尽或硬件断电；中断覆盖为受控文件状态/进程验证。本阶段完成开发自查，等待用户查看，不标记为用户验收或公开发布。
@@ -600,7 +600,7 @@ memivy/
 
 实际验证（2026-09-10）：
 - `cargo test --workspace --offline` 全部通过（含真实 90 秒模型超时）；`cargo clippy --workspace --all-targets --offline -- -D warnings`、格式检查及 `npm run build` 通过。UI 全套 123 项通过；最后状态文案修改后重跑相关 11 项通过。Vite 文件监听测试在正常权限下运行，沙箱内的 EMFILE 不作为产品缺陷。
-- schema 8 升级、立即可用/归并/草稿/结论冲突等专项通过；真实进程 `verify_phase2.py`、`verify_phase6.py` 通过，覆盖多进程写入、幂等、强杀持久性、备份恢复和 MCP 同一搜索结果。
+- schema 8 升级、立即可用/归并/草稿/结论冲突等专项通过；真实进程 `verify_memory_store.py`、`verify_mcp.py` 通过，覆盖多进程写入、幂等、强杀持久性、备份恢复和 MCP 同一搜索结果。
 - 一万条合成 Memory：FTS p95 14.8ms、两字查询 56.7ms、相关记忆 80.9ms；置顶 3.85ms、专题列表 4.07ms、回顾 27.97ms、专题检索 34.99ms。测试发现并修正了搜索关联顺序造成的短词超时，未放宽 500ms 预算。
 - 独立标识的原生 QA 包和临时数据库：未配置 AI 保存后立即出现在记忆库，可编辑生成版本；输入归档完整保留，恢复预览后生成第三个版本；阅读页视觉保持原设计。结论冲突及迟到响应以真实组件/核心夹具验证，未声称已做外部模型或多窗口原生故障实测。
 - 独立 Review-Fix 完成：修复无任务领取时暂停状态回滚、归并目标草稿保护、删除讨论遗留结论草稿；结论专项另修复原子消费草稿、双窗口冲突入口和迟到融合覆盖。最终复审无剩余阻断项，搜索性能修复后再次独立重跑搜索 2 项及当前 Memory 9 项通过。
@@ -720,7 +720,7 @@ memivy/
 
 ### 5.3 Memory Agent 合同集
 
-- 复用 [phase5_cases.json](crates/memivy-core/tests/fixtures/phase5_cases.json) 的 **40 条语义案例**：16 new、16 append、8 defer；新想法、人物/项目不同、明确改变、犹豫/否定、因果不确定、小样本、缺少指代和提示注入均保留。
+- 复用 [organization_cases.json](crates/memivy-core/tests/fixtures/organization_cases.json) 的 **40 条语义案例**：16 new、16 append、8 defer；新想法、人物/项目不同、明确改变、犹豫/否定、因果不确定、小样本、缺少指代和提示注入均保留。
 - [organization_review.json](crates/memivy-core/tests/fixtures/organization_review.json) 为每例补齐判定依据和必须保留的语义。标签是已有开发预期，**尚未声称经过用户逐条人工裁定**；有争议的标签先请用户裁定，不能看完模型输出后为提高分数改答案。
 - [organization_failures.json](crates/memivy-core/tests/fixtures/organization_failures.json) 加入 **8 条独立故障合同**：未知目标、截断、空结果、429、500、连接中断、超限、正式 90 秒超时。由 [core_faults.rs](crates/memivy-core/tests/core_faults.rs) 经真实 loopback HTTP 和正式整理调用验证，不把这些确定性故障算进真实模型准确率。
 - [intelligence_probe](crates/memivy-core/examples/intelligence_probe.rs) 保存候选、动作、目标、最终正文、原话保留、重放结果、耗时、固定输入/实现摘要及逐条复核表。动作或目标错误、核心拒绝写入、模型调用失败均计入失败，返回非零；正文含义、未涉及内容和不确定性需另行核对。
@@ -739,16 +739,16 @@ memivy/
 
 | 故障 | 可重复资产及判定 |
 |---|---|
-| 原话/版本确认后立即杀进程 | [verify_phase2.py](scripts/verify_phase2.py)：实际 SIGKILL 后检查原话、版本、回执与完整性。 |
+| 原话/版本确认后立即杀进程 | [verify_memory_store.py](scripts/verify_memory_store.py)：实际 SIGKILL 后检查原话、版本、回执与完整性。 |
 | 模型坏响应、限流、超时、中断与重复结果 | `core_faults.rs` 的 8 条合同：无部分记忆写入，原话与关键词搜索仍可用；明确重试后只产生一个版本/回执。 |
 | AI 事务执行到最后失败 | `organization_failure_after_receipt_and_index_updates_rolls_back_every_effect` 在更新整理任务终态前触发 SQL ABORT；检查版本、来源状态、回执、搜索词及索引回滚，同一 attempt 可恢复。 |
-| 已认领整理任务强杀 | [verify_phase5.py](scripts/verify_phase5.py)：重启沿用 attempt，恰好应用一次。 |
+| 已认领整理任务强杀 | [verify_organization_recovery.py](scripts/verify_organization_recovery.py)：重启沿用 attempt，恰好应用一次。 |
 | 取消后迟到响应、生成中退出 | `memory_discussion.rs` / `memory_data.rs` 的取消和恢复回归；[verify_core_faults.py](scripts/verify_core_faults.py) 强杀已持久化 pending 问答进程，重启变 interrupted，长期记忆计数不变。 |
 | 确认保存与编辑/删除并发 | `memory_intelligence.rs` / `memory_data.rs` 的过期目标、删除来源、完整稿保留及并发编辑回归。 |
-| UI 核心入口与 MCP 同时写入 | [verify_phase6.py](scripts/verify_phase6.py)：真实 stdio 与独立 MemoryStore 进程并发写入、幂等、开关、边界及 SIGKILL。原生 UI 刷新另验。 |
+| UI 核心入口与 MCP 同时写入 | [verify_mcp.py](scripts/verify_mcp.py)：真实 stdio 与独立 MemoryStore 进程并发写入、幂等、开关、边界及 SIGKILL。原生 UI 刷新另验。 |
 | migration 中断后重启 | `verify_core_faults.py` 以仓库迁移 SQL 在 SQLite 未提交事务中设置测试停点并 SIGKILL，确认无半套 schema 后交给 MemoryStore 重新初始化；已有 DDL 失败回归验证迁移整体回滚。停点仅在测试 harness，不是对实际 `MemoryStore::open` 中途插桩，也不等于断电模拟。 |
 | 索引删除和重建 | 原有 `rebuilding_missing_index_recovers_facts_and_preserves_erasure` 加 28 条双路径固定搜索集。 |
-| 活动库备份与恢复 | `verify_phase2.py` 在并发写入期间调用备份 API，并恢复到全新目录；`memory_data.rs` 核对历史、会话、回收站和来源。 |
+| 活动库备份与恢复 | `verify_memory_store.py` 在并发写入期间调用备份 API，并恢复到全新目录；`memory_data.rs` 核对历史、会话、回收站和来源。 |
 | Key 出现在日志/导出/备份 | `core_faults.rs` 将合成 Key 放入真实配置与错误 HTTP 正文，检查脱敏错误、单篇导出、SQLite 及备份；模型运行另扫描整组证据是否包含实际配置 Key。 |
 
 故障设计参考 [SQLite 的崩溃与故障注入测试](https://www.sqlite.org/testing.html)，本项目检查的是业务事务和应用恢复，不声称复现了 SQLite 全套磁盘 I/O 故障测试。
@@ -1026,7 +1026,7 @@ Astra 首轮发现五组问题：本地语音标签、恢复结果中文、错�
 - `npm run build` 通过；前端 233 项中 232 项在沙箱中通过，文件监听测试因沙箱 EMFILE 失败，沙箱外单独重跑通过。
 - `cargo test --workspace --all-targets --offline`：264 项通过、2 项显式性能测试忽略。迁入配置保护测试后，`cargo test -p memivy storage:: --offline` 的 5 项全部通过。
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --offline -- -D warnings`、`git diff --check` 通过。
-- 重建正式 `memory_probe` 与 `memivy-mcp`；`verify_phase2.py` 和 `verify_phase6.py` 的真实进程、stdio、并发写入、崩溃持久性、备份恢复及完整性检查通过。
+- 重建正式 `memory_probe` 与 `memivy-mcp`；`verify_memory_store.py` 和 `verify_mcp.py` 的真实进程、stdio、并发写入、崩溃持久性、备份恢复及完整性检查通过。
 - 正式 debug app 构建通过。浏览器确认列表与阅读页面布局；额外构建独立 identifier `com.memivy.sourceqa` 的临时测试包，在 `/private/tmp/memivy-source-removal-qa` 检查原生主窗口、中文粘贴草稿收起保留和桌面快捷输入窗口。
 - 首次沙箱内启动未能使用测试资料库，发现后停止该检查进程，再在沙箱外以显式隔离目录启动，确认测试数据库创建后继续。未在默认资料库进行测试输入。
 
@@ -1034,3 +1034,12 @@ Astra 首轮发现五组问题：本地语音标签、恢复结果中文、错�
 
 
 本轮全量改动 Review（2026-09-13）：复查全部 tracked diff 与新增 `base.css`、独立模型 probe、源码导读，核对删除模块的正式调用方、样式选择器、配置路径保护与正式数据库边界，未发现新的代码缺陷。修正 AGENTS.md 中已失效的延迟诊断入口说明与原生构建命令参数位置，明确先核对实际测试资料库再做原生输入检查；没有增加墓碑测试。复跑前端构建、i18n、fmt、Clippy、全 workspace/all-targets Rust 测试（268 通过、2 项显式性能测试忽略）。前端 233 项中 232 项在沙箱通过，文件监听项沙箱 EMFILE 后在沙箱外通过。文档本地链接和 diff 检查通过。本轮原生证据沿用上面的同版代码检查，没有再次运行真实模型或录音。无待用户决策项，未提交或推送。
+
+
+## 功能命名清理（2026-09-14）
+
+用户要求源码不以开发阶段命名。验证脚本按记忆库、整理恢复和 MCP 职责改名，整理夹具改为 `organization_cases.json`，同步调用、导入和文档路径。移除主窗口／快捷入口的 `formal` 样式前缀及注释、测试名和错误文案中的样机区分措辞。历史阶段与验收记录保留；拖动事件和磁盘恢复协议中的 `phase` 表示实际运行状态，不属于开发阶段命名，不改动持久化格式。
+
+验证中发现整理恢复脚本仍使用立即生成记忆之前的版本数假设及旧 capture 返回字段，已按当前 `capture_id` / `memory_id` / `version_id` 修正，并验证原版本保留、整理只增加一个版本、不另建记忆、重试不重复写入和原话逐字保留。
+
+实际检查：Rust fmt、Clippy、全 workspace/all-targets 测试及前端构建通过；前端 232 项在沙箱内通过，文件监听项因沙箱 EMFILE 单独在沙箱外通过，共 233 项通过。记忆库多进程、整理强杀恢复、核心故障、MCP stdio、活动库备份恢复检查通过。初次汇总保留失败记录于 `research/core-tests/20260914T022027Z-4426df51/`，修复后单独重跑失败项，不改写原始记录。浏览器检查主窗口及快捷入口布局正常，样式值和交互逻辑未改变。本轮未重新打包原生 app，未复验原生输入或真实模型；未提交或推送。

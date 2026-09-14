@@ -345,7 +345,7 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
     s.save_conversation_draft(&conversation, "unsaved_chat_marker")
         .unwrap();
     let a = capture(&s, "原始来源 A", "agent", Some("工程"));
-    let r = organize(&s, &a, "正式记忆", "当前记忆");
+    let r = organize(&s, &a, "示例记忆", "当前记忆");
     let b = capture(&s, "原始来源 B", "user", Some("生活"));
     s.apply_capture(&ChangeRequest {
         request_id: id(),
@@ -354,7 +354,7 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
             memory_id: key(&r).id.clone(),
             expected_version: r.after_version.unwrap(),
         },
-        title: "正式记忆".into(),
+        title: "示例记忆".into(),
         body: "当前记忆".into(),
         actor: Actor::Ai,
     })

@@ -137,7 +137,7 @@ impl ServerHandler for Memivy {
 #[tokio::main]
 async fn main() {
     let run = async {
-        let store = MemoryStore::open_environment().map_err(|_| "正式记忆库无法打开")?;
+        let store = MemoryStore::open_environment().map_err(|_| "记忆库无法打开")?;
         let server = Memivy {
             store,
             tool_router: Memivy::tool_router(),

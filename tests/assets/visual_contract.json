@@ -1,6 +1,6 @@
 {
   "version":1,
-  "authority":"DEVELOPMENT_PLAN.md Phase 3-6: current formal source; Demo v0.1 is historical visual reference only",
+  "authority":"Current application source and DESIGN.md; verification evidence is recorded in DEVELOPMENT_PLAN.md",
   "fixture":"crates/memivy-core/tests/fixtures/core_search.json",
   "window_sizes":[[1140,790],[760,560]],
   "capture_unit":"macOS logical window points; record screenshot pixel size and backing scale separately",

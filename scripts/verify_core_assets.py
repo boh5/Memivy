@@ -1,4 +1,4 @@
-"""Run Section 5 assets in isolated data; model calls require --model-config.
+"""Run core regression assets in isolated data; model calls require --model-config.
 
 Evidence is append-only by run directory. A completed offline run does not mark
 manual visual checks or semantic review as passed. No credentials are copied.
@@ -95,9 +95,9 @@ def main():
         env['MEMIVY_TEST_PROBE'] = str(artifacts['memory_probe'])
         report['binary_sha256'] = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in artifacts.items()}
         if not args.models_only:
-            for script in ['verify_phase2', 'verify_phase5', 'verify_core_faults']:
+            for script in ['verify_memory_store', 'verify_organization_recovery', 'verify_core_faults']:
                 run(script, [sys.executable, ROOT/f'scripts/{script}.py'])
-            run('verify_phase6', [sys.executable, ROOT/'scripts/verify_phase6.py', '--binary', artifacts['memivy-mcp']])
+            run('verify_mcp', [sys.executable, ROOT/'scripts/verify_mcp.py', '--binary', artifacts['memivy-mcp']])
             run('visual-seed', [artifacts['visual_fixture'], out/'visual-data'])
             contract = json.loads((ROOT/'tests/assets/visual_contract.json').read_text())
             (out/'visual-review.json').write_text(json.dumps([

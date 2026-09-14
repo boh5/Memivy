@@ -1,4 +1,4 @@
-.formal-desktop { width: 100vw; height: 100vh; padding: 8px; overflow: hidden; }
+.desktop-entry { width: 100vw; height: 100vh; padding: 8px; overflow: hidden; }
 .desktop-rest { display: flex; justify-content: flex-end; align-items: center; gap: 12px; width: 100%; height: 56px; }
 .desktop-toast { background: #fff; border: 1px solid #e2e6de; box-shadow: 0 2px 6px #1c1c1e10; border-radius: 10px; padding: 10px 12px; font-size: 12px; display: flex; gap: 12px; color: #315f3d; }
 .desktop-toast button { font-size: 11px; text-decoration: underline; }
@@ -38,9 +38,9 @@
 .compact-discussion .discussion-message .readable-text { line-height: 1.7; }
 .compact-discussion .discussion-composer { margin: 0; padding: 10px; border-radius: 10px; flex-shrink: 0; }
 .compact-discussion .discussion-composer > textarea { min-height: 54px; height: 54px; max-height: 100px; font-size: 13px; }
-.formal-desktop .workspace-dialog { width: calc(100vw - 40px); max-height: calc(100vh - 40px); padding: 18px; border-radius: 13px; }
-.formal-desktop .workspace-dialog h2 { font-size: 17px; }
-.formal-desktop .workspace-dialog textarea { min-height: 65px; max-height: 180px; }
+.desktop-entry .workspace-dialog { width: calc(100vw - 40px); max-height: calc(100vh - 40px); padding: 18px; border-radius: 13px; }
+.desktop-entry .workspace-dialog h2 { font-size: 17px; }
+.desktop-entry .workspace-dialog textarea { min-height: 65px; max-height: 180px; }
 .desktop-settings .checkbox-label { margin: 15px 0; }
 .desktop-settings .checkbox-label small { font-size: 11px; color: #84857c; }
 .desktop-settings .setting-line { gap: 20px; }

@@ -116,5 +116,5 @@ def check(root):
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory(prefix="memivy-phase2-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="memivy-memory-store-") as temporary:
         print(json.dumps(check(Path(temporary)), ensure_ascii=False, indent=2))

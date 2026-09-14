@@ -41,7 +41,7 @@ async fn main() {
     // Never relabel cached results with another model or overwrite an earlier run.
     // Atomic directory creation also excludes concurrent writers.
     create_run_directory(&output).expect("OUTPUT_DIR must be a fresh, non-existent directory");
-    let fixture = include_str!("../tests/fixtures/phase5_cases.json");
+    let fixture = include_str!("../tests/fixtures/organization_cases.json");
     fs::write(output.join("cases.json"), fixture).unwrap();
     use sha2::{Digest, Sha256};
     let code = concat!(

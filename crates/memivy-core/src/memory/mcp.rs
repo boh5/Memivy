@@ -1,4 +1,4 @@
-//! Local MCP policy and bounded evidence live beside the formal store rules.
+//! Local MCP policy and bounded evidence live beside MemoryStore rules.
 use super::{db::*, *};
 use serde::{Deserialize, Serialize};
 use std::{

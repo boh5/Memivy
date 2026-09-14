@@ -352,7 +352,7 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 
 打包前校验 Tauri 应用版本、原生 Cargo 包版本与 MCP 包版本一致；MCP 协议版本信息中的服务版本由 Cargo 包版本生成。sidecar 使用 Cargo 返回的实际可执行产物，应用使用 Cargo metadata 的目标目录及显式 `aarch64-apple-darwin` 构建目标，支持自定义 Cargo 输出目录并避免复用旧产物。默认应用输出为 `target/aarch64-apple-darwin/release/bundle/macos/Memivy.app`；DMG 和校验文件固定输出到仓库的 `target/release/bundle/dmg/`。
 
-开发环境用 `npm run build:mcp` 构建 sidecar，`npm run dev:app` 自动执行此步。发布测试包用 `npm run build:beta`；开发用的普通 debug app 不自动带 sidecar，如需完整 debug 包，使用 `npm run tauri -- build --debug --config src-tauri/tauri.beta.conf.json --bundles app`。协议验证运行 `python3 scripts/verify_phase6.py --binary /absolute/path/to/Memivy.app/Contents/MacOS/memivy-mcp`，先构建 `memory_probe`。旧样机专用协议脚本已随样机移除。
+开发环境用 `npm run build:mcp` 构建 sidecar，`npm run dev:app` 自动执行此步。发布测试包用 `npm run build:beta`；开发用的普通 debug app 不自动带 sidecar，如需完整 debug 包，使用 `npm run tauri -- build --debug --config src-tauri/tauri.beta.conf.json --bundles app`。协议验证运行 `python3 scripts/verify_mcp.py --binary /absolute/path/to/Memivy.app/Contents/MacOS/memivy-mcp`，先构建 `memory_probe`。旧样机专用协议脚本已随样机移除。
 
 安装：将应用移入固定位置后首次启动，再从设置复制 MCP 配置。未公证包可能被 Gatekeeper 拦截；按系统“隐私与安全性”提供的允许打开流程处理，不要求用户关闭系统安全保护。是否能在另一台 Mac 顺利安装需要实际验证。[Tauri 分发](https://v2.tauri.app/distribute/)
 

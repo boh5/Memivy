@@ -1,4 +1,4 @@
-/* Formal workspace chrome. Body/editor typography remains in markdown.css. */
+/* Workspace chrome. Body/editor typography remains in markdown.css. */
 .recall-workspace .sidebar { width: 204px; padding: 25px 14px 14px; }
 .recall-workspace .brand { height: 65px; padding: 5px 11px 0; }
 .recall-workspace .sidebar nav button.selected,

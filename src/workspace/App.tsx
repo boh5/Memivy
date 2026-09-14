@@ -75,7 +75,7 @@ export default function App() {
     void call("desktop_handoff_ready", { generation: pending.generation }).catch(e => setWindowError(errorText(e)));
   }, []);
   useEffect(() => {
-    const root = document.querySelector<HTMLElement>(".formal-app");
+    const root = document.querySelector<HTMLElement>(".memory-app");
     if (native && root) return installClickRecovery(root);
   }, []);
   useEffect(() => {
@@ -225,7 +225,7 @@ export default function App() {
   const scopeName = collections.find(c => c.id === queryScope)?.name || t("app.removedCollection");
   const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
   const reading = page === "topic" || !!selected;
-  return <div className="app-shell formal-app recall-workspace">
+  return <div className="app-shell memory-app recall-workspace">
     <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
       scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onNewDiscussion:newDiscussion,
       scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>{t("app.scopedQuestion", { scope: scopeName })}</span><button aria-label={t("app.allMemoriesAria")} onClick={showLibrary}>{t("app.allMemories")}</button></div>,

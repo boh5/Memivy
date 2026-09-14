@@ -1,4 +1,4 @@
-//! Formal macOS entry points. Window state is not a second memory store.
+//! macOS desktop entry points. Window state is not a second memory store.
 use crate::{
     capture_panel,
     workspace::{HostResult, Workspace},

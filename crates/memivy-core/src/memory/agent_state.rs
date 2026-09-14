@@ -664,7 +664,7 @@ impl MemoryStore {
 /// A one-time data move. Competing unsent drafts become ordinary conversations
 /// so the current UI can recover them without keeping a legacy draft reader.
 pub(super) fn migrate_agent_drafts(db: &Connection) -> Result<()> {
-    // Old formal turns were read-only, so they have no committed memory-tool
+    // Imported read-only turns did not mutate memories, so they have no committed memory-tool
     // boundary to replay. Preserve their messages and start the new protocol
     // from the same logical input on explicit retry. Old citations cannot tell
     // selected material apart from automatic retrieval, so do not invent focus.

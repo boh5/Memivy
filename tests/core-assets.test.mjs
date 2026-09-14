@@ -6,7 +6,7 @@ const fixture = (file) => read(`crates/memivy-core/tests/fixtures/${file}.json`)
 const unique = (rows) => assert.equal(new Set(rows.map(r => r.id)).size, rows.length);
 
 test('organization review accounts for every fixed case and fault without relabeling', () => {
-  const cases = fixture('phase5_cases');
+  const cases = fixture('organization_cases');
   const review = fixture('organization_review').cases;
   const faults = fixture('organization_failures');
   unique([...cases, ...faults]);

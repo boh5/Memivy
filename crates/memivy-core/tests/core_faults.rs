@@ -163,7 +163,7 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
     (config, tx, handle)
 }
 #[tokio::test]
-async fn eight_formal_model_failure_contracts_preserve_raw_search_and_retry() {
+async fn eight_model_failure_contracts_preserve_raw_search_and_retry() {
     let cases: Vec<Fault> =
         serde_json::from_str(include_str!("fixtures/organization_failures.json")).unwrap();
     assert_eq!(cases.len(), 8);
