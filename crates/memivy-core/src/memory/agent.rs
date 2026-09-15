@@ -472,13 +472,19 @@ pub(super) enum AgentEvent<'a> {
     Tool(&'a tools::ToolCall),
 }
 
+pub(super) enum AgentReply {
+    Continue,
+    Tool(Value),
+    Complete,
+}
+
 /// One loop for both task owners. The callback owns durable effects and fencing;
 /// the driver owns only provider protocol, streaming and bounded continuation.
 pub(super) async fn run_memory_agent(
     config: &model::ModelConfig,
     mut messages: Vec<Value>,
     tool_defs: &[Value],
-    mut callback: impl FnMut(AgentEvent<'_>) -> std::result::Result<Option<Value>, ProbeError>,
+    mut callback: impl FnMut(AgentEvent<'_>) -> std::result::Result<AgentReply, ProbeError>,
 ) -> std::result::Result<Vec<Value>, ProbeError> {
     let reserve =
         (config.max_output_tokens.unwrap_or(OUTPUT_RESERVE as u32) as usize).max(OUTPUT_RESERVE);
@@ -520,8 +526,11 @@ pub(super) async fn run_memory_agent(
                 {
                     continue;
                 }
-                let result =
-                    callback(AgentEvent::Tool(&call))?.ok_or(ProbeError::InvalidResponse)?;
+                let result = match callback(AgentEvent::Tool(&call))? {
+                    AgentReply::Tool(result) => result,
+                    AgentReply::Complete => return Ok(messages),
+                    AgentReply::Continue => return Err(ProbeError::InvalidResponse),
+                };
                 messages.push(
                     json!({"role":"tool","tool_call_id":call.id,"content":result.to_string()}),
                 );

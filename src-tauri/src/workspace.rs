@@ -1071,16 +1071,9 @@ fn validate_config(path: &std::path::Path) -> HostResult<()> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     crate::storage::validate_config_path(path, home.as_deref()).map_err(HostError::from)
 }
-#[derive(Serialize, Default)]
+#[derive(Serialize)]
 struct Settings {
-    base_url: String,
-    model: String,
-    has_key: bool,
     configured: bool,
-    model_capabilities: Option<memivy_core::model::tools::Capabilities>,
-    disable_reasoning: bool,
-    max_output_tokens: Option<u32>,
-    output_token_parameter: memivy_core::model::OutputTokenParameter,
 }
 #[tauri::command]
 fn workspace_settings(
@@ -1088,36 +1081,12 @@ fn workspace_settings(
     state: tauri::State<Workspace>,
 ) -> HostResult<Settings> {
     require_main(&window)?;
-    validate_config(&state.config)?;
-    if !state.config.exists()
-        && !memivy_core::models::Registry::exists(state.store.database_path().parent().unwrap())
-    {
-        return Ok(Settings::default());
+    let settings = crate::models::load(&state)?;
+    if settings.llm.is_some() {
+        settings.llm_config()?;
     }
-    let c = match crate::models::read_llm(&state) {
-        Ok(c) => c,
-        Err(_)
-            if memivy_core::models::Registry::read(
-                state.store.database_path().parent().unwrap(),
-            )
-            .is_ok_and(|r| r.llm.is_none())
-                && memivy_core::models::Registry::exists(
-                    state.store.database_path().parent().unwrap(),
-                ) =>
-        {
-            return Ok(Settings::default());
-        }
-        Err(e) => return Err(e),
-    };
     Ok(Settings {
-        model_capabilities: state.store.model_capabilities(&c),
-        configured: true,
-        base_url: c.base_url,
-        model: c.model,
-        has_key: c.api_key.is_some_and(|s| !s.is_empty()),
-        disable_reasoning: c.disable_reasoning,
-        max_output_tokens: c.max_output_tokens,
-        output_token_parameter: c.output_token_parameter,
+        configured: settings.llm.is_some(),
     })
 }
 #[tauri::command]

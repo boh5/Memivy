@@ -1,7 +1,7 @@
 mod audio;
 mod engine;
 use crate::workspace::HostResult;
-use memivy_core::models::{Binding, Registry, Source};
+use memivy_core::models::{Binding, ModelSettings, Source};
 use memivy_core::{
     embedding::{private_dir, write_json},
     speech::SpeechCache,
@@ -40,7 +40,7 @@ struct Part {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_session_binding")]
     binding: Binding,
     #[serde(default)]
     endpoint: String,
@@ -60,6 +60,14 @@ pub struct Session {
     error: Option<String>,
     seconds: f32,
     level: f32,
+}
+fn serialize_session_binding<S: serde::Serializer>(
+    binding: &Binding,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut snapshot = binding.clone();
+    snapshot.api_key = None;
+    snapshot.serialize(serializer)
 }
 impl Session {
     fn text(&self) -> String {
@@ -200,13 +208,13 @@ impl Service {
     }
     fn status(&self) -> HostResult<Status> {
         let cache = SpeechCache::for_user().map_err(|_| "voice_cache_unavailable")?;
-        let r = Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?;
+        let r = ModelSettings::read(self.root.parent().ok_or("voice_directory_invalid")?)?;
         let remote = r.voice.source == Source::Service;
         let s = self.state.lock().unwrap();
         Ok(Status {
             source: r.voice.source.clone(),
             label: if remote {
-                r.connection(&r.voice.connection)?.name.clone()
+                r.voice.base_url.clone()
             } else {
                 "voice_local".into()
             },
@@ -298,37 +306,36 @@ impl Service {
         self.state.lock().unwrap().last_used = Instant::now();
         Ok(())
     }
-    pub(crate) fn uses_connection(&self, id: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap()
-            .session
-            .as_ref()
-            .is_some_and(|s| s.binding.source == Source::Service && s.binding.connection == id)
-    }
-    /// A corrected credential may retry the same retained model and endpoint.
-    /// Switching provider/model never retargets audio already recorded.
-    pub(crate) fn repair_retained_credentials(&self, registry: &mut Registry) -> HostResult<()> {
-        if registry.voice.source != Source::Service {
-            return Ok(());
-        }
-        let next = registry.resolve(&registry.voice)?;
-        let s = self.state.lock().unwrap();
-        if let Some(v) = &s.session
-            && v.error.is_some()
-            && !v.recording
-            && !v.starting
-            && !v.processing
-            && v.binding.source == Source::Service
-            && v.endpoint == next.base_url
-            && v.binding.model == next.model
-            && let Some(previous) = registry
-                .connections
-                .iter_mut()
-                .find(|c| c.id == v.binding.connection)
+    /// Preserve the one retained recording's destination across model changes.
+    /// Only a stopped failed recording accepts a corrected key for that target.
+    pub(crate) fn retain_recording_config(
+        &self,
+        registry: &mut ModelSettings,
+        next: &Binding,
+    ) -> HostResult<()> {
+        let state = self.state.lock().unwrap();
+        registry.retained_voice = if let Some(session) = &state.session
+            && session.binding.source == Source::Service
         {
-            previous.api_key = next.api_key;
-        }
+            let mut config =
+                registry.voice_config(&session.id, &session.endpoint, &session.binding.model)?;
+            if session.error.is_some()
+                && !session.recording
+                && !session.starting
+                && !session.processing
+                && next.source == Source::Service
+                && next.base_url == session.endpoint
+                && next.model == session.binding.model
+            {
+                config.api_key = next.api_key.clone();
+            }
+            Some(memivy_core::models::RetainedVoice {
+                session_id: session.id.clone(),
+                config,
+            })
+        } else {
+            None
+        };
         Ok(())
     }
     fn pump(&self) {
@@ -368,7 +375,7 @@ impl Service {
         };
         if load || job.is_some() {
             let result = (|| {
-                if let Some((_, _, file, binding, endpoint)) = &job {
+                if let Some((id, _, file, binding, endpoint)) = &job {
                     let bytes =
                         fs::read(self.root.join(file)).map_err(|_| "voice_audio_unreadable")?;
                     if bytes.len() > 16000 * 20 * 4 || bytes.len() % 4 != 0 {
@@ -381,12 +388,10 @@ impl Service {
                         .map(|b| f32::from_le_bytes(*b))
                         .collect();
                     if binding.source == Source::Service {
-                        let r =
-                            Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?;
-                        let m = r.resolve(binding)?;
-                        if m.base_url != *endpoint {
-                            return Err("voice_endpoint_changed".into());
-                        }
+                        let r = ModelSettings::read(
+                            self.root.parent().ok_or("voice_directory_invalid")?,
+                        )?;
+                        let m = r.voice_config(id, endpoint, &binding.model)?;
                         return memivy_core::models::transcribe(&m, &samples).map_err(String::from);
                     }
                     self.ensure_engine()?;
@@ -397,7 +402,7 @@ impl Service {
                         .ok_or("voice_not_loaded")?
                         .transcribe(&samples)
                 } else {
-                    if Registry::read(self.root.parent().ok_or("voice_directory_invalid")?)?
+                    if ModelSettings::read(self.root.parent().ok_or("voice_directory_invalid")?)?
                         .voice
                         .source
                         == Source::Local
@@ -680,14 +685,12 @@ pub fn voice_start(
     if !valid_target || base.len() > 100_000 || prefix.len() + suffix.len() > 100_000 {
         return Err("voice_target_invalid".into());
     }
-    let registry = Registry::read(voice.0.root.parent().ok_or("voice_directory_invalid")?)?;
-    let binding = registry.voice.clone();
+    let registry = ModelSettings::read(voice.0.root.parent().ok_or("voice_directory_invalid")?)?;
+    let mut binding = registry.voice.clone();
+    binding.api_key = None;
     let (endpoint, label) = if binding.source == Source::Service {
-        let m = registry.resolve(&binding)?;
-        (
-            m.base_url,
-            registry.connection(&binding.connection)?.name.clone(),
-        )
+        let m = binding.model_config()?;
+        (m.base_url.clone(), m.base_url)
     } else {
         if !SpeechCache::for_user()
             .map_err(|_| "voice_cache_unavailable")?
@@ -1142,39 +1145,48 @@ mod tests {
         let (dir, mut service) = fixture();
         service.root = dir.path().join("voice");
         fs::create_dir(&service.root).unwrap();
-        let mut registry = Registry::default();
-        registry.connections.push(memivy_core::models::Connection {
-            id: "original".into(),
-            name: "QA".into(),
-            base_url: "http://127.0.0.1:1234/v1".into(),
-            api_key: Some("fixture-private-key".into()),
-        });
-        registry.voice = Binding {
-            source: Source::Service,
-            connection: "original".into(),
-            model: "first-model".into(),
-            ..Binding::default()
+        let mut registry = ModelSettings {
+            voice: Binding {
+                source: Source::Service,
+                base_url: "http://127.0.0.1:1234/v1".into(),
+                api_key: Some("fixture-private-key".into()),
+                model: "first-model".into(),
+                ..Binding::default()
+            },
+            ..ModelSettings::default()
         };
         registry.save(dir.path(), "initial").unwrap();
         {
             let mut state = service.state.lock().unwrap();
             let session = state.session.as_mut().unwrap();
             session.binding = registry.voice.clone();
-            session.endpoint = registry.connections[0].base_url.clone();
+            session.endpoint = registry.voice.base_url.clone();
             service.persist(&state).unwrap();
         }
         let revision = registry.revision.clone();
-        registry.voice.model = "next-recording-model".into();
+        let mut next = registry.voice.clone();
+        next.model = "next-recording-model".into();
+        service
+            .retain_recording_config(&mut registry, &next)
+            .unwrap();
+        registry.voice = next;
         registry.save(dir.path(), &revision).unwrap();
         let bytes = fs::read(service.root.join("session.json")).unwrap();
         assert!(!String::from_utf8_lossy(&bytes).contains("fixture-private-key"));
         let retained: Session = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(retained.binding.model, "first-model");
         assert_eq!(
-            registry.resolve(&retained.binding).unwrap().model,
+            ModelSettings::read(dir.path())
+                .unwrap()
+                .voice_config(&retained.id, &retained.endpoint, &retained.binding.model)
+                .unwrap()
+                .model,
             "first-model"
         );
-        assert!(service.uses_connection("original"));
+        assert_eq!(
+            registry.retained_voice.unwrap().config.api_key.as_deref(),
+            Some("fixture-private-key")
+        );
     }
     #[test]
     fn failed_session_writes_leave_recording_and_recovery_state_unchanged() {
@@ -1199,18 +1211,10 @@ mod tests {
     #[test]
     fn corrected_key_repairs_only_the_same_failed_recording_endpoint_and_model() {
         let (_dir, service) = fixture();
-        let old = memivy_core::models::Connection {
-            id: "old".into(),
-            name: "QA".into(),
-            base_url: "http://127.0.0.1:1234/v1".into(),
-            api_key: Some("old-key".into()),
-        };
-        let mut next = old.clone();
-        next.id = "new".into();
-        next.api_key = Some("fixed-key".into());
         let binding = Binding {
             source: Source::Service,
-            connection: "old".into(),
+            base_url: "http://127.0.0.1:1234/v1".into(),
+            api_key: Some("old-key".into()),
             model: "qa-asr".into(),
             ..Binding::default()
         };
@@ -1218,38 +1222,39 @@ mod tests {
             let mut state = service.state.lock().unwrap();
             let session = state.session.as_mut().unwrap();
             session.binding = binding.clone();
-            session.endpoint = old.base_url.clone();
+            session.endpoint = binding.base_url.clone();
             session.recording = false;
             session.error = Some("authentication failed".into());
         }
-        let mut r = Registry {
-            connections: vec![old, next],
-            voice: Binding {
-                connection: "new".into(),
-                ..binding.clone()
-            },
-            ..Registry::default()
+        let mut r = ModelSettings {
+            voice: binding.clone(),
+            ..ModelSettings::default()
         };
-        r.voice.model = "different".into();
-        service.repair_retained_credentials(&mut r).unwrap();
+        let mut next = Binding {
+            api_key: Some("fixed-key".into()),
+            model: "different".into(),
+            ..binding.clone()
+        };
+        service.retain_recording_config(&mut r, &next).unwrap();
         assert_eq!(
-            r.resolve(&binding).unwrap().api_key.as_deref(),
+            r.retained_voice.as_ref().unwrap().config.api_key.as_deref(),
             Some("old-key")
         );
-        r.voice.model = binding.model.clone();
-        r.connections[1].base_url = "http://127.0.0.1:9999/v1".into();
-        service.repair_retained_credentials(&mut r).unwrap();
+        next.model = binding.model.clone();
+        next.base_url = "http://127.0.0.1:9999/v1".into();
+        service.retain_recording_config(&mut r, &next).unwrap();
         assert_eq!(
-            r.resolve(&binding).unwrap().api_key.as_deref(),
+            r.retained_voice.as_ref().unwrap().config.api_key.as_deref(),
             Some("old-key")
         );
-        r.connections[1].base_url = r.connections[0].base_url.clone();
-        service.repair_retained_credentials(&mut r).unwrap();
+        next.base_url = binding.base_url;
+        service.retain_recording_config(&mut r, &next).unwrap();
         assert_eq!(
-            r.resolve(&binding).unwrap().api_key.as_deref(),
+            r.retained_voice.as_ref().unwrap().config.api_key.as_deref(),
             Some("fixed-key")
         );
     }
+
     #[test]
     fn new_recording_clears_stale_error_after_session_is_persisted() {
         let (_dir, service) = fixture();
@@ -1429,7 +1434,7 @@ pub(crate) async fn clear_model(app: &tauri::AppHandle) -> HostResult<()> {
     if service.active() || service.download.load(Ordering::SeqCst) {
         return Err("voice_busy".into());
     }
-    if Registry::read(service.root.parent().ok_or("voice_directory_invalid")?)?
+    if ModelSettings::read(service.root.parent().ok_or("voice_directory_invalid")?)?
         .voice
         .source
         == Source::Local

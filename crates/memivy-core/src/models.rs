@@ -1,4 +1,4 @@
-//! User-owned connections and capability bindings. Secrets never enter the memory database.
+//! Per-capability model settings. Secrets never enter the memory database.
 use crate::{
     embedding,
     model::{ModelConfig, OutputTokenParameter},
@@ -13,11 +13,8 @@ pub enum Error {
     ConfigurationLock,
     Conflict,
     ConfigurationTooLarge,
-    ConnectionMissing,
     LocalBinding,
     ModelRequired,
-    ConnectionLimit,
-    ConnectionInvalid,
     DimensionsRequired,
     Endpoint,
     Network,
@@ -39,11 +36,8 @@ impl Error {
             Self::ConfigurationLock => "model_configuration_lock",
             Self::Conflict => "configuration_conflict",
             Self::ConfigurationTooLarge => "model_configuration_too_large",
-            Self::ConnectionMissing => "model_connection_missing",
             Self::LocalBinding => "model_local_binding",
             Self::ModelRequired => "model_required",
-            Self::ConnectionLimit => "model_connection_limit",
-            Self::ConnectionInvalid => "model_connection_invalid",
             Self::DimensionsRequired => "model_dimensions_required",
             Self::Endpoint => "model_endpoint",
             Self::Network => "model_network",
@@ -88,13 +82,6 @@ impl From<crate::model::ProbeError> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 const FILE: &str = "models.json";
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Connection {
-    pub id: String,
-    pub name: String,
-    pub base_url: String,
-    pub api_key: Option<String>,
-}
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
@@ -106,7 +93,9 @@ pub enum Source {
 #[serde(default)]
 pub struct Binding {
     pub source: Source,
-    pub connection: String,
+    pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     pub model: String,
     pub dimensions: Option<usize>,
     pub disable_reasoning: bool,
@@ -115,19 +104,21 @@ pub struct Binding {
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Registry {
+pub struct ModelSettings {
     pub revision: String,
-    pub connections: Vec<Connection>,
+    pub format_version: u32,
+    pub retained_voice: Option<RetainedVoice>,
     pub llm: Option<Binding>,
     pub embedding: Binding,
     pub voice: Binding,
     pub auto_organize: bool,
 }
-impl Default for Registry {
+impl Default for ModelSettings {
     fn default() -> Self {
         Self {
             revision: "initial".into(),
-            connections: vec![],
+            format_version: 2,
+            retained_voice: None,
             llm: None,
             embedding: Binding::default(),
             voice: Binding::default(),
@@ -135,35 +126,78 @@ impl Default for Registry {
         }
     }
 }
-impl Registry {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RetainedVoice {
+    pub session_id: String,
+    pub config: ModelConfig,
+}
+impl Binding {
+    pub fn model_config(&self) -> Result<ModelConfig> {
+        if self.source != Source::Service {
+            return Err(Error::LocalBinding);
+        }
+        let model = ModelConfig {
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+            api_key: self.api_key.clone(),
+            disable_reasoning: self.disable_reasoning,
+            max_output_tokens: self.max_output_tokens,
+            output_token_parameter: self.output_token_parameter,
+        };
+        model.endpoint().map_err(Error::from)?;
+        Ok(model)
+    }
+}
+impl ModelSettings {
     pub fn exists(root: &Path) -> bool {
         root.join(FILE).exists()
     }
     pub fn read(root: &Path) -> Result<Self> {
+        let (settings, migration) = Self::read_file(root)?;
+        if migration != Some(true) {
+            return Ok(settings);
+        }
+        let _lock = embedding::lock(root, "models.lock").map_err(|_| Error::ConfigurationLock)?;
+        let (settings, migration) = Self::read_file(root)?;
+        if migration == Some(true) {
+            embedding::write_json(&root.join(FILE), &settings)
+                .map_err(|_| Error::ConfigurationSave)?;
+        }
+        Ok(settings)
+    }
+    fn read_file(root: &Path) -> Result<(Self, Option<bool>)> {
         let p = root.join(FILE);
         if !p.exists() {
-            return Ok(Self::default());
+            return Ok((Self::default(), None));
         }
         let m = fs::symlink_metadata(&p).map_err(|_| Error::ConfigurationRead)?;
         if !m.is_file() || m.permissions().mode() & 0o777 != 0o600 || m.len() > 256 * 1024 {
             return Err(Error::ConfigurationInvalid);
         }
-        serde_json::from_slice(&fs::read(p).map_err(|_| Error::ConfigurationRead)?)
-            .map_err(|_| Error::ConfigurationInvalid)
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(p).map_err(|_| Error::ConfigurationRead)?)
+                .map_err(|_| Error::ConfigurationInvalid)?;
+        let migration = if value.get("connections").is_some() {
+            Some(import_connections(root, &mut value)?)
+        } else {
+            if value["format_version"] != 2 {
+                return Err(Error::ConfigurationInvalid);
+            }
+            None
+        };
+        let settings: Self =
+            serde_json::from_value(value).map_err(|_| Error::ConfigurationInvalid)?;
+        settings.validate()?;
+        Ok((settings, migration))
     }
     pub fn with_legacy(root: &Path, legacy: &Path) -> Result<Self> {
         let mut r = Self::read(root)?;
         if !Self::exists(root) && legacy.exists() {
             let m = ModelConfig::read(legacy).map_err(Error::from)?;
-            r.connections.push(Connection {
-                id: "existing".into(),
-                name: "Existing model connection".into(),
-                base_url: m.base_url,
-                api_key: m.api_key,
-            });
             r.llm = Some(Binding {
                 source: Source::Service,
-                connection: "existing".into(),
+                base_url: m.base_url,
+                api_key: m.api_key,
                 model: m.model,
                 disable_reasoning: m.disable_reasoning,
                 max_output_tokens: m.max_output_tokens,
@@ -175,7 +209,11 @@ impl Registry {
     }
     pub fn save(&mut self, root: &Path, expected: &str) -> Result<()> {
         let _lock = embedding::lock(root, "models.lock").map_err(|_| Error::ConfigurationLock)?;
-        if Self::read(root)?.revision != expected {
+        let (current, migration) = Self::read_file(root)?;
+        if migration == Some(false) {
+            return Err(Error::ConfigurationInvalid);
+        }
+        if current.revision != expected {
             return Err(Error::Conflict);
         }
         self.validate()?;
@@ -189,36 +227,17 @@ impl Registry {
         self.revision = uuid::Uuid::new_v4().to_string();
         embedding::write_json(&root.join(FILE), self).map_err(|_| Error::ConfigurationSave)
     }
-    pub fn connection(&self, id: &str) -> Result<&Connection> {
-        self.connections
-            .iter()
-            .find(|s| s.id == id)
-            .ok_or(Error::ConnectionMissing)
-    }
-    pub fn resolve(&self, b: &Binding) -> Result<ModelConfig> {
-        if b.source != Source::Service {
-            return Err(Error::LocalBinding);
-        }
-        let c = self.connection(&b.connection)?;
-        let m = ModelConfig {
-            base_url: c.base_url.clone(),
-            model: b.model.clone(),
-            api_key: c.api_key.clone(),
-            disable_reasoning: b.disable_reasoning,
-            max_output_tokens: b.max_output_tokens,
-            output_token_parameter: b.output_token_parameter,
-        };
-        m.endpoint().map_err(Error::from)?;
-        Ok(m)
-    }
     pub fn llm_config(&self) -> Result<ModelConfig> {
-        self.resolve(self.llm.as_ref().ok_or(Error::ModelRequired)?)
+        self.llm
+            .as_ref()
+            .ok_or(Error::ModelRequired)?
+            .model_config()
     }
     pub fn fingerprint(&self) -> Result<String> {
         if self.embedding.source == Source::Local {
             return Ok(embedding::fingerprint());
         }
-        let m = self.resolve(&self.embedding)?;
+        let m = self.embedding.model_config()?;
         Ok(embedding::hash(
             format!(
                 "api-v2:{}:{}:{:?}:nfc-l2-chunk-v1",
@@ -230,33 +249,12 @@ impl Registry {
         ))
     }
     fn validate(&self) -> Result<()> {
-        if self.connections.len() > 32 {
-            return Err(Error::ConnectionLimit);
-        }
-        let mut ids = std::collections::HashSet::new();
-        for c in &self.connections {
-            if c.id.is_empty()
-                || c.id.len() > 64
-                || !ids.insert(&c.id)
-                || c.name.trim().is_empty()
-                || c.name.len() > 200
-            {
-                return Err(Error::ConnectionInvalid);
-            }
-            let b = Binding {
-                source: Source::Service,
-                connection: c.id.clone(),
-                model: "probe".into(),
-                ..Binding::default()
-            };
-            self.resolve(&b)?;
-        }
         for b in [self.llm.as_ref(), Some(&self.embedding), Some(&self.voice)]
             .into_iter()
             .flatten()
         {
             if b.source == Source::Service {
-                self.resolve(b)?;
+                b.model_config()?;
             }
         }
         if self.embedding.source == Source::Service
@@ -267,8 +265,108 @@ impl Registry {
         {
             return Err(Error::DimensionsRequired);
         }
+        if let Some(retained) = &self.retained_voice {
+            retained.config.endpoint().map_err(Error::from)?;
+        }
         Ok(())
     }
+    pub fn voice_config(
+        &self,
+        session_id: &str,
+        endpoint: &str,
+        model: &str,
+    ) -> Result<ModelConfig> {
+        if let Some(retained) = &self.retained_voice
+            && retained.session_id == session_id
+            && retained.config.base_url == endpoint
+            && retained.config.model == model
+        {
+            return Ok(retained.config.clone());
+        }
+        let active = self.voice.model_config()?;
+        if active.base_url != endpoint || active.model != model {
+            return Err(Error::ConfigurationInvalid);
+        }
+        Ok(active)
+    }
+}
+
+/// Import old references at the file boundary before voice can rewrite its
+/// snapshot. Unreadable optional voice state keeps the old file intact while
+/// active model reads remain available; settings writes must wait for recovery.
+fn import_connections(root: &Path, value: &mut serde_json::Value) -> Result<bool> {
+    use serde_json::{Value, json};
+    let connections = value["connections"]
+        .as_array()
+        .ok_or(Error::ConfigurationInvalid)?
+        .clone();
+    let flatten = |binding: &mut Value| -> Result<()> {
+        if binding.is_null() {
+            return Ok(());
+        }
+        if binding["source"] == "service" {
+            let id = binding["connection"]
+                .as_str()
+                .ok_or(Error::ConfigurationInvalid)?;
+            let mut matches = connections.iter().filter(|c| c["id"].as_str() == Some(id));
+            let connection = matches.next().ok_or(Error::ConfigurationInvalid)?;
+            if matches.next().is_some() {
+                return Err(Error::ConfigurationInvalid);
+            }
+            binding["base_url"] = connection["base_url"].clone();
+            binding["api_key"] = connection["api_key"].clone();
+        }
+        binding
+            .as_object_mut()
+            .ok_or(Error::ConfigurationInvalid)?
+            .remove("connection");
+        Ok(())
+    };
+    for kind in ["llm", "embedding", "voice"] {
+        flatten(&mut value[kind])?;
+    }
+    let voice_import = (|| -> Result<()> {
+        let bytes = match fs::read(root.join("voice/session.json")) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(Error::ConfigurationRead),
+        };
+        let mut session: Value =
+            serde_json::from_slice(&bytes).map_err(|_| Error::ConfigurationInvalid)?;
+        if session["binding"]["source"] == "service" {
+            let config = if session["binding"].get("connection").is_some() {
+                flatten(&mut session["binding"])?;
+                serde_json::from_value::<Binding>(session["binding"].clone())
+                    .map_err(|_| Error::ConfigurationInvalid)?
+                    .model_config()?
+            } else {
+                // A fresh recording may replace previously unreadable voice state.
+                let active: Binding = serde_json::from_value(value["voice"].clone())
+                    .map_err(|_| Error::ConfigurationInvalid)?;
+                if session["binding"]["model"].as_str() != Some(active.model.as_str()) {
+                    return Err(Error::ConfigurationInvalid);
+                }
+                active.model_config()?
+            };
+            if session["endpoint"].as_str() != Some(config.base_url.as_str()) {
+                return Err(Error::ConfigurationInvalid);
+            }
+            value["retained_voice"] = json!(RetainedVoice {
+                session_id: session["id"]
+                    .as_str()
+                    .ok_or(Error::ConfigurationInvalid)?
+                    .into(),
+                config,
+            });
+        }
+        Ok(())
+    })();
+    value
+        .as_object_mut()
+        .ok_or(Error::ConfigurationInvalid)?
+        .remove("connections");
+    value["format_version"] = json!(2);
+    Ok(voice_import.is_ok())
 }
 /// Shared bounded HTTP transport. Call only from blocking worker threads.
 fn client(timeout: Duration) -> Result<reqwest::blocking::Client> {

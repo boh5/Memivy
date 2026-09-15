@@ -1,7 +1,7 @@
 //! Version-derived index lifecycle. The app owns one writer; all readers share it.
 use super::{db::*, *};
 use crate::embedding::{self as emb, Preferences, cache::HfModelCache, chunk, client};
-use crate::models::{Registry, Source};
+use crate::models::{ModelSettings, Source};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
 use std::time::Duration;
@@ -36,7 +36,7 @@ impl MemoryStore {
     pub fn embedding_status(&self) -> Result<EmbeddingStatus> {
         let prefs = Preferences::read(&self.root).map_err(model_error)?;
         let cache = HfModelCache::for_user().map_err(model_error)?;
-        let registry = Registry::read(&self.root).map_err(model_error)?;
+        let registry = ModelSettings::read(&self.root).map_err(model_error)?;
         let remote = registry.embedding.source == Source::Service;
         let fingerprint = registry.fingerprint().map_err(model_error)?;
         let db = self.connection()?;
@@ -90,7 +90,7 @@ impl MemoryStore {
     /// observe the candidate while activation can still fail.
     pub fn apply_embedding_model(
         &self,
-        registry: &mut Registry,
+        registry: &mut ModelSettings,
         revision: &str,
     ) -> std::result::Result<(), String> {
         let _control = emb::lock(&self.root, "embedding-control.lock")?;
@@ -98,7 +98,7 @@ impl MemoryStore {
         if prefs.clear_requested {
             return Err("embedding_clearing".into());
         }
-        let mut previous = Registry::read(&self.root)?;
+        let mut previous = ModelSettings::read(&self.root)?;
         registry.save(&self.root, revision)?;
         prefs.preparing = true;
         prefs.paused = false;
@@ -135,7 +135,7 @@ impl MemoryStore {
             }
             "retry" => {
                 let cache = HfModelCache::for_user().map_err(model_error)?;
-                if Registry::read(&self.root)
+                if ModelSettings::read(&self.root)
                     .map_err(model_error)?
                     .embedding
                     .source
@@ -180,7 +180,7 @@ impl MemoryStore {
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         reset_with(
             &tx,
-            &Registry::read(&self.root)
+            &ModelSettings::read(&self.root)
                 .map_err(model_error)?
                 .fingerprint()
                 .map_err(model_error)?,
@@ -199,7 +199,7 @@ impl MemoryStore {
         let Ok(prefs) = Preferences::read(&self.root) else {
             return;
         };
-        let Ok(registry) = Registry::read(&self.root) else {
+        let Ok(registry) = ModelSettings::read(&self.root) else {
             return;
         };
         drop(control);
@@ -298,7 +298,7 @@ impl MemoryStore {
         }
     }
     fn embedding_matches(&self, fingerprint: &str) -> bool {
-        Registry::read(&self.root)
+        ModelSettings::read(&self.root)
             .and_then(|r| r.fingerprint())
             .is_ok_and(|f| f == fingerprint)
     }
@@ -321,11 +321,11 @@ impl MemoryStore {
     fn embedding_step(&self) -> Result<()> {
         let control =
             emb::lock(&self.root, "embedding-control.lock").map_err(|_| DataError::Busy)?;
-        let r = Registry::read(&self.root).map_err(model_error)?;
+        let r = ModelSettings::read(&self.root).map_err(model_error)?;
         drop(control);
         let fp = r.fingerprint().map_err(model_error)?;
         let remote = if r.embedding.source == Source::Service {
-            Some(r.resolve(&r.embedding).map_err(model_error)?)
+            Some(r.embedding.model_config().map_err(model_error)?)
         } else {
             None
         };
@@ -342,7 +342,7 @@ impl MemoryStore {
     }
     #[cfg(test)]
     fn embedding_step_with(&self, encode: impl FnMut(&str) -> emb::Result<Vec<u8>>) -> Result<()> {
-        let fp = Registry::read(&self.root)
+        let fp = ModelSettings::read(&self.root)
             .map_err(model_error)?
             .fingerprint()
             .map_err(model_error)?;
@@ -361,7 +361,7 @@ impl MemoryStore {
             return Ok(());
         }
         let mut db = self.connection()?;
-        if Registry::read(&self.root)
+        if ModelSettings::read(&self.root)
             .map_err(model_error)?
             .fingerprint()
             .map_err(model_error)?
@@ -427,7 +427,7 @@ impl MemoryStore {
         let mut error = None;
         for c in &chunks {
             if !Preferences::read(&self.root).map_err(model_error)?.wanted()
-                || Registry::read(&self.root)
+                || ModelSettings::read(&self.root)
                     .map_err(model_error)?
                     .fingerprint()
                     .map_err(model_error)?
@@ -450,7 +450,7 @@ impl MemoryStore {
         }
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if meta(&tx)?.is_none_or(|m| m.revision != index.revision)
-            || Registry::read(&self.root)
+            || ModelSettings::read(&self.root)
                 .map_err(model_error)?
                 .fingerprint()
                 .map_err(model_error)?
@@ -510,7 +510,7 @@ impl MemoryStore {
         if let Some(error) = prefs.error {
             return Err(error);
         }
-        let registry = Registry::read(&self.root)?;
+        let registry = ModelSettings::read(&self.root)?;
         drop(control);
         let remote = registry.embedding.source == Source::Service;
         let fingerprint = registry.fingerprint()?;
@@ -537,7 +537,7 @@ impl MemoryStore {
         };
         let vector = if remote {
             crate::models::bytes(&crate::models::embed(
-                &registry.resolve(&registry.embedding)?,
+                &registry.embedding.model_config()?,
                 &text,
                 registry.embedding.dimensions,
                 Duration::from_secs(3),
@@ -551,7 +551,7 @@ impl MemoryStore {
             )?)?
         };
         if !Preferences::read(&self.root)?.enabled
-            || Registry::read(&self.root)?.fingerprint()? != fingerprint
+            || ModelSettings::read(&self.root)?.fingerprint()? != fingerprint
         {
             return Err("embedding_configuration_changed".into());
         }
@@ -600,23 +600,19 @@ mod tests {
     }
     #[test]
     fn model_switch_rejects_inflight_vectors_and_supports_new_dimensions() {
-        use crate::models::{Binding, Connection, Registry, Source};
+        use crate::models::{Binding, ModelSettings, Source};
         let (d, s) = setup();
         capture(&s, "Preserve original text while switching models");
         s.embedding_step_with(|_| Ok(vector())).unwrap();
-        let mut r = Registry::default();
-        r.connections.push(Connection {
-            id: "api".into(),
-            name: "Test".into(),
-            base_url: "http://localhost:9/v1".into(),
-            api_key: None,
-        });
-        r.embedding = Binding {
-            source: Source::Service,
-            connection: "api".into(),
-            model: "three".into(),
-            dimensions: Some(3),
-            ..Binding::default()
+        let mut r = ModelSettings {
+            embedding: Binding {
+                source: Source::Service,
+                base_url: "http://localhost:9/v1".into(),
+                model: "three".into(),
+                dimensions: Some(3),
+                ..Binding::default()
+            },
+            ..ModelSettings::default()
         };
         r.save(d.path(), "initial").unwrap();
         s.embedding_step_with(|_| Ok(crate::models::bytes(&[1., 0., 0.])))

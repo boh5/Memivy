@@ -70,6 +70,17 @@ fn fixture(
             }
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{result}",result.len()).unwrap();
         }
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_millis(150);
+        while std::time::Instant::now() < deadline {
+            match listener.accept() {
+                Ok(_) => panic!("unexpected model request after task completion"),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => panic!("fixture listener failed: {error}"),
+            }
+        }
     });
     (config, handle)
 }
@@ -119,30 +130,19 @@ async fn capture_uses_natural_agent_and_one_existing_memory_identity() {
     let mut task = store.claim_organization().unwrap().unwrap();
     store.prepare_organization(&mut task).unwrap();
     let source = raw.capture_id.clone();
-    let (config, server) = fixture(2, move |index, request| {
-        if index == 0 {
-            write_call(
-                "write-1",
-                &MemoryWriteArgs {
-                    destination: Destination::New,
-                    title: "上线计划".into(),
-                    parts: vec![quoted_part(
-                        "计划上线，尚未执行。",
-                        &source,
-                        "我计划上线，但尚未执行。",
-                    )],
-                },
-            )
-        } else {
-            let result: Value = serde_json::from_str(
-                request["messages"].as_array().unwrap().last().unwrap()["content"]
-                    .as_str()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(result["receipt"]["status"], "applied");
-            final_text()
-        }
+    let (config, server) = fixture(1, move |_, _| {
+        write_call(
+            "write-1",
+            &MemoryWriteArgs {
+                destination: Destination::New,
+                title: "上线计划".into(),
+                parts: vec![quoted_part(
+                    "计划上线，尚未执行。",
+                    &source,
+                    "我计划上线，但尚未执行。",
+                )],
+            },
+        )
     });
     ready(&store, &config);
     let receipt = store
@@ -219,7 +219,7 @@ async fn target_read_and_continuation_preserve_sources_and_reversible_merge() {
     let target_id = target.memory_id.clone();
     let source = input.capture_id.clone();
     let version = previous.id.clone();
-    let (config, server) = fixture(3, move |index, request| match index {
+    let (config, server) = fixture(2, move |index, request| match index {
         0 => event(
             json!({"role":"assistant","tool_calls":[{"index":0,"id":"read-1","type":"function","function":{"name":"read_memory","arguments":json!({"memory_id":target_id,"view":"current","source_id":null,"start_char":0,"max_chars":3000}).to_string()}}]}),
             "tool_calls",
@@ -255,7 +255,7 @@ async fn target_read_and_continuation_preserve_sources_and_reversible_merge() {
                 },
             )
         }
-        _ => final_text(),
+        _ => unreachable!("no acknowledgement request is expected"),
     });
     ready(&store, &config);
     let receipt = store
@@ -284,25 +284,21 @@ async fn target_read_and_continuation_preserve_sources_and_reversible_merge() {
 }
 
 #[tokio::test]
-async fn committed_write_survives_failed_final_acknowledgement_without_requeueing() {
+async fn committed_write_finishes_without_an_acknowledgement_request_or_requeue() {
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     let raw = capture(&store, "独立想法");
     let task = store.claim_organization().unwrap().unwrap();
     let source = raw.capture_id.clone();
-    let (config, server) = fixture(2, move |index, _| {
-        if index == 0 {
-            write_call(
-                "write-1",
-                &MemoryWriteArgs {
-                    destination: Destination::New,
-                    title: "Idea".into(),
-                    parts: vec![quoted_part("独立想法，待考虑。", &source, "独立想法")],
-                },
-            )
-        } else {
-            String::new()
-        }
+    let (config, server) = fixture(1, move |_, _| {
+        write_call(
+            "write-1",
+            &MemoryWriteArgs {
+                destination: Destination::New,
+                title: "Idea".into(),
+                parts: vec![quoted_part("独立想法，待考虑。", &source, "独立想法")],
+            },
+        )
     });
     ready(&store, &config);
     let receipt = store
@@ -461,7 +457,7 @@ async fn paged_target_reads_allow_a_complete_body_update_preserving_the_tail() {
     let source = input.capture_id;
     let revised = format!("{original}决定连接池为 8 个连接。");
     let expected = revised.clone();
-    let (config, server) = fixture(4, move |index, request| match index {
+    let (config, server) = fixture(3, move |index, request| match index {
         0 | 1 => event(
             json!({"role":"assistant","tool_calls":[{"index":0,"id":format!("read-{index}"),"type":"function","function":{
                 "name":"read_memory","arguments":json!({"memory_id":target_id,"view":"current","source_id":null,"start_char":index*3000,"max_chars":3000}).to_string()
@@ -492,7 +488,7 @@ async fn paged_target_reads_allow_a_complete_body_update_preserving_the_tail() {
                 },
             )
         }
-        _ => final_text(),
+        _ => unreachable!("no acknowledgement request is expected"),
     });
     ready(&store, &config);
     let receipt = store
@@ -662,10 +658,7 @@ async fn invalid_quote_is_rejected_then_corrected_without_an_intermediate_write(
     let unchanged = store.clone();
     let original_version = raw.version_id.clone();
     let memory = raw.memory_id.clone();
-    let (config, server) = fixture(3, move |index, request| {
-        if index == 2 {
-            return final_text();
-        }
+    let (config, server) = fixture(2, move |index, request| {
         if index == 1 {
             let result: Value = serde_json::from_str(
                 request["messages"].as_array().unwrap().last().unwrap()["content"]

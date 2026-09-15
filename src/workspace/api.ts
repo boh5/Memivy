@@ -114,16 +114,7 @@ export type Message = {
   error_code: string | null;
   citations: { source: Source; available: boolean }[];
 };
-export type Settings = {
-  model_capabilities?: {structured_json:boolean;streaming_text:boolean;single_tool:boolean;multi_turn:boolean}|null;
-  configured: boolean;
-  base_url: string;
-  model: string;
-  has_key: boolean;
-  disable_reasoning: boolean;
-  max_output_tokens: number | null;
-  output_token_parameter: "max_tokens" | "max_completion_tokens";
-};
+export type Settings = { configured: boolean };
 export const keyOf = (key: Key) => `${key.kind}:${key.id}`;
 export const uid = () => crypto.randomUUID();
 export const date = formatDate;
@@ -155,7 +146,7 @@ export async function call<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return resourceCall<T>(name, args);
-  if (name === "models_load") return {revision:"preview",connections:[],llm:null,embedding:{source:"local",connection:"",model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",connection:"",model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},auto_organize:true} as T;
+  if (name === "models_load") return {revision:"preview",llm:null,embedding:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},auto_organize:true} as T;
   if (name === "embedding_status") return {enabled:false,preparing:false,paused:false,state:"not_downloaded",downloaded:0,bytes:639150592,processed:0,total:1,failed:0,error:null} as T;
   if (name === "voice_status") return {source:"local",label:"voice_local",local_available:false,enabled:false,preload:false,shortcut:"Alt+KeyR",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"",session:null} as T;
   if (name === "navigation_collections") return [] as T;
@@ -189,13 +180,6 @@ export async function call<T>(
     return [] as T;
   if (name === "library_projects") return ["Product ideas"] as T;
   if (name === "draft_read") return null as T;
-  if (name === "workspace_settings")
-    return {
-      configured: false,
-      base_url: "",
-      model: "",
-      has_key: false,
-      disable_reasoning: false,
-    } as T;
+  if (name === "workspace_settings") return { configured: false } as T;
   throw { code: 'native_required' };
 }

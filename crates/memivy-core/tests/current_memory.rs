@@ -530,7 +530,7 @@ fn deleting_a_discussion_removes_its_unsaved_selection_but_preserves_saved_memor
 
 #[test]
 fn organization_off_blocks_new_effects_but_preserves_receipt_replay() {
-    use memivy_core::models::Registry;
+    use memivy_core::models::ModelSettings;
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::open(dir.path()).unwrap();
     store.capture(&request("已整理事项")).unwrap();
@@ -539,9 +539,9 @@ fn organization_off_blocks_new_effects_but_preserves_receipt_replay() {
     let receipt = store.apply_organization(&first, &proposal).unwrap();
     let saved = store.capture(&request("新事项原文")).unwrap();
     let pending = store.claim_organization().unwrap().unwrap();
-    let mut registry = Registry {
+    let mut registry = ModelSettings {
         auto_organize: false,
-        ..Registry::default()
+        ..ModelSettings::default()
     };
     registry.save(dir.path(), "initial").unwrap();
     assert_eq!(

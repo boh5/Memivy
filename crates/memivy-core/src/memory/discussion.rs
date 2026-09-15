@@ -220,7 +220,7 @@ impl MemoryStore {
                         )
                         .map_err(data_probe)?;
                     if let Some(result) = operation.result {
-                        return Ok(Some(result));
+                        return Ok(AgentReply::Tool(result));
                     }
                     let result = self.execute_agent_tool(input, attempt, &operation);
                     let value = match result {
@@ -257,10 +257,10 @@ impl MemoryStore {
                             .get("receipt")
                             .is_some_and(|r| r["status"] == "applied"),
                     );
-                    return Ok(Some(value));
+                    return Ok(AgentReply::Tool(value));
                 }
             }
-            Ok(None)
+            Ok(AgentReply::Continue)
         })
         .await
         .map_err(Failure::from)?;

@@ -5,7 +5,7 @@ const initial={enabled:false,preparing:false,paused:false,state:'not_downloaded'
 async function setup(t,state){
  const f=workspaceFixture(t,{native:true});
  const {emptyBinding}=f.load('src/workspace/modelTypes.ts');
- const binding=emptyBinding(),models={revision:'r1',connections:[],llm:null,embedding:binding,voice:binding,auto_organize:true};
+ const binding=emptyBinding(),models={revision:'r1',llm:null,embedding:binding,voice:binding,auto_organize:true};
  let view;
  const props={kind:'embedding',models,draft:binding,embedding:state,voice:null,onBusy(){},onSaved(){},onRefresh:async()=>{f.render(view,props)},setDraft(draft){props.draft=draft;f.render(view,props)}};
  view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,props);await f.settle();

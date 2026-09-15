@@ -1138,3 +1138,13 @@ Limits: native Chinese IME composition and microphone recording were not revalid
 At the user's request, added another independent code reviewer and reviewed the entire pending UI diff without visual inspection. Fixed the list resize observer remaining attached to a detached pane after switching collection/review/trash scopes: App now shares the list identity with the resize effect so observation is reconnected. Preserved the saved preferred width at narrow startup instead of overwriting the CSS preference with the temporary window limit. Fixed archive restore eligibility when an external update returns a newer head while the reader deliberately retains the old version: restoration now requires matching archive and displayed state/head, in addition to the request identity.
 
 Added regression coverage for replacement list nodes, narrow startup and subsequent widening, keyboard bounds, and newer archive heads remaining read-only until the reader adopts them. The independent reviewer rechecked both fixes and reran all 7 focused cases. Full UI regression passed (246 tests); build, i18n and diff checks passed. No backend code changed, no visual review was performed, and no commit or push was made. Logs: ignored research/design-qa/review-*.log.
+
+
+## 2026-09-15 已授权的三项简化
+
+- 模型配置删除 Connection 列表、名称、引用 ID、查找与清理链路，各能力直接保存地址、模型和 Key。旧配置在文件边界原子转换，保留凭据、revision 与已有录音；语音重试只保留一份私有会话配置，不把 Key 写入录音文件或返回前端。保留既有旧 LLM 文件导入路径。
+- 后台整理提交记忆与回执后立即结束，共享工具循环增加明确的成功结束结果；不执行同批后续工具，也不再发出无用确认请求。来源、版本、事务和重试校验保留。
+- `workspace_settings` 缩为 configured 状态，通过统一配置读取并验证。
+- 用户明确要求保留追问建议：生成、超时、存储与界面均未裁减；讨论回调只适配成功结束结果类型。
+- 验证：全工作区 Rust 测试、Clippy、前端构建与 i18n 检查通过；UI 246 项中的 245 项在沙箱通过，文件监听项在沙箱内 EMFILE，单项沙箱外复跑通过。配置与整理变更经独立审查、修复与复审。
+- 原生 QA：独立应用标识、显式 `/private/tmp` 合成资料库，确认实际数据库与格式 2 配置落盘；旧模型地址与已保存 Key 正确显示，修改模型后经本地合成服务完成测试及应用，5 次协议请求均使用原 Key，其他能力配置保持不变，配置权限为 0600。构建保留既有大 chunk 提示；没有进行真实服务质量或真人录音验收。证据在忽略目录 `research/simplification-qa/`。

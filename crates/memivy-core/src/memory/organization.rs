@@ -160,7 +160,7 @@ impl MemoryStore {
         Ok(())
     }
     pub fn claim_organization(&self) -> Result<Option<OrganizationTask>> {
-        if !crate::models::Registry::read(&self.root).is_ok_and(|r| r.auto_organize) {
+        if !crate::models::ModelSettings::read(&self.root).is_ok_and(|r| r.auto_organize) {
             return Ok(None);
         }
         let mut db = self.connection()?;
@@ -225,7 +225,7 @@ impl MemoryStore {
         task: &OrganizationTask,
     ) -> std::result::Result<Option<Receipt>, model::ProbeError> {
         use super::agent::{
-            AgentEvent, INCOMPLETE_WRITE_READ, evidence_value, memory_read_tools,
+            AgentEvent, AgentReply, INCOMPLETE_WRITE_READ, evidence_value, memory_read_tools,
             memory_write_tool, run_memory_agent, write_request_fully_read,
         };
         let capability = self
@@ -270,62 +270,79 @@ impl MemoryStore {
         ];
         let mut receipt: Option<Receipt> = None;
         let mut protocol = vec![];
-        let completed = run_memory_agent(config, messages, &tools, |event| {
-            match event {
-                AgentEvent::BeforeRequest(messages) => {
-                    self.filter_unavailable_evidence(messages).map_err(|_| model::ProbeError::InvalidResponse)?;
-                    if receipt.is_none() {
-                        validate_organization_task(&self.connection().map_err(|_| model::ProbeError::InvalidResponse)?, &self.root, task)
-                            .map_err(|_| model::ProbeError::InvalidResponse)?;
+        let completed = run_memory_agent(config, messages, &tools, |event| match event {
+            AgentEvent::BeforeRequest(messages) => {
+                self.filter_unavailable_evidence(messages)
+                    .map_err(|_| model::ProbeError::InvalidResponse)?;
+                validate_organization_task(
+                    &self
+                        .connection()
+                        .map_err(|_| model::ProbeError::InvalidResponse)?,
+                    &self.root,
+                    task,
+                )
+                .map_err(|_| model::ProbeError::InvalidResponse)?;
+                Ok(AgentReply::Continue)
+            }
+            AgentEvent::Text(_) => Ok(AgentReply::Continue),
+            AgentEvent::Checkpoint(messages) => {
+                protocol = messages.to_vec();
+                Ok(AgentReply::Continue)
+            }
+            AgentEvent::Tool(call) => {
+                if call.name == "write_memory" {
+                    let change: MemoryWriteArgs = serde_json::from_value(call.arguments.clone())
+                        .map_err(|_| model::ProbeError::InvalidResponse)?;
+                    let version = match &change.destination {
+                        Destination::New => &task.memory.id,
+                        Destination::Existing {
+                            expected_version, ..
+                        } => expected_version,
+                    };
+                    if !write_request_fully_read(
+                        &self
+                            .connection()
+                            .map_err(|_| model::ProbeError::InvalidResponse)?,
+                        &protocol,
+                        &call.id,
+                        version,
+                    )
+                    .map_err(|_| model::ProbeError::InvalidResponse)?
+                    {
+                        return Ok(AgentReply::Tool(
+                            json!({"error":INCOMPLETE_WRITE_READ,"applied":false}),
+                        ));
                     }
-                    Ok(None)
-                }
-                AgentEvent::Text(_) => Ok(None),
-                AgentEvent::Checkpoint(messages) => {
-                    protocol = messages.to_vec();
-                    Ok(None)
-                }
-                AgentEvent::Tool(call) => {
-                    if call.name == "write_memory" {
-                        if let Some(receipt) = &receipt {
-                            return Ok(Some(json!({"already_applied":true,"receipt":receipt,"instruction":"The capture is organized. Finish without another write."})));
-                        }
-                        let change: MemoryWriteArgs = serde_json::from_value(call.arguments.clone())
-                            .map_err(|_| model::ProbeError::InvalidResponse)?;
-                        let version = match &change.destination {
-                            Destination::New => &task.memory.id,
-                            Destination::Existing { expected_version, .. } => expected_version,
-                        };
-                        if !write_request_fully_read(
-                            &self.connection().map_err(|_| model::ProbeError::InvalidResponse)?,
-                            &protocol, &call.id, version,
-                        ).map_err(|_| model::ProbeError::InvalidResponse)? {
-                            return Ok(Some(json!({"error":INCOMPLETE_WRITE_READ,"applied":false})));
-                        }
-                        let applied = match self.apply_organization(task, &change) {
-                            Ok(applied) => applied,
-                            Err(DataError::SourceAttribution) => return Ok(Some(json!({
+                    let applied = match self.apply_organization(task, &change) {
+                        Ok(applied) => applied,
+                        Err(DataError::SourceAttribution) => {
+                            return Ok(AgentReply::Tool(json!({
                                 "error":DataError::SourceAttribution.to_string(),"applied":false,
-                            }))),
-                            Err(error) => {
-                                let _ = self.fail_organization(&task.attempt_id,
-                                    if matches!(error, DataError::Conflict | DataError::Unavailable) { "conflict" } else { "invalid" });
-                                return Err(model::ProbeError::InvalidResponse);
-                            }
-                        };
-                        let result = json!({"receipt":applied});
-                        receipt = Some(applied);
-                        Ok(Some(result))
-                    } else {
-                        let result = self.agent_read_tool(&call.name, &call.arguments)
-                            .unwrap_or_else(|error| json!({"error":error.to_string()}));
-                        Ok(Some(result))
-                    }
+                            })));
+                        }
+                        Err(error) => {
+                            let _ = self.fail_organization(
+                                &task.attempt_id,
+                                if matches!(error, DataError::Conflict | DataError::Unavailable) {
+                                    "conflict"
+                                } else {
+                                    "invalid"
+                                },
+                            );
+                            return Err(model::ProbeError::InvalidResponse);
+                        }
+                    };
+                    receipt = Some(applied);
+                    Ok(AgentReply::Complete)
+                } else {
+                    let result = self
+                        .agent_read_tool(&call.name, &call.arguments)
+                        .unwrap_or_else(|error| json!({"error":error.to_string()}));
+                    Ok(AgentReply::Tool(result))
                 }
             }
-        }).await;
-        // The memory and receipt committed together even if the optional final
-        // acknowledgement failed. Never relabel that completed write as failed.
+        })
+        .await;
         if let Some(receipt) = receipt {
             return Ok(Some(receipt));
         }
@@ -460,7 +477,7 @@ fn validate_organization_task(
     root: &std::path::Path,
     task: &OrganizationTask,
 ) -> Result<()> {
-    if !crate::models::Registry::read(root).is_ok_and(|registry| registry.auto_organize) {
+    if !crate::models::ModelSettings::read(root).is_ok_and(|registry| registry.auto_organize) {
         return Err(DataError::Conflict);
     }
     let valid: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM organization_jobs j JOIN memories m ON m.id=j.memory_id WHERE j.memory_id=?1 AND j.input_version_id=?2 AND j.attempt_id=?3 AND j.capture_id=?4 AND j.status='processing' AND m.state='active' AND m.current_version_id=j.input_version_id AND NOT EXISTS(SELECT 1 FROM workspace_drafts WHERE key='memory:'||m.id))", params![task.memory.memory_id,task.memory.id,task.attempt_id,task.capture_id], |row| row.get(0))?;

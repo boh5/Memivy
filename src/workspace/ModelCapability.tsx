@@ -2,13 +2,13 @@ import {useRef,useState} from "react";
 import {call,errorText,native} from "./api";
 import {ErrorNotice,Modal} from "./components";
 import {Icon} from "../ui";
-import {indexLabel,modelNames,type Binding,type Models,type Kind,type EmbeddingStatus,type ConnectionDraft} from "./modelTypes";
+import {indexLabel,modelNames,type Binding,type Models,type Kind,type EmbeddingStatus} from "./modelTypes";
 import type {VoiceStatus} from "./useVoice";
 import VoiceSettings from "./VoiceSettings";
 import {useTranslation} from "react-i18next";
 import {useNotice} from "../i18n/react";
 import {translateCatalog} from "../i18n";
-type Props={connectionDraft?:ConnectionDraft|null;setConnectionDraft?:(d:ConnectionDraft|null)=>void;kind:Kind;models:Models;draft:Binding;setDraft:(b:Binding)=>void;embedding:EmbeddingStatus|null;voice:VoiceStatus|null;onSaved:(m:Models)=>void;onModels:(m:Models)=>void;onReconcile?:(m:Models)=>void;onRefresh:()=>Promise<void>;onDesktop:()=>void;onBusy:(v:boolean)=>void};
+type Props={kind:Kind;models:Models;draft:Binding;setDraft:(b:Binding)=>void;embedding:EmbeddingStatus|null;voice:VoiceStatus|null;onSaved:(m:Models)=>void;onModels:(m:Models)=>void;onReconcile?:(m:Models)=>void;onRefresh:()=>Promise<void>;onDesktop:()=>void;onBusy:(v:boolean)=>void};
 export default function ModelCapability(p:Props){
  const {kind,models,draft,embedding,voice}=p;
  const {t}=useTranslation('settings');
@@ -17,27 +17,24 @@ export default function ModelCapability(p:Props){
  const [test,setTest]=useState<TestState|null>(null),[busy,setBusy]=useState(false),[error,setError]=useNotice(),[confirm,setConfirm]=useState(false),[rebuild,setRebuild]=useState(false);
  const serial=useRef(0),active=useRef(false);
  const local=draft.source==='local',current=models[kind],enabled=kind==='llm'?!!current:kind==='embedding'?!!(embedding?.enabled||embedding?.preparing):!!voice?.enabled;
- const inline=p.connectionDraft;
- const selected=models.connections.find(c=>c.id===(inline?.id??draft.connection));
- const connectionReady=inline?!!inline.base_url.trim():!!selected;
- function editConnection(patch:Partial<ConnectionDraft>){edit({});p.setConnectionDraft?.({...inline??{id:selected?.id??'',name:t(modelNames[kind]),base_url:selected?.base_url??'',api_key:null,remove:false},...patch})}
+ const connectionReady=!!draft.base_url.trim();
  const validTest=test?.signature===JSON.stringify(draft)&&test.revision===models.revision;
  const supported=kind!=='llm'||test?.message==='model_test_agent';
- const changed=!!inline||JSON.stringify(current)!==JSON.stringify(draft);
- const indexChanged=kind==='embedding'&&(draft.source!==models.embedding.source||(draft.source==='service'&&(draft.model!==models.embedding.model||draft.dimensions!==models.embedding.dimensions||(inline?.base_url??selected?.base_url??'').trim().replace(/\/+$/,'')!==(models.connections.find(c=>c.id===models.embedding.connection)?.base_url??'').trim().replace(/\/+$/,''))));
+ const changed=validTest||JSON.stringify(current)!==JSON.stringify(draft);
+ const indexChanged=kind==='embedding'&&(draft.source!==models.embedding.source||(draft.source==='service'&&(draft.model!==models.embedding.model||draft.dimensions!==models.embedding.dimensions||draft.base_url.trim().replace(/\/+$/,'')!==models.embedding.base_url.trim().replace(/\/+$/,''))));
  const localReady=kind==='embedding'?!!embedding&&embedding.downloaded>=embedding.bytes:!!voice?.local_available;
  function edit(patch:Partial<Binding>){serial.current++;setTest(null);p.setDraft({...draft,...patch})}
  async function run(work:()=>Promise<void>){if(active.current)return;active.current=true;setBusy(true);p.onBusy(true);setError('');try{await work()}catch(e){setError(errorText(e))}finally{active.current=false;setBusy(false);p.onBusy(false)}}
- async function testModel(){const n=++serial.current;await run(async()=>{const result=await call<TestResult>('models_test',{revision:models.revision,kind,binding:draft,connection:inline??null});if(n!==serial.current)return;p.setDraft(result.binding);setTest({token:result.token,signature:JSON.stringify(result.binding),revision:models.revision,message:result.message,message_params:result.message_params})})}
+ async function testModel(){const n=++serial.current;await run(async()=>{const result=await call<TestResult>('models_test',{revision:models.revision,kind,binding:draft});if(n!==serial.current)return;const tested={...result.binding,api_key:draft.api_key};p.setDraft(tested);setTest({token:result.token,signature:JSON.stringify(tested),revision:models.revision,message:result.message,message_params:result.message_params})})}
  async function apply(disable=false){if(!disable&&!supported)return;await run(async()=>{try{const m=await call<Models>('models_apply',{revision:models.revision,kind,binding:disable?null:draft,token:validTest?test?.token:null,confirmed:kind==='embedding'});await p.onRefresh();p.onSaved(m)}catch(e){try{p.onReconcile?.(await call<Models>('models_load'));await p.onRefresh()}catch{}throw e}})}
  async function control(action:string){await run(async()=>{await call('embedding_control',{action});await p.onRefresh()})}
  return <><div className="model-detail">
  {kind==='llm'&&<p className="field-help">{t('capability.assistantDescription')}</p>}
  {kind!=='llm'&&<div className="model-mode-picker">{(['local','service'] as const).map(source=><button key={source} className={draft.source===source?'selected':''} aria-pressed={draft.source===source} disabled={busy} onClick={()=>{if(source!==draft.source)edit({source})}}><Icon name={source==='local'?'desktop':'link'}/><span><strong>{t(source==='local'?'capability.localModel':'capability.serviceModel')}</strong></span><i/></button>)}</div>}
  {local?<div className="model-local-card"><strong>{kind==='voice'?'Qwen3-ASR':'Qwen3-Embedding'} · 0.6B Q8</strong><p>{t(kind==='voice'?'capability.voiceLocalDescription':'capability.embeddingLocalDescription')}</p><span className="model-local-status">{t(localReady?'capability.downloadedOffline':'capability.downloadOnFirstUse')}</span></div>:<>
- <label>{t('capability.apiAddress')}<input type="url" value={inline?.base_url??selected?.base_url??''} placeholder="https://example.com/v1" autoComplete="off" spellCheck={false} disabled={busy} onChange={e=>editConnection({base_url:e.target.value,api_key:null})}/></label>
+ <label>{t('capability.apiAddress')}<input type="url" value={draft.base_url} placeholder="https://example.com/v1" autoComplete="off" spellCheck={false} disabled={busy} onChange={e=>edit({base_url:e.target.value,api_key:null})}/></label>
 
- <><label>{t('capability.modelName')}<input value={draft.model} placeholder={t(kind==='voice'?'capability.voiceModelPlaceholder':kind==='embedding'?'capability.embeddingModelPlaceholder':'capability.llmModelPlaceholder')} disabled={busy} autoComplete="off" onChange={e=>edit({model:e.target.value})}/></label> <label>API Key<input type="password" value={inline?.api_key??''} placeholder={t(selected?.has_key&&(!inline||inline.base_url===selected.base_url)?'capability.savedKeyPlaceholder':'capability.emptyKeyPlaceholder')} autoComplete="new-password" disabled={busy} onChange={e=>editConnection({api_key:e.target.value||null})}/></label><button className="outline-button" disabled={!native||busy||!connectionReady||!draft.model.trim()} onClick={()=>void testModel()}>{busy?t('status.processing'):t('capability.testConnection')}</button>{validTest&&<p className="model-test-result" role="status">{translateCatalog(test.message,{ns:'errors',...test.message_params})}</p>}</>
+ <><label>{t('capability.modelName')}<input value={draft.model} placeholder={t(kind==='voice'?'capability.voiceModelPlaceholder':kind==='embedding'?'capability.embeddingModelPlaceholder':'capability.llmModelPlaceholder')} disabled={busy} autoComplete="off" onChange={e=>edit({model:e.target.value})}/></label> <label>API Key<input type="password" value={draft.api_key??''} placeholder={t(current?.has_key&&draft.base_url===current.base_url?'capability.savedKeyPlaceholder':'capability.emptyKeyPlaceholder')} autoComplete="new-password" disabled={busy} onChange={e=>edit({api_key:e.target.value||null})}/></label><button className="outline-button" disabled={!native||busy||!connectionReady||!draft.model.trim()} onClick={()=>void testModel()}>{busy?t('status.processing'):t('capability.testConnection')}</button>{validTest&&<p className="model-test-result" role="status">{translateCatalog(test.message,{ns:'errors',...test.message_params})}</p>}</>
 
  </>}
  <p className="model-privacy"><Icon name="lock" size={14}/><span>{t(local?'capability.localPrivacy':kind==='embedding'?'capability.embeddingPrivacy':kind==='voice'?'capability.voicePrivacy':'capability.llmPrivacy')}</span></p>
@@ -52,7 +49,7 @@ export default function ModelCapability(p:Props){
  {kind==='voice'&&<>{local&&<VoiceSettings/>}<div className="setting-line"><div><strong>{t('voice.shortcutTitle')}</strong></div><button className="model-text-button" disabled={busy} onClick={p.onDesktop}>{t('voice.changeShortcut')} →</button></div></>}
  <ErrorNotice text={error}/></div>
  <footer className="model-footer"><span>{enabled?<button className="model-text-button" disabled={busy||!native} onClick={()=>void apply(true)}>{t('capability.disable',{model:t(modelNames[kind])})}</button>:null}</span><button className="send-button" disabled={busy||!native||!supported||(!local&&!validTest)||(!changed&&enabled)} onClick={()=>kind==='embedding'&&(!enabled||indexChanged)?setConfirm(true):void apply()}>{busy?t('status.processing'):kind==='embedding'&&enabled&&indexChanged?t('embedding.changeAndRebuild'):local&&!localReady&&kind==='embedding'?t('embedding.downloadAndEnable'):enabled?t('actions.applySettings'):t('capability.enable',{model:t(modelNames[kind])})}</button></footer>
- {confirm&&<Modal title={t(enabled?'embedding.changeModelDialogTitle':'embedding.enableDialogTitle')} onClose={()=>{if(!busy)setConfirm(false)}}><p>{embedding?.total==null?t('embedding.confirmCurrent'):t('embedding.confirmCount',{count:embedding.total})}</p><p className="model-privacy">{local?t('embedding.localConfirm'):t('embedding.remoteConfirm',{service:models.connections.find(c=>c.id===draft.connection)?.name??t('embedding.selectedService')})}</p><ErrorNotice text={error}/><div className="action-row"><button className="outline-button" disabled={busy} onClick={()=>setConfirm(false)}>{t('actions.cancel')}</button><button className="send-button" disabled={busy} onClick={()=>{setConfirm(false);void apply()}}>{t('embedding.confirmAndBuild')}</button></div></Modal>}
+ {confirm&&<Modal title={t(enabled?'embedding.changeModelDialogTitle':'embedding.enableDialogTitle')} onClose={()=>{if(!busy)setConfirm(false)}}><p>{embedding?.total==null?t('embedding.confirmCurrent'):t('embedding.confirmCount',{count:embedding.total})}</p><p className="model-privacy">{local?t('embedding.localConfirm'):t('embedding.remoteConfirm',{service:draft.base_url})}</p><ErrorNotice text={error}/><div className="action-row"><button className="outline-button" disabled={busy} onClick={()=>setConfirm(false)}>{t('actions.cancel')}</button><button className="send-button" disabled={busy} onClick={()=>{setConfirm(false);void apply()}}>{t('embedding.confirmAndBuild')}</button></div></Modal>}
  {rebuild&&<Modal title={t('embedding.rebuildDialogTitle')} onClose={()=>setRebuild(false)}><p>{embedding?.total==null?t('embedding.rebuildCurrent'):t('embedding.rebuildCount',{count:embedding.total})}</p><div className="action-row"><button className="outline-button" onClick={()=>setRebuild(false)}>{t('actions.cancel')}</button><button className="send-button" onClick={()=>{setRebuild(false);void control('rebuild')}}>{t('embedding.startRebuild')}</button></div></Modal>}
  </>;
 }

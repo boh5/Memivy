@@ -8,7 +8,7 @@ import McpSettings from "./McpSettings";
 import ModelCapability from "./ModelCapability";
 import ModelStorage from "./ModelStorage";
 import ModelOverview from "./ModelOverview";
-import {emptyBinding,modelNames,type Models,type Binding,type Kind,type ConnectionDraft,type EmbeddingStatus} from "./modelTypes";
+import {emptyBinding,modelNames,type Models,type Binding,type Kind,type EmbeddingStatus} from "./modelTypes";
 import type {VoiceStatus} from "./useVoice";
 import {useTranslation} from "react-i18next";
 import {message} from "../i18n/messages";
@@ -20,13 +20,12 @@ const tabs=[['general','settings','tabs.general'],['ai','spark','tabs.ai'],['dat
 export default function SettingsPanel({onClose,onRestore,onChanged,initialPage="general"}:{initialPage?:Page;onClose:()=>void;onRestore:(id:string)=>void;onChanged:()=>void}){
  const {t}=useTranslation('settings');
  const [page,setPage]=useState<Page>(initialPage),[models,setModels]=useState<Models|null>(null),[embedding,setEmbedding]=useState<EmbeddingStatus|null>(null),[voice,setVoice]=useState<VoiceStatus|null>(null),[drafts,setDrafts]=useState<Partial<Record<Kind,Binding>>>({}),[error,setError]=useNotice(),[busy,setBusy]=useState(false),[backupBusy,setBackupBusy]=useState(false),[mcpBusy,setMcpBusy]=useState(false),[repair,setRepair]=useState(false),[notice,setNotice]=useNotice();
- const [connectionDrafts,setConnectionDrafts]=useState<Partial<Record<Kind,ConnectionDraft|null>>>({});
  const live=useRef(true),poll=useRef(0);const locked=busy||backupBusy||mcpBusy;
- useEffect(()=>{live.current=true;void call<Models>('models_load').then(m=>{if(live.current){setModels(m);if(initialPage in modelNames){const k=initialPage as Kind;setDrafts({[k]:m[k]??{...emptyBinding(),source:'service',connection:''}})}}}).catch(e=>{if(live.current)setError(errorText(e))});return()=>{live.current=false;poll.current++}},[]);
+ useEffect(()=>{live.current=true;void call<Models>('models_load').then(m=>{if(live.current){setModels(m);if(initialPage in modelNames){const k=initialPage as Kind;setDrafts({[k]:m[k]??{...emptyBinding(),source:'service'}})}}}).catch(e=>{if(live.current)setError(errorText(e))});return()=>{live.current=false;poll.current++}},[]);
  async function refresh(){const n=++poll.current;const results=await Promise.allSettled([call<EmbeddingStatus>('embedding_status'),call<VoiceStatus>('voice_status')]);if(!live.current||n!==poll.current)return;const [e,v]=results;if(e.status==='fulfilled')setEmbedding(e.value);if(v.status==='fulfilled')setVoice(v.value);if(e.status==='rejected'||v.status==='rejected')setError(message('settings','status.partialModelReadFailed'));}
  useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),3000);return()=>clearTimeout(timer)},[notice,setNotice]);
  useEffect(()=>{void refresh();const t=setInterval(()=>void refresh(),1500);return()=>clearInterval(t)},[]);
- function navigate(next:Page){if(locked)return;setPage(next);setError('');setNotice('');if(models&&next in modelNames){const k=next as Kind;setDrafts(old=>({...old,[k]:old[k]??models[k]??{...emptyBinding(),source:'service',connection:''}}));}}
+ function navigate(next:Page){if(locked)return;setPage(next);setError('');setNotice('');if(models&&next in modelNames){const k=next as Kind;setDrafts(old=>({...old,[k]:old[k]??models[k]??{...emptyBinding(),source:'service'}}));}}
  function saved(m:Models){setModels(m);setNotice(message('settings','status.savedLocally'));onChanged();}
  const active=page in modelNames?'ai':page==='desktop'?'general':page;
  const tab=tabs.find(item=>item[0]===active);
@@ -34,7 +33,7 @@ export default function SettingsPanel({onClose,onRestore,onChanged,initialPage="
  return <Modal title={t('title')} className="model-settings" onClose={()=>{if(!locked)onClose()}}><div className="settings-shell"><aside className="settings-nav"><h2><img src={logo} alt=""/>{t('title')}</h2><nav aria-label={t('nav.categoryLabel')}>{tabs.map(([id,icon,label])=><button key={id} className={active===id?'active':''} aria-current={active===id?'page':undefined} disabled={locked} onClick={()=>navigate(id)}><Icon name={icon}/>{t(label)}</button>)}</nav></aside><main className="settings-main"><header className="model-page-header">{(page in modelNames)&&<button className="icon-button" aria-label={t('actions.backToModels')} disabled={locked} onClick={()=>navigate('ai')}><Icon name="back"/></button>}<div><h2>{title}</h2></div></header>
  {!native&&<p className="model-preview-note">{t('preview.readOnly')}</p>}
  {page==='ai'&&<div className="settings-page"><ModelOverview models={models} embedding={embedding} voice={voice} disabled={locked} onConfigure={navigate}/></div>}
- {page in modelNames&&models&&drafts[page as Kind]&&<ModelCapability connectionDraft={connectionDrafts[page as Kind]} setConnectionDraft={d=>setConnectionDrafts(old=>({...old,[page]:d}))} key={page} kind={page as Kind} models={models} draft={drafts[page as Kind]!} setDraft={d=>setDrafts(old=>({...old,[page]:d}))} embedding={embedding} voice={voice} onRefresh={refresh} onModels={saved} onReconcile={setModels} onSaved={m=>{setConnectionDrafts(old=>({...old,[page]:null}));saved(m);setDrafts(old=>({...old,[page]:m[page as Kind]??undefined}));setPage('ai')}} onDesktop={()=>navigate('desktop')} onBusy={setBusy}/>}
+ {page in modelNames&&models&&drafts[page as Kind]&&<ModelCapability key={page} kind={page as Kind} models={models} draft={drafts[page as Kind]!} setDraft={d=>setDrafts(old=>({...old,[page]:d}))} embedding={embedding} voice={voice} onRefresh={refresh} onModels={saved} onReconcile={setModels} onSaved={m=>{saved(m);setDrafts(old=>({...old,[page]:m[page as Kind]??undefined}));setPage('ai')}} onDesktop={()=>navigate('desktop')} onBusy={setBusy}/>}
  {(page==='general'||page==='desktop')&&<GeneralSettings focusEntry={page==='desktop'} onBusyChange={setBusy}/>}
  {page==='data'&&<div className="settings-page"><BackupSettings disabled={busy||mcpBusy} onBusyChange={setBackupBusy} onRestore={onRestore}/><ModelStorage models={models} embedding={embedding} voice={voice} onRefresh={refresh} onBusy={setBusy}/><details><summary>{t('searchMaintenance.title')}</summary><div className="setting-line"><div><strong>{t('searchMaintenance.rebuildTitle')}</strong><p>{t('searchMaintenance.rebuildDescription')}</p></div><button className="outline-button" disabled={locked||!native} onClick={()=>setRepair(true)}>{t('actions.repair')}</button></div><button className="model-text-button" onClick={()=>navigate('embedding')}>{t('actions.manageSemanticIndex')} →</button></details></div>}
  {page==='mcp'&&<div className="settings-page"><McpSettings onBusyChange={setMcpBusy}/></div>}

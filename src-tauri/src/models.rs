@@ -2,9 +2,9 @@ use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace, require_main};
 use memivy_core::{
     model::ModelConfig,
-    models::{Binding, Connection, Registry, Source},
+    models::{Binding, ModelSettings, Source},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     sync::Mutex,
     time::{Duration, Instant},
@@ -18,45 +18,39 @@ struct Proof {
     kind: String,
     binding: String,
     at: Instant,
-    connection: Option<Connection>,
+    candidate: Binding,
     capabilities: Option<memivy_core::model::tools::Capabilities>,
 }
 #[derive(Serialize)]
 pub(crate) struct View {
     revision: String,
-    connections: Vec<ConnectionView>,
-    llm: Option<Binding>,
-    embedding: Binding,
-    voice: Binding,
+    llm: Option<BindingView>,
+    embedding: BindingView,
+    voice: BindingView,
     auto_organize: bool,
 }
 #[derive(Serialize)]
-struct ConnectionView {
-    id: String,
-    name: String,
-    base_url: String,
+pub(crate) struct BindingView {
+    #[serde(flatten)]
+    binding: Binding,
     has_key: bool,
 }
-fn view(r: Registry) -> View {
+impl From<Binding> for BindingView {
+    fn from(mut binding: Binding) -> Self {
+        let has_key = binding.api_key.take().is_some_and(|k| !k.is_empty());
+        Self { binding, has_key }
+    }
+}
+fn view(r: ModelSettings) -> View {
     View {
         revision: r.revision,
-        connections: r
-            .connections
-            .into_iter()
-            .map(|c| ConnectionView {
-                id: c.id,
-                name: c.name,
-                base_url: c.base_url,
-                has_key: c.api_key.is_some_and(|k| !k.is_empty()),
-            })
-            .collect(),
-        llm: r.llm,
-        embedding: r.embedding,
-        voice: r.voice,
+        llm: r.llm.map(Into::into),
+        embedding: r.embedding.into(),
+        voice: r.voice.into(),
         auto_organize: r.auto_organize,
     }
 }
-fn load(state: &Workspace) -> HostResult<Registry> {
+pub(crate) fn load(state: &Workspace) -> HostResult<ModelSettings> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     crate::storage::validate_config_path(
         &state
@@ -68,12 +62,12 @@ fn load(state: &Workspace) -> HostResult<Registry> {
         home.as_deref(),
     )?;
     crate::storage::validate_config_path(&state.config, home.as_deref())?;
-    Registry::with_legacy(state.store.database_path().parent().unwrap(), &state.config)
+    ModelSettings::with_legacy(state.store.database_path().parent().unwrap(), &state.config)
         .map_err(HostError::from)
 }
 pub(crate) fn read_llm(state: &Workspace) -> HostResult<ModelConfig> {
-    if Registry::exists(state.store.database_path().parent().unwrap()) {
-        Registry::read(state.store.database_path().parent().unwrap())?
+    if ModelSettings::exists(state.store.database_path().parent().unwrap()) {
+        ModelSettings::read(state.store.database_path().parent().unwrap())?
             .llm_config()
             .map_err(HostError::from)
     } else {
@@ -91,18 +85,10 @@ pub(crate) fn models_load(
     require_main(&window)?;
     load(&state).map(view)
 }
-#[derive(Deserialize)]
-pub(crate) struct ConnectionEdit {
-    id: String,
-    name: String,
-    base_url: String,
-    api_key: Option<String>,
-    remove: bool,
-}
 #[derive(Serialize)]
 pub(crate) struct TestResult {
     token: String,
-    binding: Binding,
+    binding: BindingView,
     message: String,
     message_params: serde_json::Value,
 }
@@ -115,45 +101,27 @@ pub(crate) async fn models_test(
     revision: String,
     kind: String,
     mut binding: Binding,
-    connection: Option<ConnectionEdit>,
 ) -> HostResult<TestResult> {
     require_main(&window)?;
-    let mut r = load(&state)?;
+    let r = load(&state)?;
     if r.revision != revision {
         return Err(HostError::new("configuration_conflict"));
     }
-    let candidate = if let Some(edit) = connection {
-        if edit.remove {
-            return Err(HostError::new("model_configuration"));
-        }
-        let url = edit.base_url.trim().trim_end_matches('/').to_string();
-        let previous = r
-            .connections
-            .iter()
-            .find(|c| c.id == edit.id && c.base_url.trim_end_matches('/') == url);
-        let key = match edit.api_key {
-            Some(k) => {
-                if k.is_empty() {
-                    None
-                } else {
-                    Some(k)
-                }
-            }
-            None => previous.and_then(|c| c.api_key.clone()),
-        };
-        let c = Connection {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: edit.name.trim().into(),
-            base_url: url,
-            api_key: key,
-        };
-        binding.connection = c.id.clone();
-        r.connections.push(c.clone());
-        Some(c)
-    } else {
-        None
+    binding.base_url = binding.base_url.trim().trim_end_matches('/').to_string();
+    let previous = match kind.as_str() {
+        "llm" => r.llm.as_ref(),
+        "embedding" => Some(&r.embedding),
+        "voice" => Some(&r.voice),
+        _ => return Err(HostError::new("invalid")),
     };
-    let m = r.resolve(&binding)?;
+    if binding.api_key.is_none() {
+        binding.api_key = previous
+            .filter(|b| b.base_url.trim_end_matches('/') == binding.base_url)
+            .and_then(|b| b.api_key.clone());
+    } else if binding.api_key.as_deref() == Some("") {
+        binding.api_key = None;
+    }
+    let m = binding.model_config()?;
     let mut capabilities = None;
     let mut message_params = serde_json::json!({});
     let message = match kind.as_str() {
@@ -209,23 +177,25 @@ pub(crate) async fn models_test(
     if proofs.len() >= 32 {
         proofs.remove(0);
     }
+    let public = BindingView::from(binding.clone());
     proofs.push(Proof {
         token: token.clone(),
         revision,
         kind,
-        binding: serde_json::to_string(&binding)
+        binding: serde_json::to_string(&public.binding)
             .map_err(|_| HostError::new("model_configuration"))?,
         at: Instant::now(),
-        connection: candidate,
+        candidate: binding,
         capabilities,
     });
     Ok(TestResult {
         token,
-        binding,
+        binding: public,
         message,
         message_params,
     })
 }
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn models_apply(
@@ -234,7 +204,7 @@ pub(crate) async fn models_apply(
     tests: tauri::State<'_, ModelTests>,
     revision: String,
     kind: String,
-    binding: Option<Binding>,
+    mut binding: Option<Binding>,
     token: Option<String>,
     confirmed: bool,
 ) -> HostResult<View> {
@@ -248,8 +218,8 @@ pub(crate) async fn models_apply(
     if let Some(b) = &binding
         && b.source == Source::Service
     {
-        let serialized =
-            serde_json::to_string(b).map_err(|_| HostError::new("model_configuration"))?;
+        let serialized = serde_json::to_string(&BindingView::from(b.clone()).binding)
+            .map_err(|_| HostError::new("model_configuration"))?;
         let proofs = tests
             .0
             .lock()
@@ -265,9 +235,7 @@ pub(crate) async fn models_apply(
             })
             .ok_or(HostError::new("model_test_required"))?;
         capabilities = proof.capabilities.clone();
-        if let Some(connection) = &proof.connection {
-            r.connections.push(connection.clone());
-        }
+        binding = Some(proof.candidate.clone());
     }
     let root = state.store.database_path().parent().unwrap().to_owned();
     match kind.as_str() {
@@ -283,7 +251,6 @@ pub(crate) async fn models_apply(
                 return Err(HostError::new("model_tools_unsupported"));
             }
             r.llm = binding;
-            prune_unused(&mut r, window.app_handle());
             r.save(&root, &revision)?;
             if let Some(caps) = capabilities {
                 let config = r.llm_config()?;
@@ -301,7 +268,6 @@ pub(crate) async fn models_apply(
                     return Err(HostError::new("index_confirmation_required"));
                 }
                 r.embedding = b;
-                prune_unused(&mut r, window.app_handle());
                 let store = state.store.clone();
                 let result = tauri::async_runtime::spawn_blocking(move || {
                     store.apply_embedding_model(&mut r, &revision)?;
@@ -318,13 +284,13 @@ pub(crate) async fn models_apply(
         }
         "voice" => {
             if let Some(b) = binding {
-                r.voice = b;
+                let next = b;
                 window
                     .app_handle()
                     .state::<crate::voice::Voice>()
                     .0
-                    .repair_retained_credentials(&mut r)?;
-                prune_unused(&mut r, window.app_handle());
+                    .retain_recording_config(&mut r, &next)?;
+                r.voice = next;
                 r.save(&root, &revision)?;
                 if let Err(e) = crate::voice::set_enabled(window.app_handle(), true).await {
                     let error = rollback_config(&root, &r, previous, e);
@@ -372,7 +338,7 @@ pub(crate) async fn models_clear(
     tauri::async_runtime::spawn_blocking(move || {
         let root = store.database_path().parent().unwrap().to_owned();
         let _writer = memivy_core::embedding::lock(&root, "embedding-writer.lock")?;
-        if Registry::read(&root)?.embedding.source == Source::Local {
+        if ModelSettings::read(&root)?.embedding.source == Source::Local {
             store
                 .embedding_control("disable")
                 .map_err(HostError::from)?;
@@ -384,23 +350,10 @@ pub(crate) async fn models_clear(
     .map_err(|_| HostError::new("model_delete_failed"))
 }
 
-fn prune_unused(r: &mut Registry, app: &tauri::AppHandle) {
-    let used: Vec<String> = r
-        .llm
-        .iter()
-        .chain([&r.embedding, &r.voice])
-        .filter(|b| b.source == Source::Service)
-        .map(|b| b.connection.clone())
-        .collect();
-    r.connections.retain(|c| {
-        used.contains(&c.id) || app.state::<crate::voice::Voice>().0.uses_connection(&c.id)
-    });
-}
-
 fn rollback_config(
     root: &std::path::Path,
-    candidate: &Registry,
-    mut previous: Registry,
+    candidate: &ModelSettings,
+    mut previous: ModelSettings,
     error: HostError,
 ) -> HostError {
     if previous.save(root, &candidate.revision).is_ok() {
@@ -414,9 +367,40 @@ fn rollback_config(
 mod tests {
     use super::*;
     #[test]
+    fn public_views_and_test_signatures_never_contain_credentials() {
+        let private = Binding {
+            source: Source::Service,
+            base_url: "http://localhost:1234/v1".into(),
+            model: "fixture-model".into(),
+            api_key: Some("private-fixture-key".into()),
+            ..Binding::default()
+        };
+        let response = BindingView::from(private.clone());
+        let bytes = serde_json::to_string(&response).unwrap();
+        assert!(!bytes.contains("private-fixture-key"));
+        assert!(!bytes.contains("api_key"));
+        assert!(response.has_key);
+        let submitted: Binding = serde_json::from_str(&bytes).unwrap();
+        assert_eq!(
+            serde_json::to_string(&submitted).unwrap(),
+            serde_json::to_string(&response.binding).unwrap()
+        );
+        let all = view(ModelSettings {
+            llm: Some(private.clone()),
+            voice: private.clone(),
+            embedding: private,
+            ..ModelSettings::default()
+        });
+        assert!(
+            !serde_json::to_string(&all)
+                .unwrap()
+                .contains("private-fixture-key")
+        );
+    }
+    #[test]
     fn activation_rollback_restores_config_but_never_overwrites_a_newer_save() {
         let dir = tempfile::tempdir().unwrap();
-        let mut previous = Registry::default();
+        let mut previous = ModelSettings::default();
         previous.save(dir.path(), "initial").unwrap();
         let mut candidate = previous.clone();
         candidate.auto_organize = false;
@@ -431,7 +415,7 @@ mod tests {
             .code,
             "model_configuration"
         );
-        let mut newer = Registry::read(dir.path()).unwrap();
+        let mut newer = ModelSettings::read(dir.path()).unwrap();
         assert!(newer.auto_organize);
         assert_ne!(newer.revision, previous.revision);
         let revision = newer.revision.clone();
@@ -447,6 +431,9 @@ mod tests {
             .code,
             "configuration_restore_failed"
         );
-        assert_eq!(Registry::read(dir.path()).unwrap().revision, newer.revision);
+        assert_eq!(
+            ModelSettings::read(dir.path()).unwrap().revision,
+            newer.revision
+        );
     }
 }
