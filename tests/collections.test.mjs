@@ -16,15 +16,6 @@ test('collection scope follows top input into a discussion and remains visible',
  assert.equal(f.calls.filter(v=>v.name==='discussion_submit')[1].args.collectionId,null);
 });
 
-test('review retrieves three older memories at a time and replaces the batch',async t=>{
- const f=workspaceFixture(t),List=f.load('src/workspace/MemoryList.tsx').default;
- f.overrides.library_query=async({query})=>({items:[{key:query.offset?f.keyB:f.keyA,title:query.offset?"Second group":"First group",snippet:'',origin:null,updated_at:1}],next_offset:query.offset?null:3});
- const view=f.mount(List,{trash:false,active:true,selected:null,review:true,revision:0,onSelect(){},onCapture(){},onRefresh(){}});await f.settle();
- const first=f.calls.find(v=>v.name==='library_query').args.query;assert.equal(first.limit,3);assert.equal(first.oldest,true);
- f.find(view,n=>n.props.className==='load-more review-next').props.onClick();await f.settle();
- assert(f.text(view.tree).includes("Second group"));assert(!f.text(view.tree).includes("First group"));
-});
-
 test('AI suggestions are read-only until an explicit add and repeated clicks write once',async t=>{
  const f=workspaceFixture(t),Suggestions=f.load('src/workspace/CollectionSuggestions.tsx').default;
  f.overrides.navigation_suggest=async()=>[{key:f.keyA,title:"Previous interview ideas",snippet:"Original excerpt"}];let complete;

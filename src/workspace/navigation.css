@@ -83,8 +83,6 @@
 .suggestion-rows h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.6; }
 .suggestion-rows p { font-size: 12px; line-height: 1.8; color: #91929a; margin: 0; white-space: pre-wrap; }
 .suggestions-progress { padding: 30px 0; font-size: 13px; color: #99998f; }
-.review-next { display: flex; align-items: center; justify-content: center; gap: 9px; color: #8f782d; }
-.review-next svg { transform: rotate(90deg); }
 @media (max-width: 960px) {
   .collection-header { padding: 16px 20px; gap: 12px; }
   .collection-header-actions { flex-wrap: wrap; justify-content: flex-end; max-width: 145px; gap: 5px; }

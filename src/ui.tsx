@@ -28,6 +28,7 @@ const paths: Record<string, string> = {
   undo: "M8 4 3 9l5 5M3 9h11a6 6 0 0 1 0 12",
   stop: "M6 6h12v12H6z",
   leaf: "M19 3C6 2 2 8 5 15c4 7 16 2 14-12ZM5 20 15 8",
+  activity: "M4 20h16M6 16v-4M12 16V4M18 16V8",
   history: "M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2",
   refresh: "M3 10a9 9 0 0 1 15-5l3 3M21 3v5h-5M21 14a9 9 0 0 1-15 5l-3-3M3 21v-5h5",
   trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",

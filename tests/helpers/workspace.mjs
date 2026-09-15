@@ -125,7 +125,7 @@ function render(f) {
     if(!f.dom.messages.has(n.key)) f.dom.messages.set(n.key,{key:n.key,getBoundingClientRect(){return {top:this.offset-list.scrollTop,bottom:this.offset+100-list.scrollTop};}});
     const element=f.dom.messages.get(n.key);element.offset=i*100;return element;
   });
-  for(const node of nodes(f.tree)) if(node.props?.ref) node.props.ref.current ||= node.props.className==='discussion-messages'?list:{focus(){},scrollIntoView(){f.dom.scrolls++;list.scrollTop=Math.max(0,articles.length*100-500);}};
+  for(const node of nodes(f.tree)) if(node.props?.ref) node.props.ref.current ||= node.props.className==='discussion-messages'?list:{focus(){},querySelector(){return null;},scrollIntoView(){f.dom.scrolls++;list.scrollTop=Math.max(0,articles.length*100-500);}};
   for(const effect of f.effects.splice(0))effect();
 }
 function unmount(f) { if(composerSurfaces.has(f))unmount(composerSurfaces.get(f)); f.alive=false; for(const value of f.slots)value?.cleanup?.(); for(const n of nodes(f.tree))if(n.props?.ref)n.props.ref.current=null; }

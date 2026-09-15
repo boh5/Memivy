@@ -151,6 +151,12 @@ export async function call<T>(
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
   if (name === "organization_jobs") return [] as T;
+  if (name === "activity_summary") {
+    const date = new Date(previewRaw.created_at);
+    const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+    return {memory_count: 1, days: [{date: key, count: 1}]} as T;
+  }
+  if (name === "activity_records") return {items: Number(args?.since) <= previewRaw.created_at && Number(args?.until) > previewRaw.created_at ? [{...previewRow, id:previewId}] : [], next_offset:null} as T;
   if (name === "library_query") {
     const q = args?.query as Query;
     return {

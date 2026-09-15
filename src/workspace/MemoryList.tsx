@@ -7,8 +7,8 @@ import { call, date, errorText, keyOf, sourceName, native, type Key, type Page, 
 import { Empty, ErrorNotice } from "./components";
 import { useNotice } from "../i18n/react";
 
-export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, review = false, collectionId }: {
-  review?: boolean; collectionId?: string;
+export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, collectionId }: {
+  collectionId?: string;
   trash: boolean; active: boolean; selected: Key | null; revision?: number;
   onSelect: (key: Key) => void; onCapture: () => void; onRefresh: () => void;
 }) {
@@ -17,7 +17,6 @@ export default function MemoryList({ trash, active, selected, revision: requeste
   const revision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]) + requestedRevision + reload;
   const statusRevision = useResourceVersion([{domain:"organization"}]);
   const [states, setStates] = useState<Record<string,{status:string;recommendations:number}>>({});
-  const [reviewOffset, setReviewOffset] = useState(0);
   const [origin, setOrigin] = useState(""), [project, setProject] = useState("");
   const [since, setSince] = useState(""), [until, setUntil] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -38,12 +37,11 @@ export default function MemoryList({ trash, active, selected, revision: requeste
   }, [result]);
   const loadedSignature = useRef<string | null>(null);
   const options: Query = {
-    query: "", trash, collection_id: collectionId, oldest: review, offset: review ? reviewOffset : undefined, origin: origin || undefined, project: project || undefined,
+    query: "", trash, collection_id: collectionId, origin: origin || undefined, project: project || undefined,
     since: since ? new Date(`${since}T00:00:00`).getTime() : undefined,
     until: until ? new Date(new Date(`${until}T00:00:00`).setDate(new Date(`${until}T00:00:00`).getDate() + 1)).getTime() : undefined,
   };
   const signature = JSON.stringify(options);
-  useEffect(() => { setReviewOffset(0); }, [origin, project, since, until]);
   useEffect(() => {
     let alive = true;
     void call<string[]>("library_projects").then(p => { if (alive) setProjects(p); })
@@ -54,10 +52,10 @@ export default function MemoryList({ trash, active, selected, revision: requeste
     const seq = ++sequence.current;
     setLoading(true); setListError(""); loadingMore.current = false;
     const readWindow = async (): Promise<Page> => {
-      const count = review ? 3 : loadedSignature.current === signature ? visibleCount.current : 40;
-      let page = await call<Page>("library_query", { query: { ...options, limit: review ? 3 : 40 } });
+      const count = loadedSignature.current === signature ? visibleCount.current : 40;
+      let page = await call<Page>("library_query", { query: { ...options, limit: 40 } });
       const items = [...page.items];
-      while (!review && items.length < count && page.next_offset !== null && sequence.current === seq) {
+      while (items.length < count && page.next_offset !== null && sequence.current === seq) {
         page = await call<Page>("library_query", { query: { ...options, offset: page.next_offset, limit: 40 } });
         items.push(...page.items);
       }
@@ -70,7 +68,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
           const row = [...list.querySelectorAll<HTMLElement>("[data-record]")].find(row => row.getBoundingClientRect().bottom > top);
           if (row) anchor.current = {key:row.dataset.record!,top:row.getBoundingClientRect().top};
         }
-        loadedSignature.current = signature; visibleCount.current = Math.max(40, r.items.length); setResult(r); if (review && reviewOffset > 0 && !r.items.length) setReviewOffset(0); } })
+        loadedSignature.current = signature; visibleCount.current = Math.max(40, r.items.length); setResult(r); } })
       .catch(e => { if (sequence.current === seq) { setListError(errorText(e)); if (loadedSignature.current !== signature) setResult({ items: [], next_offset: null }); } })
       .finally(() => { if (sequence.current === seq) setLoading(false); });
     return () => { ++sequence.current; };
@@ -113,7 +111,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
               ? t("list.trashEyebrow")
               : t("list.libraryEyebrow")}
           </span>
-          <h1>{trash ? t("list.trashTitle") : review ? t("list.reviewTitle") : collectionId ? t("list.collectionTitle") : t("list.libraryTitle")}</h1>
+          <h1>{trash ? t("list.trashTitle") : collectionId ? t("list.collectionTitle") : t("list.libraryTitle")}</h1>
         </div>
         <button
           className="icon-button"
@@ -124,7 +122,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
         </button>
       </div>
       <div className="filter-bar">
-        <span>{trash ? t("list.trashSubtitle") : review ? t("list.reviewSubtitle") : t("list.recentSubtitle")}</span>
+        <span>{trash ? t("list.trashSubtitle") : t("list.recentSubtitle")}</span>
         <button
           aria-expanded={filtersOpen}
           aria-label={t("list.filter")}
@@ -251,8 +249,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
             {t("list.loading")}
           </p>
         )}
-        {review && !loading && result.items.length > 0 && <button className="load-more review-next" onClick={() => setReviewOffset(result.next_offset ?? 0)}>{result.next_offset !== null ? t("list.reviewMore") : t("list.reviewFromStart")}<Icon name="arrow" size={13} /></button>}
-        {!review && result.next_offset !== null && (
+        {result.next_offset !== null && (
           <button
             className="load-more"
             disabled={loading}

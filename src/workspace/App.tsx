@@ -12,6 +12,7 @@ import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
 import MemoryDetail from "./MemoryDetail";
 import MemoryList from "./MemoryList";
+import Activity from "./Activity";
 import PaneResizeHandle from "./PaneResizeHandle";
 import WorkspaceQuery from "./WorkspaceQuery";
 import WorkspaceSidebar, { type WorkspacePage } from "./WorkspaceSidebar";
@@ -227,7 +228,7 @@ export default function App() {
   const queryScope = page === "collection" ? collectionId : page === "topic" ? topic?.collection_id || null : null;
   const scopeName = collections.find(c => c.id === queryScope)?.name || t("app.removedCollection");
   const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
-  const listIdentity = page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library";
+  const listIdentity = page === "trash" ? "trash" : listCollectionId ? `collection:${listCollectionId}` : "library";
   const reading = page === "topic" || !!selected;
   return <div className={`app-shell memory-app recall-workspace${sidebarHidden ? " sidebar-hidden" : ""}`}>
     <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
@@ -240,7 +241,7 @@ export default function App() {
     }} />
     <WorkspaceSidebar page={page} topic={topic} topics={topics}
       selected={selected} pins={pins} collections={collections} collectionId={collectionId}
-      onReview={() => { setRecallQuick(false); setSelected(null); setPage("review"); setCollectionId(null); }} onPin={openRecord}
+      onActivity={() => { setRecallQuick(false); setSelected(null); setPage("activity"); setCollectionId(null); }} onPin={openRecord}
       onCollection={showCollection} onNewCollection={() => setCollectionEditor("new")}
       onLibrary={showLibrary} onTrash={() => { setRecallQuick(false); setSelected(null); setPage("trash"); }}
       onTopic={t => { setRecallQuick(false); if (page === "trash") setSelected(null); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); }}
@@ -260,11 +261,11 @@ export default function App() {
       <Toast />
       {restoreNotice && <div className="restore-notice" role="status">{restoreNotice}<button aria-label={t("app.closeRestoreNotice")} onClick={() => setRestoreNotice("")}>×</button></div>}
       <ErrorNotice text={windowError} />
-      <div className={`library-layout ${reading ? "has-selection" : ""}`}>
+      {page === "activity" ? <Activity onOpenRecord={openRecord} /> : <div className={`library-layout ${reading ? "has-selection" : ""}`}>
         <PaneResizeHandle pane="list" targetKey={listIdentity} />
         <MemoryList key={listIdentity}
-          review={page === "review"} collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
-          selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
+          collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
+          selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection"].includes(page)) setPage("library"); }}
           onCapture={newDiscussion} onRefresh={refresh} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
           <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : null}</span></div>
@@ -278,10 +279,10 @@ export default function App() {
              catch (e) { setWindowError(errorText(e)); }
            }} onBack={() => setSelected(null)} />
           : <section className="memory-detail-pane unselected">
-            <Empty title={page === "trash" ? t("app.emptyTrashTitle") : page === "review" ? t("app.emptyReviewTitle") : page === "collection" ? t("app.emptyCollectionTitle") : t("app.emptyLibraryTitle")}
+            <Empty title={page === "trash" ? t("app.emptyTrashTitle") : page === "collection" ? t("app.emptyCollectionTitle") : t("app.emptyLibraryTitle")}
               text={page === "trash" ? t("app.emptyTrashText") : t("app.emptyDefaultText")} />
           </section>}
-      </div>
+      </div>}
     </main>
     {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}

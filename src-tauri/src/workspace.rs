@@ -756,6 +756,27 @@ async fn library_query(
     let s = state.store.clone();
     blocking(move || s.library(&query)).await
 }
+#[tauri::command]
+async fn activity_summary(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+) -> HostResult<ActivitySummary> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.activity_summary()).await
+}
+#[tauri::command]
+async fn activity_records(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    since: i64,
+    until: i64,
+    offset: usize,
+) -> HostResult<ActivityRecords> {
+    require_main(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.activity_records(since, until, offset)).await
+}
 type ReadError = HostError;
 #[tauri::command]
 async fn library_detail(
@@ -1234,6 +1255,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             library_changes,
             library_agent_changes,
             library_query,
+            activity_summary,
+            activity_records,
             navigation_collections,
             navigation_record,
             navigation_pin,

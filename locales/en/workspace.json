@@ -2,7 +2,6 @@
   "nav": {
     "main": "Main navigation",
     "library": "All memories",
-    "review": "Review",
     "pinned": "Pinned",
     "newCollection": "New collection",
     "collections": "Collections",
@@ -17,7 +16,8 @@
     "hideSidebar": "Hide sidebar",
     "showSidebar": "Show sidebar",
     "resizeSidebar": "Resize sidebar",
-    "resizeList": "Resize memory list"
+    "resizeList": "Resize memory list",
+    "activity": "Activity"
   },
   "topbar": {
     "searchTrigger": "Share an idea or ask a question",
@@ -122,12 +122,10 @@
     "trashEyebrow": "There is room to restore what matters",
     "libraryEyebrow": "Keep it here for next time",
     "trashTitle": "Trash",
-    "reviewTitle": "Review",
     "collectionTitle": "Collection memories",
     "libraryTitle": "All memories",
     "refresh": "Refresh memory list",
     "trashSubtitle": "Deleted memories",
-    "reviewSubtitle": "Start with earlier memories",
     "recentSubtitle": "Recently updated",
     "filter": "Filter",
     "filterActive": "Filter · Active",
@@ -161,8 +159,6 @@
     "clearFilters": "Clear filters",
     "captureIdea": "Capture an idea",
     "loading": "Reading local memories…",
-    "reviewMore": "Review three more",
-    "reviewFromStart": "Review from the beginning",
     "loadMore": "Load more"
   },
   "related": {
@@ -199,7 +195,6 @@
     "scopedQuestion": "Focusing on {{scope}}",
     "allMemories": "All memories",
     "allMemoriesAria": "Ask across all memories",
-    "previewBanner": "Preview only. Use the Memivy app to save and edit.",
     "collectionCount": "{{count}} memories",
     "collectionCount_one": "{{count}} memory",
     "collectionCount_other": "{{count}} memories",
@@ -212,7 +207,6 @@
     "backToMemories": "Back to memories",
     "topicScoped": "Collection · {{name}}",
     "emptyTrashTitle": "Leave room to restore",
-    "emptyReviewTitle": "Talk with your past self",
     "emptyCollectionTitle": "Connect related ideas",
     "emptyLibraryTitle": "Make what you keep useful",
     "emptyTrashText": "Choose a deleted memory to read or restore.",
@@ -221,7 +215,8 @@
     "removeCollectionBody": "Memories and discussions in “{{name}}” will be preserved. This removes the collection from navigation.",
     "cancel": "Cancel",
     "captureSaved": "Captured",
-    "close": "Close"
+    "close": "Close",
+    "previewBanner": "Preview only. Use the Memivy app to save and edit."
   },
   "desktop": {
     "modelRequired": "Connect a model in the main window first. Your question draft is preserved.",
@@ -517,5 +512,39 @@
     "discussion": "Discussion",
     "discussionHelp": "Connect your memories and keep thinking.",
     "discussionStart": "Share an idea or ask a question. Relevant memories join the discussion."
+  },
+  "activity": {
+    "title": "Activity",
+    "eyebrow": "YOUR MEMORY, OVER TIME",
+    "subtitle": "See the ideas you have saved, one day at a time.",
+    "memories": "Memories",
+    "days": "Recording days",
+    "current": "Current streak",
+    "longest": "Longest streak",
+    "calendar": "Recording activity",
+    "period": "Choose period",
+    "recentYear": "Past year",
+    "periodCount_one": "{{count}} recording across {{days}}",
+    "periodCount_other": "{{count}} recordings across {{days}}",
+    "dayCount_one": "{{date}} · {{count}} recording",
+    "dayCount_other": "{{date}} · {{count}} recordings",
+    "recordCount_one": "{{count}} recording",
+    "recordCount_other": "{{count}} recordings",
+    "chooseDay": "Select a day to see what you saved.",
+    "legend": "Daily recording count, from fewer to more",
+    "less": "Less",
+    "more": "More",
+    "countingNote": "Each saved input counts once. Trashed records are excluded. Your streak continues if you recorded yesterday.",
+    "emptyTitle": "Your first idea starts here",
+    "emptyText": "Save an idea using the input above. Your recording days will appear here.",
+    "noRecords": "No recordings on this day.",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "previous": "Previous",
+    "next": "Next",
+    "dayUnit_one": "day",
+    "dayUnit_other": "days",
+    "dayTotal_one": "{{count}} day",
+    "dayTotal_other": "{{count}} days"
   }
 }

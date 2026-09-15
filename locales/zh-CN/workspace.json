@@ -2,7 +2,6 @@
   "nav": {
     "main": "主导航",
     "library": "全部记忆",
-    "review": "回顾",
     "pinned": "置顶",
     "newCollection": "新建专题",
     "collections": "专题",
@@ -17,7 +16,8 @@
     "hideSidebar": "隐藏侧栏",
     "showSidebar": "显示侧栏",
     "resizeSidebar": "调整侧栏宽度",
-    "resizeList": "调整记忆列表宽度"
+    "resizeList": "调整记忆列表宽度",
+    "activity": "足迹"
   },
   "topbar": {
     "searchTrigger": "表达想法或提问",
@@ -122,12 +122,10 @@
     "trashEyebrow": "可以恢复，留一份余地",
     "libraryEyebrow": "留在这里，下次用得上",
     "trashTitle": "回收站",
-    "reviewTitle": "回顾",
     "collectionTitle": "专题记忆",
     "libraryTitle": "全部记忆",
     "refresh": "刷新记忆列表",
     "trashSubtitle": "已删除的记忆",
-    "reviewSubtitle": "从较早的记忆开始",
     "recentSubtitle": "最近更新",
     "filter": "筛选",
     "filterActive": "筛选 · 已启用",
@@ -161,8 +159,6 @@
     "clearFilters": "清除筛选",
     "captureIdea": "记下一个想法",
     "loading": "正在读取本地记忆…",
-    "reviewMore": "再回顾三条",
-    "reviewFromStart": "从头回顾",
     "loadMore": "加载更多"
   },
   "related": {
@@ -199,7 +195,6 @@
     "scopedQuestion": "重点参考 {{scope}}",
     "allMemories": "全部记忆",
     "allMemoriesAria": "改为从全部记忆提问",
-    "previewBanner": "此处仅供预览，保存和编辑请使用 Memivy 应用。",
     "collectionCount": "{{count}} 条记忆",
     "collectionCount_one": "{{count}} 条记忆",
     "collectionCount_other": "{{count}} 条记忆",
@@ -212,7 +207,6 @@
     "backToMemories": "返回记忆",
     "topicScoped": "专题 · {{name}}",
     "emptyTrashTitle": "留一份余地",
-    "emptyReviewTitle": "和过去的自己，再聊一聊",
     "emptyCollectionTitle": "让相关的想法，慢慢连起来",
     "emptyLibraryTitle": "让留下的想法，再次用得上",
     "emptyTrashText": "选一条已删除的记忆，查看内容或恢复。",
@@ -221,7 +215,8 @@
     "removeCollectionBody": "“{{name}}”中的记忆和讨论都会保留，只移除专题入口。",
     "cancel": "取消",
     "captureSaved": "已记下",
-    "close": "关闭"
+    "close": "关闭",
+    "previewBanner": "此处仅供预览，保存和编辑请使用 Memivy 应用。"
   },
   "desktop": {
     "modelRequired": "先在主窗口连接一个模型。问题草稿会保留。",
@@ -516,5 +511,39 @@
     "discussion": "讨论",
     "discussionHelp": "联系已有记忆，继续你的思考。",
     "discussionStart": "直接说出想法或问题，相关记忆会参与讨论。"
+  },
+  "activity": {
+    "title": "足迹",
+    "eyebrow": "日积月累，皆有迹可循",
+    "subtitle": "看看你留下了多少想法，又在哪些日子有所记录。",
+    "memories": "记忆总数",
+    "days": "记录天数",
+    "current": "当前连续",
+    "longest": "最长连续",
+    "calendar": "记录热力图",
+    "period": "选择时间范围",
+    "recentYear": "最近一年",
+    "chooseDay": "点击日期，看看那天记下了什么。",
+    "legend": "每天的记录次数，从少到多",
+    "less": "少",
+    "more": "多",
+    "countingNote": "每次保存的原始输入计一次，废纸篓中的记录不计入。昨天有记录，今天尚未记录时，连续天数仍保留。",
+    "emptyTitle": "从第一个想法开始",
+    "emptyText": "在上方输入框保存一个想法，记录过的日子就会在这里亮起。",
+    "noRecords": "这一天还没有记录。",
+    "loading": "正在加载…",
+    "retry": "重试",
+    "previous": "上一页",
+    "next": "下一页",
+    "periodCount_one": "{{days}}里，留下了 {{count}} 次记录",
+    "periodCount_other": "{{days}}里，留下了 {{count}} 次记录",
+    "dayCount_one": "{{date}} · {{count}} 次记录",
+    "dayCount_other": "{{date}} · {{count}} 次记录",
+    "recordCount_one": "{{count}} 次记录",
+    "recordCount_other": "{{count}} 次记录",
+    "dayUnit_one": "天",
+    "dayUnit_other": "天",
+    "dayTotal_one": "{{count}} 天",
+    "dayTotal_other": "{{count}} 天"
   }
 }

@@ -3,13 +3,13 @@ import { Icon } from "../ui";
 import { useTranslation } from "react-i18next";
 import { keyOf, type Collection, type Key, type Row, type Topic } from "./api";
 
-export type WorkspacePage = "library" | "trash" | "topic" | "review" | "collection";
+export type WorkspacePage = "library" | "trash" | "topic" | "activity" | "collection";
 export default function WorkspaceSidebar({ page, topic, topics, selected, pins, collections, collectionId,
-  onLibrary, onTrash, onTopic, onDesktop, onSettings, onReview, onPin, onCollection, onNewCollection }: {
+  onLibrary, onTrash, onTopic, onDesktop, onSettings, onActivity, onPin, onCollection, onNewCollection }: {
   page: WorkspacePage; topic: Topic | null; topics: Topic[];
   selected: Key | null; pins: Row[]; collections: Collection[]; collectionId: string | null;
   onLibrary: () => void; onTrash: () => void; onTopic: (topic: Topic) => void;
-  onDesktop: () => void; onSettings: () => void; onReview: () => void;
+  onDesktop: () => void; onSettings: () => void; onActivity: () => void;
   onPin: (key: Key) => void; onCollection: (id: string) => void; onNewCollection: () => void;
 }) {
   const { t } = useTranslation("workspace");
@@ -17,7 +17,7 @@ export default function WorkspaceSidebar({ page, topic, topics, selected, pins, 
     <div className="brand"><img src={logo} alt="Memivy" /></div>
     <nav aria-label={t("nav.main")}>
       <button className={page === "library" ? "selected" : ""} aria-current={page === "library" ? "page" : undefined} onClick={onLibrary}><Icon name="book" />{t("nav.library")}</button>
-      <button className={page === "review" ? "selected" : ""} aria-current={page === "review" ? "page" : undefined} onClick={onReview}><Icon name="history" />{t("nav.review")}</button>
+      <button className={page === "activity" ? "selected" : ""} aria-current={page === "activity" ? "page" : undefined} onClick={onActivity}><Icon name="activity" />{t("nav.activity")}</button>
     </nav>
     <div className="sidebar-sections">
       {!!pins.length && <details className="sidebar-group" open>

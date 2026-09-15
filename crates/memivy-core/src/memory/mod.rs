@@ -4,6 +4,7 @@
 mod changes;
 pub use changes::*;
 mod access;
+mod activity;
 mod agent;
 mod agent_mutations;
 mod agent_state;
@@ -25,6 +26,7 @@ mod search;
 mod transfer;
 mod types;
 
+pub use activity::*;
 pub use agent::{MemorySourceQuote, MemoryWriteArgs, MemoryWritePart};
 pub use agent_mutations::*;
 pub use agent_state::*;

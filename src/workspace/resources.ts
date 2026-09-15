@@ -17,6 +17,7 @@ const keyOf = (key: unknown) => {
 export function dependencies(name: string, args: Record<string, unknown> = {}): Dependency[] | undefined {
   const record = keyOf(args.key);
   switch (name) {
+    case "activity_summary": case "activity_records": return [{domain:"memory"}];
     case "library_detail": return [{domain:"memory",entity:record}];
     case "library_query": case "library_projects":
       return [{domain:"memory"},{domain:"navigation"},{domain:"collection"}];
