@@ -228,12 +228,6 @@ impl MemoryStore {
             AgentEvent, AgentReply, INCOMPLETE_WRITE_READ, evidence_value, memory_read_tools,
             memory_write_tool, run_memory_agent, write_request_fully_read,
         };
-        let capability = self
-            .model_capabilities(config)
-            .ok_or(model::ProbeError::ToolsUnsupported)?;
-        if !capability.supports_agent() {
-            return Err(model::ProbeError::ToolsUnsupported);
-        }
         validate_organization_task(
             &self
                 .connection()
@@ -243,7 +237,7 @@ impl MemoryStore {
         )
         .map_err(|_| model::ProbeError::InvalidResponse)?;
         let mut tools = memory_read_tools();
-        tools.retain(|tool| tool["function"]["name"] != "read_conversation");
+        tools.retain(|tool| tool.name != "read_conversation");
         tools.push(memory_write_tool());
         let current_evidence = resolve_excerpt(
             &self
@@ -256,8 +250,8 @@ impl MemoryStore {
         )
         .map_err(|_| model::ProbeError::InvalidResponse)?;
         let messages = vec![
-            json!({"role":"system","content":ORGANIZATION_RULES}),
-            json!({"role":"user","content":json!({
+            json!(crate::model::Message::system(ORGANIZATION_RULES)),
+            json!(crate::model::Message::user(json!({
                 "capture_id":task.capture_id,
                 "memory_id":task.memory.memory_id,
                 "version_id":task.memory.id,
@@ -266,7 +260,7 @@ impl MemoryStore {
                 "origin":task.origin,
                 "recorded_at":task.memory.created_at,
                 "related_memories":task.candidates,
-            }).to_string()}),
+            }).to_string())),
         ];
         let mut receipt: Option<Receipt> = None;
         let mut protocol = vec![];
@@ -290,9 +284,10 @@ impl MemoryStore {
                 Ok(AgentReply::Continue)
             }
             AgentEvent::Tool(call) => {
-                if call.name == "write_memory" {
-                    let change: MemoryWriteArgs = serde_json::from_value(call.arguments.clone())
-                        .map_err(|_| model::ProbeError::InvalidResponse)?;
+                if call.function.name == "write_memory" {
+                    let change: MemoryWriteArgs =
+                        serde_json::from_value(call.function.arguments.clone())
+                            .map_err(|_| model::ProbeError::InvalidResponse)?;
                     let version = match &change.destination {
                         Destination::New => &task.memory.id,
                         Destination::Existing {
@@ -304,7 +299,7 @@ impl MemoryStore {
                             .connection()
                             .map_err(|_| model::ProbeError::InvalidResponse)?,
                         &protocol,
-                        &call.id,
+                        call.id.as_str(),
                         version,
                     )
                     .map_err(|_| model::ProbeError::InvalidResponse)?
@@ -336,7 +331,7 @@ impl MemoryStore {
                     Ok(AgentReply::Complete)
                 } else {
                     let result = self
-                        .agent_read_tool(&call.name, &call.arguments)
+                        .agent_read_tool(&call.function.name, &call.function.arguments)
                         .unwrap_or_else(|error| json!({"error":error.to_string()}));
                     Ok(AgentReply::Tool(result))
                 }

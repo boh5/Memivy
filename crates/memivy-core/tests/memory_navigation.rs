@@ -504,6 +504,7 @@ async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist()
     let receipt = organize(&s, &raw).unwrap();
     // An invalid endpoint would fail immediately if a model call were attempted.
     let config = memivy_core::model::ModelConfig {
+        provider: Default::default(),
         base_url: "invalid".into(),
         model: "unused".into(),
         api_key: None,
@@ -544,6 +545,7 @@ async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new
     s.dismiss_organization_collections(&r.request_id).unwrap();
     let reopened = MemoryStore::open(dir.path()).unwrap();
     let config = memivy_core::model::ModelConfig {
+        provider: Default::default(),
         base_url: "invalid".into(),
         model: "unused".into(),
         api_key: None,

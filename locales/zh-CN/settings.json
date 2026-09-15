@@ -22,6 +22,7 @@
     "manageSemanticIndex": "管理语义搜索",
     "reloadSettings": "重新读取设置",
     "cancel": "取消",
+    "saveSettings": "保存设置",
     "applySettings": "应用设置",
     "resume": "继续",
     "retry": "重试",
@@ -82,7 +83,14 @@
     "assistantDescription": "讨论想法、回忆往事，并更新相关记忆。",
     "embeddingPrivacyDetails": "包括首次设置时的已有记忆、之后新增和修改的内容，以及查找相关记忆或通过 MCP 搜索时使用的查询内容。不包括原话、历史版本、回收站和草稿。",
     "privacyDetails": "会发送哪些内容？",
-    "reasoningDescription": "可能缩短回复等待时间，仅对支持此设置的模型生效。"
+    "reasoningDescription": "可能缩短回复等待时间，仅对支持此设置的模型生效。",
+    "provider": "服务协议",
+    "providers": {
+      "openaiCompatible": "OpenAI 兼容",
+      "openaiResponses": "OpenAI Responses",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini"
+    }
   },
   "embedding": {
     "status": {

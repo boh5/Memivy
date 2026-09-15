@@ -56,7 +56,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "26.0",
-      "infoPlist": "Info.plist",
+      "infoPlist": "Info.release.plist",
       "entitlements": "Entitlements.plist",
       "files": {
         "Resources/en.lproj/InfoPlist.strings": "infoplist/en.lproj/InfoPlist.strings",

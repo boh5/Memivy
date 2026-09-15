@@ -71,7 +71,7 @@ fn finished_turn(store: &MemoryStore, evidence: &[SourceRef]) -> (String, Turn) 
         db.execute("INSERT INTO message_citations(message_id,kind,source_id,cited,excerpt_start,excerpt_length) VALUES(?1,?2,?3,1,0,?4)",params![run.assistant_message_id,kind,source_id,length as i64]).unwrap();
     }
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     (conversation, store.turn(&run.input_id).unwrap())
 }
@@ -1057,7 +1057,7 @@ fn cancellation_and_explicit_restart_recovery_fence_late_results() {
         .unwrap();
     assert_eq!(
         store
-            .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+            .finish_agent_input(&run.input_id, &run.attempt_id, &[])
             .unwrap_err(),
         DataError::Conflict
     );
@@ -1073,7 +1073,7 @@ fn cancellation_and_explicit_restart_recovery_fence_late_results() {
     assert_eq!(reopened.recover_interrupted_turns().unwrap(), 1);
     assert_eq!(
         store
-            .finish_agent_input(&next.input_id, &next.attempt_id, false, &[])
+            .finish_agent_input(&next.input_id, &next.attempt_id, &[])
             .unwrap_err(),
         DataError::Conflict
     );
@@ -1101,7 +1101,7 @@ fn conversation_cursor_reads_do_not_drop_old_messages() {
             .append_agent_text(&t.input_id, &t.attempt_id, "回答")
             .unwrap();
         store
-            .finish_agent_input(&t.input_id, &t.attempt_id, false, &[])
+            .finish_agent_input(&t.input_id, &t.attempt_id, &[])
             .unwrap();
     }
     let first = store.messages(&conversation, 0, 100).unwrap();

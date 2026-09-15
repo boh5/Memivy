@@ -6,16 +6,47 @@ use std::{
 };
 fn endpoint(status: u16, body: String, delay: u64) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let thread = std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
-        let mut request = vec![0; 8192];
-        let size = socket.read(&mut request).unwrap();
-        let text = String::from_utf8_lossy(&request[..size]);
-        assert!(text.starts_with("POST /v1/chat/completions "));
+        let mut header = vec![];
+        while !header.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if let Err(error) = socket.read_exact(&mut byte) {
+                assert!(delay > 0, "request read failed: {error}");
+                return;
+            }
+            header.push(byte[0]);
+        }
+        let header = String::from_utf8(header).unwrap();
+        assert!(header.starts_with("POST /v1/chat/completions "));
+        let length = header
+            .lines()
+            .find_map(|line| {
+                line.to_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|n| n.trim().parse::<usize>().unwrap())
+            })
+            .unwrap();
+        let mut body_bytes = vec![0; length];
+        socket.read_exact(&mut body_bytes).unwrap();
         std::thread::sleep(Duration::from_millis(delay));
         let _ = write!(
             socket,
@@ -27,6 +58,7 @@ fn endpoint(status: u16, body: String, delay: u64) -> (String, std::thread::Join
 }
 fn config(base_url: String) -> ModelConfig {
     ModelConfig {
+        provider: Default::default(),
         base_url,
         model: "test-only".into(),
         api_key: Some("fixture-secret".into()),
@@ -36,7 +68,7 @@ fn config(base_url: String) -> ModelConfig {
     }
 }
 fn response(content: &str, finish: &str) -> String {
-    serde_json::json!({"choices":[{"message":{"content":content},"finish_reason":finish}]})
+    serde_json::json!({"id":"fixture","model":"test-only","choices":[{"message":{"role":"assistant","content":content},"finish_reason":finish}]})
         .to_string()
 }
 
@@ -73,7 +105,7 @@ async fn validates_exact_schema_and_categorizes_failures_without_leaking() {
     ];
     for (status, body, error) in cases {
         let (url, thread) = endpoint(status, body, 0);
-        let result = probe(config(url), Duration::from_secs(2)).await;
+        let result = probe(config(url), Duration::from_secs(10)).await;
         thread.join().unwrap();
         if let Some(error) = error {
             let actual = result.unwrap_err();
@@ -143,7 +175,9 @@ async fn full_text_accepts_long_output_and_rejects_truncation() {
         let (url, server) = endpoint(200, response(&content, finish), 0);
         let result = complete_with_policy(
             &config(url),
-            json!([]),
+            vec![memivy_core::model::Message::user(
+                "Clean up this synthetic memory",
+            )],
             "cleanup",
             json!({}),
             OutputPolicy::FullText,
@@ -223,7 +257,14 @@ async fn output_budget_is_optional_and_uses_only_the_selected_parameter() {
             )
             .unwrap();
         });
-        complete(&c, json!([]), "test", json!({})).await.unwrap();
+        complete(
+            &c,
+            vec![memivy_core::model::Message::user("Synthetic request")],
+            "test",
+            json!({}),
+        )
+        .await
+        .unwrap();
         server.join().unwrap();
     }
 }

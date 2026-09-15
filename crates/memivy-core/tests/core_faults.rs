@@ -70,6 +70,7 @@ fn endpoint(mode: &str) -> (ModelConfig, mpsc::Sender<()>, std::thread::JoinHand
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let config = ModelConfig {
+        provider: Default::default(),
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "synthetic-only".into(),
         api_key: Some(KEY.into()),
@@ -176,17 +177,7 @@ async fn eight_model_failure_contracts_preserve_raw_search_and_retry() {
         s.prepare_organization(&mut task).unwrap();
         let (config, release, server) = endpoint(&case.mode);
         config.save(&s.model_config_path()).unwrap();
-        memivy_core::model::tools::save_capabilities(
-            temp.path(),
-            &config,
-            &memivy_core::model::tools::Capabilities {
-                structured_json: true,
-                streaming_text: true,
-                single_tool: true,
-                multi_turn: true,
-            },
-        )
-        .unwrap();
+
         let response = if case.mode == "timeout" {
             tokio::time::timeout(
                 Duration::from_millis(50),

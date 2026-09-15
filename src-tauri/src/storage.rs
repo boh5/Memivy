@@ -1,4 +1,60 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub(crate) const DEVELOPMENT_IDENTIFIER: &str = "com.memivy.app.dev";
+
+fn resolved_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+    {
+        return Err("The library path must be absolute without parent traversal.".into());
+    }
+    for ancestor in path.ancestors() {
+        match ancestor.canonicalize() {
+            Ok(base) => return Ok(base.join(path.strip_prefix(ancestor).unwrap())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Could not resolve the library path: {error}")),
+        }
+    }
+    Err("Could not resolve the library path.".into())
+}
+
+pub(crate) fn application_root(
+    identifier: &str,
+    home: &Path,
+    override_path: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let development = identifier == DEVELOPMENT_IDENTIFIER;
+    let default = home
+        .join("Library/Application Support")
+        .join(if development {
+            DEVELOPMENT_IDENTIFIER
+        } else {
+            "com.memivy.app"
+        });
+    let selected = resolved_path(override_path.unwrap_or(&default))?;
+    if development {
+        let production = resolved_path(&home.join("Library/Application Support/com.memivy.app"))?;
+        // Reserve case aliases of these ASCII library paths before they exist.
+        // Matching shared components means one directory contains the other.
+        if selected
+            .components()
+            .zip(production.components())
+            .all(|(left, right)| {
+                left.as_os_str()
+                    .as_encoded_bytes()
+                    .eq_ignore_ascii_case(right.as_os_str().as_encoded_bytes())
+            })
+        {
+            return Err(
+                "Memivy Dev cannot open the production library or its parent directories.".into(),
+            );
+        }
+    }
+    Ok(selected)
+}
+
 pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(), String> {
     // Keep the storage boundary error semantic so the IPC layer can localize it.
     // Never return translated text from this validation helper.
@@ -28,9 +84,11 @@ pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(
     }
     let parent = resolved_parent.ok_or_else(invalid)?;
     let home = home.and_then(|p| p.canonicalize().ok());
-    let app_data = home
-        .as_ref()
-        .is_some_and(|p| parent.starts_with(p.join("Library/Application Support/com.memivy.app")));
+    let app_data = home.as_ref().is_some_and(|p| {
+        ["com.memivy.app", DEVELOPMENT_IDENTIFIER]
+            .iter()
+            .any(|id| parent.starts_with(p.join("Library/Application Support").join(id)))
+    });
     // A HOME-level dotfiles repository must not block standard app storage.
     // Only exempt that exact marker, not a project/worktree inside app data.
     if parent
@@ -44,7 +102,45 @@ pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_config_path;
+    use super::*;
+
+    #[test]
+    fn installed_and_development_libraries_are_separate() {
+        let home = tempfile::tempdir().unwrap();
+        let production = application_root("com.memivy.app", home.path(), None).unwrap();
+        let development = application_root(DEVELOPMENT_IDENTIFIER, home.path(), None).unwrap();
+        assert_ne!(production, development);
+        assert!(development.ends_with("com.memivy.app.dev"));
+        assert!(application_root(DEVELOPMENT_IDENTIFIER, home.path(), Some(&production)).is_err());
+        assert!(application_root(DEVELOPMENT_IDENTIFIER, home.path(), Some(home.path())).is_err());
+    }
+
+    #[test]
+    fn development_rejects_symlinked_production_and_relative_libraries() {
+        let home = tempfile::tempdir().unwrap();
+        let production = home
+            .path()
+            .join("Library/Application Support/com.memivy.app");
+        std::fs::create_dir_all(&production).unwrap();
+        let alias = home.path().join("alias");
+        std::os::unix::fs::symlink(&production, &alias).unwrap();
+        for path in [alias, production.join("qa"), PathBuf::from("relative")] {
+            assert!(application_root(DEVELOPMENT_IDENTIFIER, home.path(), Some(&path)).is_err());
+        }
+        let isolated = home.path().join("isolated");
+        assert!(application_root(DEVELOPMENT_IDENTIFIER, home.path(), Some(&isolated)).is_ok());
+    }
+
+    #[test]
+    fn development_rejects_case_aliases_before_production_exists() {
+        let home = tempfile::tempdir().unwrap();
+        let alias = home
+            .path()
+            .join("Library/Application Support/COM.MEMIVY.APP");
+        for path in [alias.clone(), alias.join("qa"), home.path().join("LIBRARY")] {
+            assert!(application_root(DEVELOPMENT_IDENTIFIER, home.path(), Some(&path)).is_err());
+        }
+    }
 
     #[test]
     fn rejected_repository_path_uses_a_stable_error_code() {
@@ -73,6 +169,7 @@ mod configuration_boundary_tests {
             .join("Library/Application Support/com.memivy.app/model.json");
         validate_config_path(&path, Some(home.path())).unwrap();
         let config = ModelConfig {
+            provider: Default::default(),
             base_url: "http://127.0.0.1:11435/v1".into(),
             model: "test-only".into(),
             api_key: Some("synthetic-test-key".into()),

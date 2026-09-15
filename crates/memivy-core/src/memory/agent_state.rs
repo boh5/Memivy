@@ -27,8 +27,6 @@ pub struct AgentExecution {
     pub protocol: Vec<Value>,
     pub focused_memory_ids: Vec<String>,
     pub follow_ups: Vec<String>,
-    pub record_only: bool,
-    pub maintenance_paused: bool,
     pub operations: Vec<AgentOperation>,
 }
 
@@ -36,7 +34,6 @@ pub struct AgentExecution {
 pub struct AgentConversationContext {
     pub summary: String,
     pub summary_through_seq: i64,
-    pub memory_paused: bool,
     pub receipt_revision: String,
 }
 
@@ -48,13 +45,12 @@ pub struct AgentHistorySnapshot {
 
 fn conversation_context(db: &Connection, conversation: &str) -> Result<AgentConversationContext> {
     let mut context = db.query_row(
-        "SELECT summary,summary_through_seq,memory_paused FROM conversations WHERE id=?",
+        "SELECT summary,summary_through_seq FROM conversations WHERE id=?",
         [conversation],
         |r| {
             Ok(AgentConversationContext {
                 summary: r.get(0)?,
                 summary_through_seq: r.get(1)?,
-                memory_paused: r.get(2)?,
                 receipt_revision: String::new(),
             })
         },
@@ -69,14 +65,6 @@ fn receipt_revision(db: &Connection, conversation: &str) -> Result<String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentMaintenance {
-    ThisTurn,
-    PauseConversation,
-    ResumeConversation,
 }
 
 pub(super) fn decode<T: serde::de::DeserializeOwned>(value: &str) -> Result<T> {
@@ -151,8 +139,8 @@ pub(super) fn complete_operation(
 
 fn execution(db: &Connection, input: &str) -> Result<AgentExecution> {
     let mut value = db.query_row(
-        "SELECT t.id,COALESCE(t.active_attempt,''),t.conversation_id,u.id,a.id,u.text,a.text,a.status,t.record_only,(t.maintenance_paused OR c.memory_paused) FROM turns t JOIN conversations c ON c.id=t.conversation_id JOIN messages u ON u.turn_id=t.id AND u.role='user' JOIN messages a ON a.turn_id=t.id AND a.role='assistant' WHERE t.id=?",
-        [input], |r| Ok(AgentExecution {input_id:r.get(0)?,attempt_id:r.get(1)?,conversation_id:r.get(2)?,user_message_id:r.get(3)?,assistant_message_id:r.get(4)?,input_text:r.get(5)?,text:r.get(6)?,state:r.get(7)?,record_only:r.get(8)?,maintenance_paused:r.get(9)?,protocol:vec![],focused_memory_ids:vec![],follow_ups:vec![],operations:vec![]}),
+        "SELECT t.id,COALESCE(t.active_attempt,''),t.conversation_id,u.id,a.id,u.text,a.text,a.status FROM turns t JOIN conversations c ON c.id=t.conversation_id JOIN messages u ON u.turn_id=t.id AND u.role='user' JOIN messages a ON a.turn_id=t.id AND a.role='assistant' WHERE t.id=?",
+        [input], |r| Ok(AgentExecution {input_id:r.get(0)?,attempt_id:r.get(1)?,conversation_id:r.get(2)?,user_message_id:r.get(3)?,assistant_message_id:r.get(4)?,input_text:r.get(5)?,text:r.get(6)?,state:r.get(7)?,protocol:vec![],focused_memory_ids:vec![],follow_ups:vec![],operations:vec![]}),
     )?;
     let (protocol, focus, followups): (String, String, String) = db.query_row(
         "SELECT protocol_messages,focused_memory_ids,follow_ups FROM turns WHERE id=?",
@@ -332,7 +320,7 @@ impl MemoryStore {
                 return Err(DataError::Conflict);
             }
         }
-        if !protocol.starts_with(&old) {
+        if !super::protocol::decode(protocol)?.starts_with(&super::protocol::decode(&old)?) {
             return Err(DataError::RequestConflict);
         }
         tx.execute("UPDATE turns SET protocol_messages=?2,checkpoint_text_chars=(SELECT length(text) FROM messages WHERE turn_id=?1 AND role='assistant') WHERE id=?1",params![input,encoded])?;
@@ -377,19 +365,14 @@ impl MemoryStore {
             |r| r.get(0),
         )?;
         let protocol: Vec<Value> = decode(&protocol)?;
+        let protocol = super::protocol::decode(&protocol)?;
         let declared = protocol
             .iter()
-            .filter(|m| m["role"] == "assistant")
-            .filter_map(|m| m["tool_calls"].as_array())
-            .flatten()
+            .flat_map(|m| super::protocol::calls(&m.message))
             .any(|c| {
-                c["id"] == call_id
-                    && c["function"]["name"] == name
-                    && c["function"]["arguments"]
-                        .as_str()
-                        .and_then(|v| serde_json::from_str::<Value>(v).ok())
-                        .as_ref()
-                        == Some(arguments)
+                c.id.as_str() == call_id
+                    && c.function.name == name
+                    && c.function.arguments == *arguments
             });
         if !declared {
             return Err(DataError::Invalid);
@@ -466,7 +449,6 @@ impl MemoryStore {
         &self,
         input: &str,
         attempt: &str,
-        record_only: bool,
         follow_ups: &[String],
     ) -> Result<()> {
         if follow_ups.len() > 3
@@ -486,8 +468,8 @@ impl MemoryStore {
             return Err(DataError::Conflict);
         }
         tx.execute(
-            "UPDATE turns SET record_only=?2,follow_ups=?3,progress=NULL WHERE id=?1",
-            params![input, record_only, encode(&follow_ups)?],
+            "UPDATE turns SET follow_ups=?2,progress=NULL WHERE id=?1",
+            params![input, encode(&follow_ups)?],
         )?;
         tx.execute("UPDATE messages SET status='complete',error_code=NULL WHERE turn_id=? AND role='assistant'",[input])?;
         tx.execute("UPDATE conversations SET updated_at=?2 WHERE id=(SELECT conversation_id FROM turns WHERE id=?1)",params![input,now()?])?;
@@ -631,31 +613,6 @@ impl MemoryStore {
             return Err(DataError::Invalid);
         }
         tx.execute("UPDATE conversations SET summary=?2,summary_through_seq=?3 WHERE id=(SELECT conversation_id FROM turns WHERE id=?1)",params![input,summary,through_seq])?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn set_agent_maintenance(
-        &self,
-        input: &str,
-        attempt: &str,
-        mode: AgentMaintenance,
-    ) -> Result<()> {
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        agent_fence(&tx, input, attempt)?;
-        match mode {
-            AgentMaintenance::ThisTurn => {
-                tx.execute("UPDATE turns SET maintenance_paused=1 WHERE id=?", [input])?;
-            }
-            AgentMaintenance::PauseConversation => {
-                tx.execute("UPDATE conversations SET memory_paused=1 WHERE id=(SELECT conversation_id FROM turns WHERE id=?)",[input])?;
-            }
-            AgentMaintenance::ResumeConversation => {
-                tx.execute("UPDATE conversations SET memory_paused=0 WHERE id=(SELECT conversation_id FROM turns WHERE id=?)",[input])?;
-                tx.execute("UPDATE turns SET maintenance_paused=0 WHERE id=?", [input])?;
-            }
-        }
         tx.commit()?;
         Ok(())
     }

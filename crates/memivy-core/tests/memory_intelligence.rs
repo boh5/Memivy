@@ -334,7 +334,7 @@ fn explicit_selected_text_appends_exactly_and_never_schedules_organization() {
         .append_agent_text(&run.input_id, &run.attempt_id, "尚未保存的建议")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let request = id();
     let destination = Destination::Existing {

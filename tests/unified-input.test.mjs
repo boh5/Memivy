@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {workspaceFixture} from './helpers/workspace.mjs';
 const enter={key:'Enter',metaKey:true,ctrlKey:false,altKey:false,shiftKey:false,repeat:false,keyCode:13,nativeEvent:{isComposing:false},preventDefault(){}};
 const props=f=>({topic:f.topic,configured:true,onSettings(){},onRefresh(){},onOpenRecord(){}});
-const response=extra=>({seq:2,id:'answer',turn_id:'logical-input',role:'assistant',status:'complete',text:"The budget has been considered.",citations:[],followups:[],receipts:[],record_only:false,progress:null,...extra});
+const response=extra=>({seq:2,id:'answer',turn_id:'logical-input',role:'assistant',status:'complete',text:"The budget has been considered.",citations:[],followups:[],receipts:[],progress:null,...extra});
 
 test('one composer accepts records, questions and mixed expressions without classifying or rewriting them',async t=>{
  const f=workspaceFixture(t),sent=[];
@@ -52,7 +52,7 @@ test('a failed answer preserves its committed write through viewing changes, ret
  const f=workspaceFixture(t,{native:true});
  const original="Change the weekend budget to 80 yuan and revisit the other plan later.",draft="Next unsent idea";
  const receipt={request_id:'committed-budget-write',memory_id:'budget',status:'applied',before_version:'budget-before',after_version:'budget-after'};
- const user={seq:1,id:'original-expression',turn_id:'logical-input',role:'user',status:'complete',text:original,citations:[],followups:[],receipts:[],record_only:false,progress:null};
+ const user={seq:1,id:'original-expression',turn_id:'logical-input',role:'user',status:'complete',text:original,citations:[],followups:[],receipts:[],progress:null};
  let answer=response({status:'failed',error_code:'network',text:"Updated the weekend budget to 80 yuan.",receipts:[receipt]});
  f.messages(()=>[user,answer]);
  f.db.set('discussion:topic-a',{key:'discussion:topic-a',request_id:'unsent-next-input',title:'',body:draft,context:[],expected_version:null});

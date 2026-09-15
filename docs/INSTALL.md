@@ -20,8 +20,9 @@ See [Apple's instructions](https://support.apple.com/102445).
 ## Start using Memivy
 
 You can save and edit notes immediately, without an account or model setup.
-To chat with AI, configure a compatible model service in Settings. Your provider
-may charge for usage.
+To chat with AI, choose OpenAI Compatible, OpenAI Responses, Anthropic, or Google
+Gemini in Settings. Enter the service URL, model ID, and API key, then save the
+settings. You can optionally test the connection. Your provider may charge for usage.
 
 Voice input and search by meaning are optional. Choose a local model or configure
 a remote service in Settings. Local models download separately; keep Memivy open

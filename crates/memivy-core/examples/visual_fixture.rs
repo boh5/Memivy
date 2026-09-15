@@ -38,9 +38,7 @@ fn main() {
             "Woodbridge will start with the desktop app. First check whether users can find their first saved note again.",
         )
         .unwrap();
-    store
-        .finish_agent_input(&input, &attempt, false, &[])
-        .unwrap();
+    store.finish_agent_input(&input, &attempt, &[]).unwrap();
     store.check_integrity().unwrap();
     fs::write(dir.join("fixture.json"),serde_json::to_vec_pretty(&json!({"fixture_version":fixture.version,"records":seeded.records,"captures":seeded.captures,"topic":topic,"note":"Synthetic baseline evidence, not user visual acceptance. MCP off; no model configuration."})).unwrap()).unwrap();
     println!("Synthetic fixture ready; MCP off, no model configuration.");

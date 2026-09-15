@@ -6,11 +6,11 @@ fn sources(db: &Connection, message: &str, cited_only: bool) -> Result<Vec<Sourc
 }
 fn message(db: &Connection, id: &str) -> Result<Message> {
     let mut m = db.query_row(
-        "SELECT m.seq,m.id,m.turn_id,m.role,m.text,m.status,m.error_code,t.follow_ups,t.progress,t.record_only,m.created_at FROM messages m JOIN turns t ON t.id=m.turn_id WHERE m.id=?",
+        "SELECT m.seq,m.id,m.turn_id,m.role,m.text,m.status,m.error_code,t.follow_ups,t.progress,m.created_at FROM messages m JOIN turns t ON t.id=m.turn_id WHERE m.id=?",
         [id],
         |r| {
             Ok(Message {
-                created_at: r.get(10)?,
+                created_at: r.get(9)?,
                 seq: r.get(0)?,
                 id: r.get(1)?,
                 turn_id: r.get(2)?,
@@ -23,7 +23,6 @@ fn message(db: &Connection, id: &str) -> Result<Message> {
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 receipts: vec![],
                 progress: r.get(8)?,
-                record_only: r.get(9)?,
             })
         },
     )?;
@@ -33,7 +32,6 @@ fn message(db: &Connection, id: &str) -> Result<Message> {
     } else {
         m.followups.clear();
         m.progress = None;
-        m.record_only = false;
     }
     m.citations = sources(db, id, true)?
         .into_iter()

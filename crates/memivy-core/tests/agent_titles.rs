@@ -32,7 +32,7 @@ fn finish(store: &MemoryStore, run: &AgentExecution) {
         .append_agent_text(&run.input_id, &run.attempt_id, "ASSISTANT_PRIVATE_MARKER")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
 }
 

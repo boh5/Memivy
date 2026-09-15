@@ -75,7 +75,7 @@ const failures: Record<string, UiMessage> = {
 const progressLabels = {
   recalling: "input.recalling", search_memories: "input.recalling", list_memories: "input.recalling",
   read_memory: "input.readingMemory", read_conversation: "input.readingDiscussion",
-  write_memory: "input.updatingMemory", undo_changes: "input.undoingMemory", set_turn_options: "input.understanding",
+  write_memory: "input.updatingMemory", undo_changes: "input.undoingMemory",
 } as const;
 
 export default function Discussion({ topic, revision: requestedRevision = 0, configured, onSettings, onRefresh, onOpenRecord, compact = false, quick = false, sourceApp = "Memivy", composerVisible = true, onReady, onBusy, focus = 1 }: {
@@ -177,7 +177,7 @@ export default function Discussion({ topic, revision: requestedRevision = 0, con
         {!!m.citations.length && <div className="discussion-citations">{m.citations.map((citation, index) => <button key={`${citation.source.kind}:${citation.source.id}`} disabled={!citation.available} onClick={() => setSource({ ...citation.source, messageId: m.id })}>{citation.available ? t("discussion.citation", { count: index + 1 }) : t("discussion.sourceDeleted")}</button>)}</div>}
         {m.role === "assistant" && <>
           <MemoryChanges inputId={m.turn_id} receipts={m.receipts} onOpenRecord={onOpenRecord} onRefresh={refresh} />
-          {m.status === "complete" && !m.record_only && !!m.followups.length && <div className="discussion-followups">{m.followups.map(text => <button key={text} disabled={!!pending || sending} onClick={() => void suggestion(text)}>{text}<Icon name="arrow" size={12} /></button>)}</div>}
+          {m.status === "complete" && !!m.followups.length && <div className="discussion-followups">{m.followups.map(text => <button key={text} disabled={!!pending || sending} onClick={() => void suggestion(text)}>{text}<Icon name="arrow" size={12} /></button>)}</div>}
           <div className="discussion-message-actions">{["failed", "cancelled", "interrupted"].includes(m.status) && m.error_code !== "changes_undone" && <button className="quiet" disabled={!!pending || sending} onClick={() => void retry(m.turn_id)}>{t("discussion.retry")}</button>}
             {m.text && m.status !== "processing" && <MoreMenu><button onClick={() => setSave(m)}>{t("input.saveText")}</button></MoreMenu>}
           </div>

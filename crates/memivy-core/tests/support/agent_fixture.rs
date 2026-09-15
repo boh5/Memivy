@@ -44,6 +44,7 @@ pub fn fixture(
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let config = ModelConfig {
+        provider: Default::default(),
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "synthetic-agent".into(),
         api_key: None,

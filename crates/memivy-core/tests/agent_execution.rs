@@ -286,7 +286,7 @@ fn cancellation_and_restart_preserve_visible_text_but_retry_resumes_checkpoint()
     );
     assert_eq!(
         store
-            .finish_agent_input(&retry.input_id, &retry.attempt_id, false, &[])
+            .finish_agent_input(&retry.input_id, &retry.attempt_id, &[])
             .unwrap_err(),
         DataError::Conflict
     );
@@ -314,7 +314,7 @@ fn source_archive_and_atomic_undo_outlive_deleted_conversation() {
     let receipt = op.receipt.unwrap();
     let memory = receipt.memory_id.clone().unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, true, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let key = RecordKey {
         kind: "memory".into(),
@@ -595,58 +595,12 @@ fn workspace_draft_protects_agent_update_and_whole_group_undo() {
 }
 
 #[test]
-fn pause_scope_persists_and_does_not_disable_reads() {
-    let (_root, store, conversation) = setup();
-    let run = begin(&store, &conversation, "这轮别记");
-    store
-        .set_agent_maintenance(&run.input_id, &run.attempt_id, AgentMaintenance::ThisTurn)
-        .unwrap();
-    assert!(
-        store
-            .agent_execution(&run.input_id)
-            .unwrap()
-            .maintenance_paused
-    );
-    store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
-        .unwrap();
-    let next = begin(&store, &conversation, "下一轮");
-    assert!(!next.maintenance_paused);
-    store
-        .set_agent_maintenance(
-            &next.input_id,
-            &next.attempt_id,
-            AgentMaintenance::PauseConversation,
-        )
-        .unwrap();
-    store
-        .finish_agent_input(&next.input_id, &next.attempt_id, false, &[])
-        .unwrap();
-    let later = begin(&store, &conversation, "后续表达");
-    assert!(later.maintenance_paused);
-    assert_eq!(store.messages(&conversation, 0, 100).unwrap().len(), 6);
-    store
-        .set_agent_maintenance(
-            &later.input_id,
-            &later.attempt_id,
-            AgentMaintenance::ResumeConversation,
-        )
-        .unwrap();
-    assert!(
-        !store
-            .agent_execution(&later.input_id)
-            .unwrap()
-            .maintenance_paused
-    );
-}
-
-#[test]
 fn persisted_summary_uses_same_conversation_sequence_and_undo_invalidates_it() {
     let (_root, store, conversation) = setup();
     let run = begin(&store, &conversation, "预算 5000，尚未决定上线");
     write(&store, &run, Destination::New, "预算 5000，尚未决定上线");
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, true, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let through = store.turn(&run.input_id).unwrap().assistant.seq;
     let next = begin(&store, &conversation, "Continue discussion");
@@ -727,7 +681,7 @@ fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_
         "每周8小时，预算4800元；不上传录音；是否收费尚未决定。",
     );
     store
-        .finish_agent_input(&conditions.input_id, &conditions.attempt_id, false, &[])
+        .finish_agent_input(&conditions.input_id, &conditions.attempt_id, &[])
         .unwrap();
     let ideas = begin(
         &store,
@@ -735,7 +689,7 @@ fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_
         "可以比较访谈标注体验和后续验证问题，只是备选思路，尚未执行或决定。",
     );
     store
-        .finish_agent_input(&ideas.input_id, &ideas.attempt_id, false, &[])
+        .finish_agent_input(&ideas.input_id, &ideas.attempt_id, &[])
         .unwrap();
     let current = begin(
         &store,
@@ -780,7 +734,7 @@ fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_
     let receipt = committed.receipt.unwrap();
     let memory = receipt.memory_id.unwrap();
     store
-        .finish_agent_input(&current.input_id, &current.attempt_id, true, &[])
+        .finish_agent_input(&current.input_id, &current.attempt_id, &[])
         .unwrap();
     store.delete_conversation(&conversation).unwrap();
     let version = store.memory(&memory).unwrap().current;
@@ -979,7 +933,7 @@ fn explicit_save_reuses_receipts_and_can_undo_membership_after_conversation_dele
         .append_agent_text(&run.input_id, &run.attempt_id, "可编辑的建议")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let request = id();
     let saved = store
@@ -1130,7 +1084,7 @@ fn execution_requires_the_persisted_tool_boundary_and_preserves_it_for_retry() {
     );
     assert_eq!(
         store
-            .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+            .finish_agent_input(&run.input_id, &run.attempt_id, &[])
             .unwrap_err(),
         DataError::Conflict
     );
@@ -1144,7 +1098,7 @@ fn execution_requires_the_persisted_tool_boundary_and_preserves_it_for_retry() {
         .unwrap();
     assert!(
         store
-            .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+            .finish_agent_input(&run.input_id, &run.attempt_id, &[])
             .is_ok()
     );
 }
@@ -1158,7 +1112,7 @@ fn optional_followups_cannot_downgrade_completion_or_accept_stale_attempts() {
         .append_agent_text(&run.input_id, &run.attempt_id, "完整回答")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     // No callback after a generation failure leaves all successful work intact.
     assert!(
@@ -1242,7 +1196,7 @@ fn late_archiving_preserves_when_the_user_originally_expressed_the_source() {
         )
         .unwrap();
     store
-        .finish_agent_input(&earlier.input_id, &earlier.attempt_id, false, &[])
+        .finish_agent_input(&earlier.input_id, &earlier.attempt_id, &[])
         .unwrap();
     let current = begin(&store, &conversation, "把刚才提到的原因记下来");
     let args = MemoryWriteArgs {
@@ -1290,7 +1244,7 @@ fn summary_compare_and_swap_rejects_pre_undo_model_output_without_stopping_new_i
     let earlier = begin(&store, &conversation, "决定下个月收费");
     write(&store, &earlier, Destination::New, "决定下个月收费");
     store
-        .finish_agent_input(&earlier.input_id, &earlier.attempt_id, true, &[])
+        .finish_agent_input(&earlier.input_id, &earlier.attempt_id, &[])
         .unwrap();
     let through = store.turn(&earlier.input_id).unwrap().assistant.seq;
     let current = begin(&store, &conversation, "再考虑一下这个决定");
@@ -1343,12 +1297,12 @@ fn first_checkpoint_reloads_history_if_undo_invalidates_a_prepared_summary() {
         let earlier = begin(&store, &conversation, "决定下个月收费");
         write(&store, &earlier, Destination::New, "决定下个月收费");
         store
-            .finish_agent_input(&earlier.input_id, &earlier.attempt_id, true, &[])
+            .finish_agent_input(&earlier.input_id, &earlier.attempt_id, &[])
             .unwrap();
         let through = store.turn(&earlier.input_id).unwrap().assistant.seq;
         let later = begin(&store, &conversation, "补充：收入目标仍待验证");
         store
-            .finish_agent_input(&later.input_id, &later.attempt_id, false, &[])
+            .finish_agent_input(&later.input_id, &later.attempt_id, &[])
             .unwrap();
         let current = begin(&store, &conversation, "继续评估");
         let mut snapshot = store.agent_history_snapshot(&current.input_id).unwrap();
@@ -1487,7 +1441,7 @@ fn a_memory_keeps_its_whole_change_group_handle_after_conversation_deletion() {
     );
     write(&store, &run, Destination::New, "另外一个想法");
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, true, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     store.delete_conversation(&conversation).unwrap();
     let groups = store.memory_agent_changes(&target.memory_id).unwrap();

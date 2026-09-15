@@ -48,9 +48,20 @@ cargo fetch --locked
 npm run dev:app
 ```
 
-The app uses `~/Library/Application Support/com.memivy.app/` for its data,
-including when running from source.
+The installed app uses `~/Library/Application Support/com.memivy.app/` for its data.
+`npm run dev:app` runs **Memivy Dev** from `~/Applications/Memivy Dev.app`,
+with a separate library at `~/Library/Application Support/com.memivy.app.dev/`.
+It retains frontend hot reload and Rust rebuilds. Quit the development app or
+press Ctrl+C in its terminal to end the session before starting another one.
 `npm run dev` alone opens a browser preview; use `dev:app` for the desktop app.
+
+For native QA, set `MEMIVY_DATA_DIR` to an absolute path containing synthetic
+test data and run `npm run qa:app`. QA and Dev share one application identity
+and one native session lock across checkouts. QA refuses the persistent Dev and
+production libraries. Test libraries remain available after exit; remove only
+your disposable test data after inspecting results. Shared model files are reused.
+Fresh Dev libraries use Option+Shift+M for quick capture; the installed app keeps
+Option+M. Dev does not automatically enable launch at login.
 
 To build a DMG, run `npm run build:release`. The DMG and checksum are written to
 `target/release/bundle/dmg/`. See [Contributing](CONTRIBUTING.md) for checks and

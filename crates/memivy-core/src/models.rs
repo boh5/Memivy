@@ -92,6 +92,7 @@ pub enum Source {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Binding {
+    pub provider: crate::model::Provider,
     pub source: Source,
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,6 +138,7 @@ impl Binding {
             return Err(Error::LocalBinding);
         }
         let model = ModelConfig {
+            provider: self.provider,
             base_url: self.base_url.clone(),
             model: self.model.clone(),
             api_key: self.api_key.clone(),
@@ -195,6 +197,7 @@ impl ModelSettings {
         if !Self::exists(root) && legacy.exists() {
             let m = ModelConfig::read(legacy).map_err(Error::from)?;
             r.llm = Some(Binding {
+                provider: m.provider,
                 source: Source::Service,
                 base_url: m.base_url,
                 api_key: m.api_key,

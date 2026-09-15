@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {workspaceFixture} from './helpers/workspace.mjs';
 
-test('a failed Agent capability check blocks model activation',async t=>{
+test('a failed Agent capability check remains visible without blocking an explicit save',async t=>{
  const f=workspaceFixture(t,{native:true});
  let binding={source:'service',base_url:'http://localhost:1234/v1',has_key:true,model:'QA',dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:'max_tokens'};
  const models={revision:'r1',llm:binding,embedding:binding,voice:binding,auto_organize:true};
@@ -11,7 +11,7 @@ test('a failed Agent capability check blocks model activation',async t=>{
  const view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,{kind:'llm',models,draft:binding,embedding:null,voice:null,setDraft:b=>{binding=b},onBusy(){},onSaved(){applied++},onRefresh:async()=>{}});await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==="Test connection").props.onClick();await f.settle();
  assert(f.text(view.tree).includes("This model did not pass Memivy's compatibility check"));assert.equal(applied,0);
- assert(f.find(view,n=>n.type==='button'&&n.props.className==='send-button').props.disabled);
+ assert.equal(f.find(view,n=>n.type==='button'&&n.props.className==='send-button').props.disabled,false);
  assert(!f.calls.some(c=>c.name==='models_apply'||c.name==='workspace_configure'));
  f.find(view,n=>n.type==='input'&&n.props.placeholder==="Enter a chat model ID").props.onChange({target:{value:'another'}});await f.settle();
  assert(!f.text(view.tree).includes("This model did not pass Memivy's compatibility check"));
@@ -90,7 +90,7 @@ test('failed activation reloads the actual revision and keeps the candidate draf
  let reconciled,view;const props={kind:'llm',models,draft:binding,embedding:null,voice:null,onBusy(){},onSaved(){assert.fail('must not claim saved')},onReconcile(m){reconciled=m},onRefresh:async()=>{},setDraft(b){props.draft=b;f.render(view,props)}};
  view=f.mount(f.load('src/workspace/ModelCapability.tsx').default,props);await f.settle();
  f.find(view,n=>n.type==='button'&&f.text(n)==="Test connection").props.onClick();await f.settle();
- f.find(view,n=>n.type==='button'&&f.text(n)==="Enable AI assistant").props.onClick();await f.settle();
+ f.find(view,n=>n.type==='button'&&f.text(n)==="Save settings").props.onClick();await f.settle();
  assert.equal(reconciled.revision,'rollback-revision');assert.equal(props.draft.model,'draft-model');
  assert(f.nodes(view.tree).some(n=>n.props?.text==='activation failed'));
 });

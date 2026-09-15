@@ -1,4 +1,4 @@
-use memivy_core::{memory::*, model::tools};
+use memivy_core::memory::*;
 use serde_json::{Value, json};
 
 #[path = "support/agent_fixture.rs"]
@@ -18,7 +18,7 @@ fn finish(store: &MemoryStore, run: &AgentExecution, text: &str) {
         .append_agent_text(&run.input_id, &run.attempt_id, text)
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
 }
 fn content(request: &Value) -> Value {
@@ -183,7 +183,7 @@ async fn many_manual_saves_continue_normally_and_page_every_group_without_changi
             let message = &initial["recent_messages"][1];
             assert_eq!(message["id"], message_id);
             assert!(
-                request["messages"][0]["content"]
+                request["messages"][0]["content"][0]["text"]
                     .as_str()
                     .unwrap()
                     .contains("manual_saves_offset")
@@ -229,17 +229,7 @@ async fn many_manual_saves_continue_normally_and_page_every_group_without_changi
             json!({"conversation_id":conversation,"after_seq":seq-1,"limit":1,"manual_saves_offset":(index+1)*20}),
         ))
     });
-    tools::save_capabilities(
-        dir.path(),
-        &config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: true,
-            multi_turn: true,
-        },
-    )
-    .unwrap();
+
     store
         .run_discussion(
             &config,
@@ -381,7 +371,7 @@ async fn manual_save_undo_invalidates_summary_and_remains_a_distinct_group_in_hi
                 assert_eq!(message["manual_saves"]["items"][0]["input_id"], group);
                 assert_eq!(message["manual_saves"]["items"][0]["status"], "undone");
                 assert!(
-                    request["messages"][0]["content"]
+                    request["messages"][0]["content"][0]["text"]
                         .as_str()
                         .unwrap()
                         .contains("manual_saves")
@@ -416,17 +406,7 @@ async fn manual_save_undo_invalidates_summary_and_remains_a_distinct_group_in_hi
             _ => sse_text("[\"帮我比较两个方案的成本\",\"哪些假设还需要验证？\"]"),
         })
     });
-    tools::save_capabilities(
-        dir.path(),
-        &config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: true,
-            multi_turn: true,
-        },
-    )
-    .unwrap();
+
     store
         .run_discussion(
             &config,

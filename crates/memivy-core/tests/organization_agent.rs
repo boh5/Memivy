@@ -1,7 +1,4 @@
-use memivy_core::{
-    memory::*,
-    model::{ModelConfig, ProbeError, tools},
-};
+use memivy_core::{memory::*, model::ModelConfig};
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
@@ -31,6 +28,7 @@ fn fixture(
 ) -> (ModelConfig, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let config = ModelConfig {
+        provider: Default::default(),
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         model: "synthetic".into(),
         api_key: None,
@@ -84,19 +82,7 @@ fn fixture(
     });
     (config, handle)
 }
-fn ready(store: &MemoryStore, config: &ModelConfig) {
-    tools::save_capabilities(
-        store.database_path().parent().unwrap(),
-        config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: true,
-            multi_turn: true,
-        },
-    )
-    .unwrap();
-}
+
 fn event(delta: Value, finish: &str) -> String {
     format!(
         "data: {}\n\ndata: [DONE]\n\n",
@@ -144,7 +130,7 @@ async fn capture_uses_natural_agent_and_one_existing_memory_identity() {
             },
         )
     });
-    ready(&store, &config);
+
     let receipt = store
         .run_organization(&config, &task)
         .await
@@ -175,7 +161,7 @@ async fn natural_unchanged_completion_does_not_create_a_false_mutation_receipt()
     let raw = capture(&store, "那个以后再说。");
     let task = store.claim_organization().unwrap().unwrap();
     let (config, server) = fixture(1, |_, _| final_text());
-    ready(&store, &config);
+
     assert!(
         store
             .run_organization(&config, &task)
@@ -257,7 +243,7 @@ async fn target_read_and_continuation_preserve_sources_and_reversible_merge() {
         }
         _ => unreachable!("no acknowledgement request is expected"),
     });
-    ready(&store, &config);
+
     let receipt = store
         .run_organization(&config, &task)
         .await
@@ -300,7 +286,7 @@ async fn committed_write_finishes_without_an_acknowledgement_request_or_requeue(
             },
         )
     });
-    ready(&store, &config);
+
     let receipt = store
         .run_organization(&config, &task)
         .await
@@ -313,30 +299,6 @@ async fn committed_write_finishes_without_an_acknowledgement_request_or_requeue(
     assert_eq!(
         store.memory(&raw.memory_id).unwrap().current.body,
         "独立想法，待考虑。"
-    );
-}
-
-#[tokio::test]
-async fn unsupported_capability_keeps_capture_untouched() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = MemoryStore::open(dir.path()).unwrap();
-    let raw = capture(&store, "保留原话");
-    let task = store.claim_organization().unwrap().unwrap();
-    let config = ModelConfig {
-        base_url: "http://127.0.0.1:9/v1".into(),
-        model: "unverified".into(),
-        api_key: None,
-        max_output_tokens: None,
-        output_token_parameter: Default::default(),
-        disable_reasoning: false,
-    };
-    assert_eq!(
-        store.run_organization(&config, &task).await.unwrap_err(),
-        ProbeError::ToolsUnsupported
-    );
-    assert_eq!(
-        store.memory(&raw.memory_id).unwrap().current.id,
-        raw.version_id
     );
 }
 
@@ -405,7 +367,7 @@ async fn candidate_excerpt_cannot_replace_an_unread_tail() {
             )
         }
     });
-    ready(&store, &config);
+
     assert!(
         store
             .run_organization(&config, &task)
@@ -490,7 +452,7 @@ async fn paged_target_reads_allow_a_complete_body_update_preserving_the_tail() {
         }
         _ => unreachable!("no acknowledgement request is expected"),
     });
-    ready(&store, &config);
+
     let receipt = store
         .run_organization(&config, &task)
         .await
@@ -609,7 +571,7 @@ async fn trash_between_requests_removes_candidate_body_and_extra_spans_before_wr
             }
         }
     });
-    ready(&store, &config);
+
     assert!(
         store
             .run_organization(&config, &task)
@@ -696,7 +658,7 @@ async fn invalid_quote_is_rejected_then_corrected_without_an_intermediate_write(
             },
         )
     });
-    ready(&store, &config);
+
     let receipt = store
         .run_organization(&config, &task)
         .await

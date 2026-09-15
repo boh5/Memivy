@@ -67,16 +67,6 @@ async fn main() {
     )
     .unwrap();
     let mut cases: Vec<Case> = serde_json::from_str(fixture).unwrap();
-    let capability_root = tempfile::tempdir().unwrap();
-    let capabilities = MemoryStore::open(capability_root.path())
-        .unwrap()
-        .test_model_capabilities(&config)
-        .await
-        .expect("capability probe");
-    assert!(
-        capabilities.supports_agent(),
-        "streaming multi-turn capability required"
-    );
     let extra = include_str!("../tests/fixtures/agent_organization.json");
     fs::write(output.join("agent-cases.json"), extra).unwrap();
     cases.extend(serde_json::from_str::<Vec<Case>>(extra).unwrap());
@@ -88,11 +78,6 @@ async fn main() {
         let path = output.join(format!("{}.json", case.id));
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();
-        fs::copy(
-            capability_root.path().join("model-capabilities.json"),
-            dir.path().join("model-capabilities.json"),
-        )
-        .unwrap();
         for (title, body) in &case.seeds {
             let c = capture(&store, body);
             store

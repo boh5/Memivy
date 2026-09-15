@@ -383,10 +383,6 @@ impl MemoryStore {
         if op.result.is_some() {
             return Err(DataError::RequestConflict);
         }
-        let paused:bool=tx.query_row("SELECT t.maintenance_paused OR c.memory_paused FROM turns t JOIN conversations c ON c.id=t.conversation_id WHERE t.id=?",[input],|r|r.get(0))?;
-        if paused {
-            return Err(DataError::Conflict);
-        }
         let previous = match &write.destination {
             Destination::New => None,
             Destination::Existing {

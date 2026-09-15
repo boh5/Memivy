@@ -104,7 +104,6 @@ export type Message = {
   followups: string[];
   receipts: Receipt[];
   progress: string | null;
-  record_only: boolean;
   seq: number;
   id: string;
   text: string;

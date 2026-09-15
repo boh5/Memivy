@@ -65,7 +65,7 @@ const api = {
     if(name==='draft_write') { if(Buffer.byteLength(args.draft.title)>200) throw 'invalid title'; db.set(args.draft.key,structuredClone(args.draft)); return; }
     if(name==='draft_clear') { db.delete(args.key); return; }
     if(name==='discussion_source') return {source:args.source,text:'known source'};
-    if(name==='discussion_messages') return (messageResponse ? messageResponse(args) : []).map(m=>({followups:[],receipts:[],progress:null,record_only:false,...m}));
+    if(name==='discussion_messages') return (messageResponse ? messageResponse(args) : []).map(m=>({followups:[],receipts:[],progress:null,...m}));
     if(name==='discussion_open') return topic;
     if(name==='discussion_submit') return new Promise(resolve=>{askResolve=()=>resolve(topic)});
     if(name==='library_query') return {items:[row(keyA),row(keyB)],next_offset:null};

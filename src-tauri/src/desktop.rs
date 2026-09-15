@@ -742,7 +742,15 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .store
         .database_path()
         .with_file_name("desktop.json");
-    app.manage(Desktop::new(path));
+    let development = app.config().identifier == crate::storage::DEVELOPMENT_IDENTIFIER;
+    let fresh = !path.exists();
+    let desktop = Desktop::new(path);
+    if development && fresh {
+        let mut state = desktop.inner.lock().unwrap();
+        state.prefs.shortcut = "Alt+Shift+KeyM".into();
+        state.prefs.login_initialized = true;
+    }
+    app.manage(desktop);
     apply_context(&app.state::<Desktop>(), read_context(app.handle()));
     termination::install(app.handle())?;
     capture_panel::configure(app.handle())?;
@@ -752,7 +760,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "../icons/tray-icon.png"
         ))?)
         .icon_as_template(true)
-        .tooltip("Memivy")
+        .tooltip(app.package_info().name.clone())
         .on_menu_event(|app, event| {
             let h = app.clone();
             let id = event.id.as_ref().to_string();
@@ -792,7 +800,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = register(app.handle(), &p.shortcut) {
         set_error(app.handle(), e.to_string());
     }
-    if !p.login_initialized {
+    if !development && !p.login_initialized {
         let handle = app.handle().clone();
         tauri::async_runtime::spawn_blocking(move || {
             if let Err(error) =
@@ -1107,7 +1115,6 @@ pub(crate) async fn record_completed(
         }
         drop(state);
         publish(&h);
-        let _ = h.emit_to("capture", "desktop-record-complete", &topic_id);
         Ok(true)
     })
     .await?;

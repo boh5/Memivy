@@ -1148,3 +1148,55 @@ Added regression coverage for replacement list nodes, narrow startup and subsequ
 - 用户明确要求保留追问建议：生成、超时、存储与界面均未裁减；讨论回调只适配成功结束结果类型。
 - 验证：全工作区 Rust 测试、Clippy、前端构建与 i18n 检查通过；UI 246 项中的 245 项在沙箱通过，文件监听项在沙箱内 EMFILE，单项沙箱外复跑通过。配置与整理变更经独立审查、修复与复审。
 - 原生 QA：独立应用标识、显式 `/private/tmp` 合成资料库，确认实际数据库与格式 2 配置落盘；旧模型地址与已保存 Key 正确显示，修改模型后经本地合成服务完成测试及应用，5 次协议请求均使用原 Key，其他能力配置保持不变，配置权限为 0600。构建保留既有大 chunk 提示；没有进行真实服务质量或真人录音验收。证据在忽略目录 `research/simplification-qa/`。
+
+## 2026-09-15 Rig BYOM integration
+
+- Added pinned rig-core 0.42.0 with reqwest and rustls only. All LLM entry points use Rig messages, tool definitions and completion responses directly. Provider selection supports OpenAI-compatible Chat, OpenAI Responses, Anthropic and Gemini with custom endpoints and model IDs. No Rig Agent, runner or vector store was added; embedding and speech retain their existing implementations.
+- Preserved the bounded tool loop, cancellation, committed-operation retries, source filtering, reversible receipts and follow-up suggestions. Legacy execution checkpoints are decoded at the storage boundary without a schema change or rewriting displayed history. Provider tool IDs and signatures survive tool-result round trips.
+- Retained request/response byte limits, deadlines and terminal checks through the shared HTTP transport. Added checks for Rig behaviors that can otherwise conceal refusals, missing Chat terminal markers, incomplete sibling calls or malformed arguments. No tool executes until the complete response passes validation; output truncation remains a distinct error.
+- Settings default old configurations to OpenAI-compatible. Changing protocol clears the draft credential and test proof; Gemini uses the provider root URL. Native isolated QA verified old settings display, protocol switching, five synthetic Gemini probe requests, saving/reopening settings and private 0600 configuration. Actual provider credentials and live-provider model quality were not tested.
+- Independent runtime and configuration reviews found and resolved SDK argument-handling gaps and the Gemini default URL issue; final review found no remaining scoped issue. Focused four-protocol tests cover structured requests, arbitrary model IDs, tool signatures, refusals and truncated writes. Backup/restore concurrency verification passed with library integrity intact. Evidence is under ignored research/rig-evaluation and research/rig-native-qa. No commit, push or release.
+- Final core-assets regression passed in research/core-tests/20260915T104819Z-f9e23150: formatting, all-target Clippy, 274 Rust tests (2 ignored), 247 UI tests, frontend and harness builds, memory-store, organization-recovery, fault and MCP process checks. The i18n check and native QA build also passed. The earlier aggregate run retained a test-only lint failure; it was fixed before this clean final run.
+
+## 2026-09-15 Direct AI assistant settings save
+
+- Removed the required connection test from AI assistant saving in both UI and host. Save validates configuration locally; an optional matching test can still supply its candidate and capability cache. Preserved existing credentials only for the same provider and normalized endpoint. Removed the Disable AI assistant button and use Save settings for both initial setup and edits. Voice and embedding activation retain their existing rules.
+- Organization now checks capabilities on first use when no matching result is cached, consistent with discussion. Unsupported capabilities still produce an explicit failure and preserve the original capture.
+- Verification: 249 UI tests, three host configuration tests, 16 provider/organization tests, frontend build, i18n, formatting and all-target Clippy passed. Independent review found no issue. Native isolated QA saved an edited model without testing against an unavailable synthetic endpoint, reopened the saved setting, verified the existing synthetic key and 0600 file permissions, and visually confirmed removal of the disable button. No personal library or actual provider credential was used. Evidence: ignored research/rig-evaluation/settings-save-*. No commit or push.
+
+## 2026-09-15 Remove Agent control and activation gates
+
+- Removed mandatory capability probes and their disk cache from discussion and organization. Actual user requests run immediately. Optional connection diagnostics remain available in settings; LLM tests no longer issue or store activation proofs, and LLM saves no longer consult proofs or roll back for capability-cache failures. Voice and embedding keep their existing activation checks.
+- Removed set_turn_options, response classification, maintenance state APIs and their write guards. Agent follows the user's natural-language request about whether to write memories; completed answers always attempt follow-up suggestions. Removed classification-dependent quick-window auto-dismiss so answers and suggestions remain visible. Original text, source checks, receipts, versions, undo, cancellation and idempotent retries retain their existing boundaries.
+- Kept the public initial schema unchanged; retired columns and old cache files are unused, without deleting user data. Retried legacy checkpoints use the current system instruction only in the outgoing request view, preserving stored protocol history. A pending removed control call receives a tool error and can continue normally.
+- Independent runtime and settings reviews passed after fixing stale retry instructions. Synthetic tests exercise actual first requests without cache, write arguments and receipts, suggestions after brief acknowledgments, inactive legacy flags and retry from an old control checkpoint. Evidence is under ignored research/agent-simplification. No commit or push.
+- Final core-assets run research/core-tests/20260915T112059Z-f466dbb0 passed: 273 Rust tests (2 ignored), 249 UI tests, format, all-target Clippy, frontend/harness builds and memory-store, organization-recovery, fault and MCP process checks. Backup/restore concurrency and i18n checks also passed.
+- Native isolated QA saved settings with a directory occupying the retired cache-file path, preserving its synthetic key. Actual requests offered only the six remaining memory tools, without preflight calls. Complete Chinese pasted input produced one memory and applied receipt; the quick window displayed its answer, undo control and two suggestions together. An earlier automation typing attempt delivered only a digit; its unsupported write quote was rejected without creating a memory. The fixed synthetic reply is not evidence of live-model semantic quality. QA processes were stopped; real credentials, physical IME composition and live-provider quality were not tested.
+
+## 2026-09-15 Independent review of all pending changes
+
+Three independent reviewers inspected the complete pending implementation and related tests in separate scopes: model transport/dependencies, memory execution/data handling, and host/frontend settings. No new actionable code defects were found. The parent reviewed remaining documentation and examples, corrected stale references to removed turn controls and capability-cache activation, and preserved the concurrently updated AGENTS.md isolation rules.
+
+No UI QA, native build or app launch was performed for this review. Verification evidence from research/core-tests/20260915T112059Z-f466dbb0 and backup/restore checks was inspected; compared source hashes differ only in an explanatory model-tools comment. Full tests were not repeated because no executable code changed. Diff check passed. No commit or push.
+
+## 2026-09-15：固定开发身份与 QA 隔离
+
+- 用户授权将安装版与开发版分开。`dev:app` 和新增 `qa:app` 共用 `Memivy Dev` / `com.memivy.app.dev`，固定运行包为 `~/Applications/Memivy Dev.app`。Cargo runner 将每次热重建的程序放入同一应用包，保留 Tauri/Vite 开发生命周期；不再按任务创建 QA 身份。
+- Dev 默认库为 `~/Library/Application Support/com.memivy.app.dev/`。QA 必须显式指定绝对 `MEMIVY_DATA_DIR`，拒绝正式库、持久开发库及指向受保护目录的符号链接。原生宿主再次校验开发库不能覆盖正式目录；语音状态跟随实际打开的 Workspace 库。未迁移或删除既有个人数据。
+- 原生会话使用用户级文件锁，覆盖 sidecar 准备、运行和退出清理。第二个会话明确拒绝进入；进程组退出采用有界等待，覆盖忽略退出信号的直接子进程与遗留后代。保留持久库，合成 QA 数据由执行者在确认结果后清理。
+- 新开发库的快捷入口默认为 Option+Shift+M，语音快捷键为 Option+Shift+R；已有偏好保留。开发版不自动注册登录启动。安装版默认与发布身份保持不变。
+- Tauri 开发模式自动嵌入根 `Info.plist`；该文件明确声明 Dev 身份。发布使用 `Info.release.plist` 显式覆盖名称、标识和可执行文件，避免 Tauri 合并元数据时遗留开发身份。已实际生成发布配置的 debug 验证包，核对为 `Memivy` / `com.memivy.app` / `memivy`，未安装或发布。
+- 已验证：Python 4 项路径/进程隔离测试；宿主 50 项测试；宿主 Clippy 全目标、格式检查；前端构建和 i18n 检查。UI 249 项中 248 项在沙箱通过，文件监听项因沙箱 EMFILE 失败，在正常权限下单独复测通过。独立检查发现的语音目录、辅助程序来源、退出清理问题均已修复并复审。
+- 原生证据：固定 Dev 窗口正常呈现；Rust 文件变更后同一路径重启；第二个 QA 被锁拦截；lsof 分别确认显式 QA 库和默认 Dev 库；正式库全部文件在本轮前后 SHA-256 一致。已退出验证进程并删除本次合成 QA 库。快捷键默认值已在原生设置显示；安装版与开发版同时运行、真实麦克风及完整安装升级流程未做本轮验收。
+- 剩余系统历史项：刷新后的菜单栏设置仍显示旧小写 `memivy`。裸程序无法通过普通 LaunchServices 应用注销清除，控制中心配置受系统隐私权限保护；未重置其他菜单栏设置，未将该历史项记为清理完成。此前重新生成但已停止运行的 Rig QA 包已再次注销并删除。
+- 临时证据位于忽略的 `research/dev-isolation-20260915/`。本轮未提交、推送或发布。
+
+## 2026-09-15：全部未提交改动的独立审查与修复
+
+- 两个独立子代理分别审阅核心模型／记忆执行改动，以及宿主／前端／开发启动器与相关文档，覆盖全部待提交文件。
+- 修复 QA 路径比较遗漏 macOS 大小写及 Unicode 等价路径的问题；受保护目录尚未创建时也拒绝大小写别名。合成测试覆盖持久 Dev 库经符号链接移动后的 Unicode 别名，未访问或修改个人资料库。
+- 修复终端 SIGHUP 导致会话包装器提前退出、留下独立进程组的问题；挂断现在进入已有的有界退出清理。启动器 7 项回归通过，并已接入 `test:core-assets`；路径与进程修复均经独立复审。
+- 修复前完整回归 `research/core-tests/20260915T122905Z-6b682fdc` 通过：275 项 Rust 测试（另 2 项忽略）、249 项 UI 测试、格式、Clippy、前端与测试程序构建、存储／恢复／故障／MCP 测试。随后备份恢复并发检查、修复后宿主路径测试与全工作区 Clippy 通过。
+- 修复旧执行记录恢复及新 Chat 流丢失推理签名的问题：保留三个既有推理字段的原始内容，用 Rig 工具调用的私有附加数据随 checkpoint 保存；请求副本对所有 Provider 移除内部键，仅在 Chat 请求中按工具消息出现次序及 wire ID 补回字段。补回后检查实际请求字节上限，跨轮复用工具 ID 不会串用签名。
+- 独立复审补充了真实流中不同类型推理块复用 index 的情况：只合并连续且兼容的 text／summary 分片，加密块保持独立和原始顺序。合成测试验证新流回传、序列化后重试、旧 checkpoint 已提交回执不重复、内部字段不泄漏和请求大小限制；最终相关核心测试 31 项及核心 Clippy 通过，复审无剩余问题。
+- 最终完整回归 `research/core-tests/20260915T124954Z-030a63f3` 全部通过：282 项 Rust 测试（另 2 项忽略）、249 项 UI 测试、7 项启动器测试、格式、全工作区 Clippy、前端与测试程序构建，以及全部离线进程检查。回归期间受检源码未变化；随后使用最终测试程序的备份恢复并发检查通过，i18n 与最终 diff check 通过。本轮未运行真实服务商、原生交互或安装验收，未提交或推送；菜单栏历史项按用户要求暂停处理。

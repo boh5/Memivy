@@ -1,9 +1,18 @@
-use memivy_core::{
-    memory::*,
-    model::{ModelConfig, tools},
-};
+use memivy_core::memory::*;
 use serde_json::{Value, json};
 
+fn checkpoint_calls(value: &Value) -> Vec<memivy_core::model::ToolCall> {
+    match serde_json::from_value::<memivy_core::model::Message>(value.clone()).unwrap() {
+        memivy_core::model::Message::Assistant { content, .. } => content
+            .into_iter()
+            .filter_map(|p| match p {
+                memivy_core::model::AssistantContent::ToolCall(call) => Some(call),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
+    }
+}
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -19,19 +28,7 @@ fn setup() -> (tempfile::TempDir, MemoryStore, String) {
         .unwrap();
     (dir, store, conversation)
 }
-fn ready(store: &MemoryStore, config: &ModelConfig) {
-    tools::save_capabilities(
-        store.database_path().parent().unwrap(),
-        config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: true,
-            multi_turn: true,
-        },
-    )
-    .unwrap();
-}
+
 fn begin(store: &MemoryStore, conversation: &str, text: &str, focus: &[String]) -> AgentExecution {
     store
         .begin_agent_input(&id(), &id(), conversation, text, focus, None)
@@ -56,254 +53,109 @@ fn count(store: &MemoryStore, table: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn mixed_expression_writes_once_then_finishes_naturally_with_followups() {
-    let (_dir, store, conversation) = setup();
-    let run = begin(
-        &store,
-        &conversation,
-        "我考虑先做反馈收集，还没决定。这个想法有哪些风险？",
-        &[],
-    );
-    let source = run.user_message_id.clone();
-    let source_quote = run.input_text.clone();
-    let (config, requests, server) = fixture(4, move |index, request| {
-        Response::stream(match index {
-            0 => {
-                let context = last_content(request);
-                assert_eq!(context["source_message_id"], source);
-                call(
-                    "reply-options",
-                    "set_turn_options",
-                    json!({"reply_kind":"answer_or_discussion","maintenance":"unchanged"}),
-                )
-            }
-            1 => {
-                let result = last_content(request);
-                assert_eq!(result["reply_kind"], "answer_or_discussion");
-                assert_eq!(result["maintenance_paused"], false);
-                call(
-                    "write-1",
-                    "write_memory",
-                    json!({"destination":{"kind":"new"},"title":"反馈收集想法","parts":[{"text":"正在考虑先做反馈收集，尚未决定。","sources":[{"source_id":source,"quote":source_quote}]}]}),
-                )
-            }
-            2 => {
-                assert_eq!(
-                    request["messages"][4]["reasoning_content"],
-                    "synthetic reasoning retained for protocol"
-                );
-                let result = last_content(request);
-                assert_eq!(result["receipt"]["status"], "applied");
-                text("可以先验证用户是否愿意持续提交反馈。你目前还在考虑，没有作出决定。")
-            }
-            _ => suggestions(),
-        })
-    });
-    ready(&store, &config);
-    let mut displayed = vec![];
-    let mut memory_updates = 0;
-    store
-        .run_discussion(
-            &config,
-            &run.input_id,
-            &run.attempt_id,
-            "zh-CN",
-            |changed| {
-                memory_updates += usize::from(changed);
-                let state = store.agent_execution(&run.input_id).unwrap();
-                if !state.text.is_empty() {
-                    displayed.push((state.state, state.text));
-                }
-            },
+async fn actual_requests_write_and_generate_followups_without_control_tools_or_capability_cache() {
+    for input in [
+        "我每周可投入8小时。",
+        "我每周可投入8小时。这对计划有什么影响？",
+    ] {
+        let (dir, store, conversation) = setup();
+        // Old cache files and retired classification fields must not gate actual requests.
+        std::fs::write(
+            dir.path().join("model-capabilities.json"),
+            "invalid old cache",
         )
-        .await
         .unwrap();
-    server.join().unwrap();
-    let result = store.agent_execution(&run.input_id).unwrap();
-    assert_eq!(result.state, "complete");
-    assert_eq!(result.follow_ups.len(), 2);
-    assert!(!result.record_only);
-    assert!(!result.maintenance_paused);
-    assert_eq!(memory_updates, 1);
-    assert!(displayed.iter().any(|(state, _)| state == "processing"));
-    assert_eq!(count(&store, "memories"), 1);
-    assert_eq!(count(&store, "captures"), 1);
-    assert_eq!(count(&store, "organization_jobs"), 0);
-    let receipt = store.agent_input_receipts(&run.input_id).unwrap();
-    assert_eq!(receipt.len(), 1);
-    let saved = store
-        .memory(receipt[0].memory_id.as_ref().unwrap())
-        .unwrap();
-    assert!(saved.current.body.contains("尚未决定"));
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 4);
-    assert!(requests.iter().all(|r| r["stream"] == true));
-    assert_eq!(requests[0]["tool_choice"], "auto");
-}
-
-#[tokio::test]
-async fn acknowledgment_reply_writes_without_followups_and_resumes_only_when_requested() {
-    for resume in [false, true] {
-        let (_dir, store, conversation) = setup();
-        let input = if resume {
-            "恢复记录：我每周可投入8小时。"
-        } else {
-            "我每周可投入8小时。"
-        };
         let run = begin(&store, &conversation, input, &[]);
-        if resume {
-            store
-                .set_agent_maintenance(
-                    &run.input_id,
-                    &run.attempt_id,
-                    AgentMaintenance::PauseConversation,
-                )
-                .unwrap();
-        }
-        assert_eq!(
-            store
-                .agent_execution(&run.input_id)
-                .unwrap()
-                .maintenance_paused,
-            resume
-        );
+        let db = rusqlite::Connection::open(store.database_path()).unwrap();
+        db.execute(
+            "UPDATE conversations SET memory_paused=1 WHERE id=?",
+            [&conversation],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE turns SET record_only=1,maintenance_paused=1 WHERE id=?",
+            [&run.input_id],
+        )
+        .unwrap();
         let source = run.user_message_id.clone();
-        // Keep a response available for an unexpected suggestions request until
-        // the run completes, so a refused connection cannot hide that request.
-        let (config, requests, server) = fixture(4, move |index, request| {
+        let (config, requests, server) = fixture(3, move |index, request| {
             Response::stream(match index {
                 0 => {
-                    assert_eq!(last_content(request)["memory_maintenance_paused"], resume);
-                    call(
-                        "reply-options",
-                        "set_turn_options",
-                        json!({"reply_kind":"acknowledgment_only","maintenance":if resume {"resume_conversation"} else {"unchanged"}}),
-                    )
-                }
-                1 => {
-                    let result = last_content(request);
-                    assert_eq!(result["applied"], true);
-                    assert_eq!(result["reply_kind"], "acknowledgment_only");
-                    assert_eq!(result["maintenance_paused"], false);
+                    let context = last_content(request);
+                    assert_eq!(context["source_message_id"], source);
+                    assert!(context.get("memory_maintenance_paused").is_none());
+                    assert!(
+                        !request["tools"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|t| t["function"]["name"] == "set_turn_options")
+                    );
                     call(
                         "write-hours",
                         "write_memory",
                         json!({"destination":{"kind":"new"},"title":"每周可投入时间","parts":[{"text":"每周可投入8小时。","sources":[{"source_id":source,"quote":"我每周可投入8小时。"}]}]}),
                     )
                 }
-                2 => {
+                1 => {
                     assert_eq!(last_content(request)["receipt"]["status"], "applied");
                     text("已记下：每周可投入8小时。")
                 }
                 _ => suggestions(),
             })
         });
-        ready(&store, &config);
         store
             .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
             .await
             .unwrap();
-        drop(server);
+        server.join().unwrap();
         let result = store.agent_execution(&run.input_id).unwrap();
         assert_eq!(result.state, "complete");
-        assert_eq!(result.text, "已记下：每周可投入8小时。");
-        assert!(result.record_only);
-        assert!(result.follow_ups.is_empty());
-        assert!(!result.maintenance_paused);
-        assert!(
-            !store
-                .agent_conversation_context(&conversation)
-                .unwrap()
-                .memory_paused
-        );
-        let receipts = store.agent_input_receipts(&run.input_id).unwrap();
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].status, "applied");
-        assert_eq!(
-            store
-                .memory(receipts[0].memory_id.as_ref().unwrap())
-                .unwrap()
-                .current
-                .body,
-            "每周可投入8小时。"
-        );
+        assert_eq!(result.follow_ups.len(), 2);
+        assert_eq!(count(&store, "memories"), 1);
         assert_eq!(count(&store, "captures"), 1);
+        let receipt = store.agent_input_receipts(&run.input_id).unwrap();
+        assert_eq!(receipt.len(), 1);
+        assert_eq!(receipt[0].status, "applied");
         assert_eq!(requests.lock().unwrap().len(), 3);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("model-capabilities.json")).unwrap(),
+            "invalid old cache"
+        );
     }
 }
 
 #[tokio::test]
-async fn answer_reply_does_not_resume_paused_memory_maintenance() {
+async fn no_memory_request_is_visible_to_agent_without_a_control_step() {
     let (_dir, store, conversation) = setup();
-    let run = begin(
-        &store,
-        &conversation,
-        "我每周改成8小时；先别恢复记录，这对计划有什么影响？",
-        &[],
-    );
-    store
-        .set_agent_maintenance(
-            &run.input_id,
-            &run.attempt_id,
-            AgentMaintenance::PauseConversation,
-        )
-        .unwrap();
-    let source = run.user_message_id.clone();
-    let (config, requests, server) = fixture(4, move |index, request| {
-        Response::stream(match index {
-            0 => {
-                assert_eq!(last_content(request)["memory_maintenance_paused"], true);
-                call(
-                    "reply-options",
-                    "set_turn_options",
-                    json!({"reply_kind":"answer_or_discussion","maintenance":"unchanged"}),
-                )
-            }
-            1 => {
-                let result = last_content(request);
-                assert_eq!(result["reply_kind"], "answer_or_discussion");
-                assert_eq!(result["maintenance_paused"], true);
-                call(
-                    "paused-write",
-                    "write_memory",
-                    json!({"destination":{"kind":"new"},"title":"每周可投入时间","parts":[{"text":"每周可投入8小时。","sources":[{"source_id":source,"quote":"我每周改成8小时"}]}]}),
-                )
-            }
-            2 => {
-                let result = last_content(request);
-                assert_eq!(result["applied"], false);
-                assert_eq!(result["error"], "memory_maintenance_paused");
-                text("可以按每周8小时重新估算计划；记录仍暂停，本轮没有保存记忆。")
-            }
-            _ => suggestions(),
+    let run = begin(&store, &conversation, "这轮不要记忆，只帮我比较想法。", &[]);
+    let (config, requests, server) = fixture(2, |index, request| {
+        Response::stream(if index == 0 {
+            assert_eq!(
+                last_content(request)["current_message"],
+                "这轮不要记忆，只帮我比较想法。"
+            );
+            assert!(request.to_string().contains("do not call write_memory"));
+            text("可以先比较成本和投入时间。")
+        } else {
+            suggestions()
         })
     });
-    ready(&store, &config);
     store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
         .await
         .unwrap();
     server.join().unwrap();
-    let result = store.agent_execution(&run.input_id).unwrap();
-    assert_eq!(result.state, "complete");
-    assert!(!result.record_only);
-    assert_eq!(result.follow_ups.len(), 2);
-    assert!(result.maintenance_paused);
-    assert!(
-        store
-            .agent_conversation_context(&conversation)
-            .unwrap()
-            .memory_paused
-    );
-    assert!(
-        store
-            .agent_input_receipts(&run.input_id)
-            .unwrap()
-            .is_empty()
-    );
     assert_eq!(count(&store, "memories"), 0);
-    assert_eq!(count(&store, "captures"), 0);
-    assert_eq!(requests.lock().unwrap().len(), 4);
+    assert_eq!(
+        store
+            .agent_execution(&run.input_id)
+            .unwrap()
+            .follow_ups
+            .len(),
+        2
+    );
+    assert_eq!(requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -316,10 +168,22 @@ async fn committed_tool_without_checkpoint_result_resumes_only_after_that_tool()
         &[],
     );
     let args = json!({"destination":{"kind":"new"},"title":"反馈验证","parts":[{"text":"决定验证反馈收集，尚未上线。","sources":[{"source_id":run.user_message_id,"quote":run.input_text}]}]});
-    let protocol = vec![
+    let reasoning = json!({
+        "reasoning":"Legacy provider reasoning",
+        "reasoning_content":"Legacy canonical reasoning",
+        "reasoning_details":[
+            {"type":"reasoning.text","id":"thinking-7","format":"anthropic-claude-v1","index":3,"text":"Signed thought","signature":"original-signature"},
+            {"type":"reasoning.encrypted","id":"rs_8","format":"openai-responses-v1","index":4,"data":"original-encrypted-data"}
+        ]
+    });
+    let mut protocol = vec![
         json!({"role":"user","content":run.input_text}),
         json!({"role":"assistant","content":"先记下这个决定。","tool_calls":[{"id":"committed-call","type":"function","function":{"name":"write_memory","arguments":args.to_string()}}]}),
     ];
+    protocol[1]
+        .as_object_mut()
+        .unwrap()
+        .extend(reasoning.as_object().unwrap().clone());
     store
         .append_agent_text(&run.input_id, &run.attempt_id, "先记下这个决定。")
         .unwrap();
@@ -356,6 +220,10 @@ async fn committed_tool_without_checkpoint_result_resumes_only_after_that_tool()
             assert_eq!(messages.len(), 3);
             assert_eq!(messages[1]["tool_calls"][0]["id"], "committed-call");
             assert_eq!(messages[2]["tool_call_id"], "committed-call");
+            for (key, value) in reasoning.as_object().unwrap() {
+                assert_eq!(&messages[1][key], value, "legacy reasoning field {key}");
+            }
+            assert!(!request.to_string().contains("_memivy_openai_reasoning"));
             let result = last_content(request);
             assert_eq!(result["receipt"]["request_id"], receipt_id);
             text("下一步先验证需求。")
@@ -363,7 +231,7 @@ async fn committed_tool_without_checkpoint_result_resumes_only_after_that_tool()
             suggestions()
         })
     });
-    ready(&store, &config);
+
     store
         .run_discussion(&config, &retry.input_id, &retry.attempt_id, "zh-CN", |_| {})
         .await
@@ -402,7 +270,7 @@ async fn streaming_cancellation_retains_visible_prefix_and_stops_before_tools() 
             delta(json!({}), json!("stop")) + "data: [DONE]\n\n",
         ],
     });
-    ready(&store, &config);
+
     let result = store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {
             let current = store.agent_execution(&run.input_id).unwrap();
@@ -455,7 +323,7 @@ async fn cancellation_after_first_commit_preserves_receipt_and_stops_pending_wri
             ) + "data: [DONE]\n\n",
         ],
     });
-    ready(&store, &config);
+
     let mut streamed_before_commit = false;
     let mut successful_updates = 0;
     let outcome = store
@@ -479,8 +347,12 @@ async fn cancellation_after_first_commit_preserves_receipt_and_stops_pending_wri
                         "applied"
                     );
                     let pending = current.protocol.last().unwrap();
-                    assert_eq!(pending["tool_calls"][1]["id"], "pending-write");
-                    assert!(!current.protocol.iter().any(|m| m["role"] == "tool"));
+                    assert_eq!(checkpoint_calls(pending)[1].id.as_str(), "pending-write");
+                    assert!(!current.protocol.iter().any(|m| {
+                        m["content"]
+                            .as_array()
+                            .is_some_and(|parts| parts.iter().any(|p| p["type"] == "toolresult"))
+                    }));
                     store
                         .stop_agent_input(&run.input_id, &run.attempt_id, "cancelled", None)
                         .unwrap();
@@ -595,7 +467,7 @@ async fn reading_v1_then_writing_v2_keeps_the_cited_v1_available() {
             _ => suggestions(),
         })
     });
-    ready(&store, &config);
+
     store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
         .await
@@ -696,7 +568,7 @@ async fn citation_keeps_longer_reread_and_disjoint_tail_without_exposing_unread_
             _ => suggestions(),
         })
     });
-    ready(&store, &config);
+
     store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
         .await
@@ -725,29 +597,22 @@ async fn citation_keeps_longer_reread_and_disjoint_tail_without_exposing_unread_
 }
 
 #[tokio::test]
-async fn unsupported_model_is_explicit_without_network_or_alternative_workflow() {
+async fn actual_protocol_failure_is_explicit_without_a_preflight_request() {
     let (_dir, store, conversation) = setup();
     let run = begin(&store, &conversation, "今天想到一个方向。", &[]);
-    let (config, requests, server) = fixture(0, |_, _| unreachable!());
-    tools::save_capabilities(
-        store.database_path().parent().unwrap(),
-        &config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: false,
-            multi_turn: false,
-        },
-    )
-    .unwrap();
+    let (config, requests, server) = fixture(1, |_, _| Response {
+        status: 422,
+        parts: vec![],
+    });
+
     assert!(matches!(
         store
             .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
             .await,
-        Err(Failure::ToolsUnsupported)
+        Err(Failure::InvalidAnswer)
     ));
     server.join().unwrap();
-    assert!(requests.lock().unwrap().is_empty());
+    assert_eq!(requests.lock().unwrap().len(), 1);
     assert_eq!(
         store.agent_execution(&run.input_id).unwrap().input_text,
         "今天想到一个方向。"
@@ -769,7 +634,7 @@ async fn suggestions_failure_does_not_change_successful_answer_or_receipts() {
             }
         }
     });
-    ready(&store, &config);
+
     store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {})
         .await
@@ -873,15 +738,16 @@ async fn pending_write_rechecks_the_persisted_request_view(prune: bool) {
             _ => suggestions(),
         })
     });
-    ready(&store, &config);
+
     let first = store
         .run_discussion(&config, &run.input_id, &run.attempt_id, "zh-CN", |_| {
             let saved = store.agent_execution(&run.input_id).unwrap();
             if saved.state == "processing"
-                && saved
-                    .protocol
-                    .last()
-                    .is_some_and(|m| m["tool_calls"][0]["id"] == "pending-write")
+                && saved.protocol.last().is_some_and(|m| {
+                    checkpoint_calls(m)
+                        .iter()
+                        .any(|c| c.id.as_str() == "pending-write")
+                })
             {
                 store
                     .stop_agent_input(&run.input_id, &run.attempt_id, "failed", Some("network"))
@@ -905,7 +771,7 @@ async fn pending_write_rechecks_the_persisted_request_view(prune: bool) {
     let reopened = MemoryStore::open(dir.path()).unwrap();
     let saved = reopened.agent_execution(&run.input_id).unwrap();
     assert!(
-        saved.protocol[2]["content"]
+        saved.protocol[2]["content"][0]["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains("背景。")
@@ -993,7 +859,7 @@ async fn rereading_compacted_conversation_supplies_the_whole_input_undo_handle()
             _ => unreachable!(),
         })
     });
-    ready(&store, &config);
+
     store
         .run_discussion(&config, &first.input_id, &first.attempt_id, "zh-CN", |_| {})
         .await
@@ -1026,4 +892,51 @@ async fn rereading_compacted_conversation_supplies_the_whole_input_undo_handle()
             .is_empty()
     );
     assert_eq!(count(&store, "captures"), 1);
+}
+
+#[tokio::test]
+async fn legacy_control_checkpoint_retries_with_current_prompt_and_preserves_history() {
+    let (_dir, store, conversation) = setup();
+    let run = begin(&store, &conversation, "请继续分析。", &[]);
+    let old = vec![
+        json!({"role":"system","content":"Always call set_turn_options before answering."}),
+        json!({"role":"user","content":run.input_text}),
+        json!({"role":"assistant","content":null,"tool_calls":[{"id":"old-options","type":"function","function":{"name":"set_turn_options","arguments":"{\"reply_kind\":\"acknowledgment_only\",\"maintenance\":\"unchanged\"}"}}]}),
+    ];
+    store
+        .checkpoint_agent(&run.input_id, &run.attempt_id, &old)
+        .unwrap();
+    store
+        .stop_agent_input(&run.input_id, &run.attempt_id, "failed", Some("network"))
+        .unwrap();
+    let retry = store.retry_agent_input(&run.input_id, &id()).unwrap();
+    let (config, requests, server) = fixture(2, |index, request| {
+        Response::stream(if index == 0 {
+            assert!(
+                !request["messages"][0]
+                    .to_string()
+                    .contains("set_turn_options")
+            );
+            assert!(
+                request["messages"][0]
+                    .to_string()
+                    .contains("Respond naturally")
+            );
+            assert_eq!(last_content(request)["applied"], false);
+            text("可以继续比较成本和时间。")
+        } else {
+            suggestions()
+        })
+    });
+    store
+        .run_discussion(&config, &retry.input_id, &retry.attempt_id, "zh-CN", |_| {})
+        .await
+        .unwrap();
+    server.join().unwrap();
+    let result = store.agent_execution(&run.input_id).unwrap();
+    assert_eq!(result.state, "complete");
+    assert_eq!(result.protocol[0], old[0]);
+    assert_eq!(result.follow_ups.len(), 2);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(count(&store, "memories"), 0);
 }

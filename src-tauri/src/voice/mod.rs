@@ -598,20 +598,27 @@ impl Service {
     }
 }
 pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
-    let root = memivy_core::memory::MemoryStore::environment_root()
-        .map_err(|e| e.to_string())?
-        .join("voice");
+    let root = app
+        .state::<crate::workspace::Workspace>()
+        .store
+        .database_path()
+        .with_file_name("voice");
     // A broken optional voice configuration must never prevent ordinary capture.
     let mut setup_error = private_dir(&root)
         .err()
         .map(|_| "voice_directory_invalid".to_string());
-    let prefs = match read_preferences(&root) {
+    let mut prefs = match read_preferences(&root) {
         Ok(p) => p,
         Err(e) => {
             setup_error = Some(e.to_string());
             Preferences::default()
         }
     };
+    if app.config().identifier == crate::storage::DEVELOPMENT_IDENTIFIER
+        && !root.join("settings.json").exists()
+    {
+        prefs.shortcut = "Alt+Shift+KeyR".into();
+    }
     let mut session: Option<Session> = fs::read(root.join("session.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())

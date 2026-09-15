@@ -19,7 +19,6 @@ struct Proof {
     binding: String,
     at: Instant,
     candidate: Binding,
-    capabilities: Option<memivy_core::model::tools::Capabilities>,
 }
 #[derive(Serialize)]
 pub(crate) struct View {
@@ -87,11 +86,25 @@ pub(crate) fn models_load(
 }
 #[derive(Serialize)]
 pub(crate) struct TestResult {
-    token: String,
+    token: Option<String>,
     binding: BindingView,
     message: String,
     message_params: serde_json::Value,
 }
+fn prepare_binding(binding: &mut Binding, previous: Option<&Binding>) {
+    binding.base_url = binding.base_url.trim().trim_end_matches('/').to_string();
+    if binding.api_key.is_none() {
+        binding.api_key = previous
+            .filter(|b| {
+                b.provider == binding.provider
+                    && b.base_url.trim().trim_end_matches('/') == binding.base_url
+            })
+            .and_then(|b| b.api_key.clone());
+    } else if binding.api_key.as_deref() == Some("") {
+        binding.api_key = None;
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn models_test(
@@ -107,29 +120,20 @@ pub(crate) async fn models_test(
     if r.revision != revision {
         return Err(HostError::new("configuration_conflict"));
     }
-    binding.base_url = binding.base_url.trim().trim_end_matches('/').to_string();
     let previous = match kind.as_str() {
         "llm" => r.llm.as_ref(),
         "embedding" => Some(&r.embedding),
         "voice" => Some(&r.voice),
         _ => return Err(HostError::new("invalid")),
     };
-    if binding.api_key.is_none() {
-        binding.api_key = previous
-            .filter(|b| b.base_url.trim_end_matches('/') == binding.base_url)
-            .and_then(|b| b.api_key.clone());
-    } else if binding.api_key.as_deref() == Some("") {
-        binding.api_key = None;
-    }
+    prepare_binding(&mut binding, previous);
     let m = binding.model_config()?;
-    let mut capabilities = None;
     let mut message_params = serde_json::json!({});
     let message = match kind.as_str() {
         "llm" => {
             let c = memivy_core::model::tools::probe(&m)
                 .await
                 .map_err(HostError::from)?;
-            capabilities = Some(c.clone());
             if c.supports_agent() {
                 "model_test_agent"
             } else {
@@ -168,6 +172,14 @@ pub(crate) async fn models_test(
     if load(&state)?.revision != revision {
         return Err(HostError::new("configuration_conflict"));
     }
+    if kind == "llm" {
+        return Ok(TestResult {
+            token: None,
+            binding: binding.into(),
+            message,
+            message_params,
+        });
+    }
     let token = uuid::Uuid::new_v4().to_string();
     let mut proofs = tests
         .0
@@ -186,10 +198,9 @@ pub(crate) async fn models_test(
             .map_err(|_| HostError::new("model_configuration"))?,
         at: Instant::now(),
         candidate: binding,
-        capabilities,
     });
     Ok(TestResult {
-        token,
+        token: Some(token),
         binding: public,
         message,
         message_params,
@@ -214,9 +225,9 @@ pub(crate) async fn models_apply(
         return Err(HostError::new("configuration_conflict"));
     }
     let previous = r.clone();
-    let mut capabilities = None;
     if let Some(b) = &binding
         && b.source == Source::Service
+        && kind != "llm"
     {
         let serialized = serde_json::to_string(&BindingView::from(b.clone()).binding)
             .map_err(|_| HostError::new("model_configuration"))?;
@@ -224,17 +235,14 @@ pub(crate) async fn models_apply(
             .0
             .lock()
             .map_err(|_| HostError::new("model_test_unavailable"))?;
-        let proof = proofs
-            .iter()
-            .find(|p| {
-                Some(&p.token) == token.as_ref()
-                    && p.revision == revision
-                    && p.kind == kind
-                    && p.binding == serialized
-                    && p.at.elapsed() < Duration::from_secs(600)
-            })
-            .ok_or(HostError::new("model_test_required"))?;
-        capabilities = proof.capabilities.clone();
+        let proof = proofs.iter().find(|p| {
+            Some(&p.token) == token.as_ref()
+                && p.revision == revision
+                && p.kind == kind
+                && p.binding == serialized
+                && p.at.elapsed() < Duration::from_secs(600)
+        });
+        let proof = proof.ok_or(HostError::new("model_test_required"))?;
         binding = Some(proof.candidate.clone());
     }
     let root = state.store.database_path().parent().unwrap().to_owned();
@@ -243,24 +251,12 @@ pub(crate) async fn models_apply(
             if binding.as_ref().is_some_and(|b| b.source == Source::Local) {
                 return Err(HostError::new("model_configuration"));
             }
-            if binding.is_some()
-                && !capabilities
-                    .as_ref()
-                    .is_some_and(|caps| caps.supports_agent())
-            {
-                return Err(HostError::new("model_tools_unsupported"));
+            if let Some(b) = &mut binding {
+                prepare_binding(b, r.llm.as_ref());
+                b.model_config()?;
             }
             r.llm = binding;
             r.save(&root, &revision)?;
-            if let Some(caps) = capabilities {
-                let config = r.llm_config()?;
-                if let Err(e) = memivy_core::model::tools::save_capabilities(&root, &config, &caps)
-                {
-                    let error = rollback_config(&root, &r, previous, e.into());
-                    changed(&window);
-                    return Err(error);
-                }
-            }
         }
         "embedding" => {
             if let Some(b) = binding {
@@ -397,6 +393,47 @@ mod tests {
                 .contains("private-fixture-key")
         );
     }
+    #[test]
+    fn untested_binding_preserves_only_same_provider_endpoint_credentials() {
+        let previous = Binding {
+            source: Source::Service,
+            base_url: "https://example.com/v1".into(),
+            model: "old-model".into(),
+            api_key: Some("fixture-key".into()),
+            ..Binding::default()
+        };
+        let mut candidate = Binding {
+            base_url: " https://example.com/v1/ ".into(),
+            model: "new-model".into(),
+            api_key: None,
+            ..previous.clone()
+        };
+        prepare_binding(&mut candidate, Some(&previous));
+        assert_eq!(candidate.api_key, previous.api_key);
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = ModelSettings {
+            llm: Some(candidate.clone()),
+            ..ModelSettings::default()
+        };
+        settings.save(dir.path(), "initial").unwrap();
+        assert_eq!(
+            ModelSettings::read(dir.path()).unwrap().llm.unwrap().model,
+            "new-model"
+        );
+        candidate.api_key = None;
+        candidate.provider = memivy_core::model::Provider::Gemini;
+        prepare_binding(&mut candidate, Some(&previous));
+        assert!(candidate.api_key.is_none());
+        candidate.provider = previous.provider;
+        candidate.base_url = "https://different.example/v1".into();
+        prepare_binding(&mut candidate, Some(&previous));
+        assert!(candidate.api_key.is_none());
+        candidate.base_url = previous.base_url.clone();
+        candidate.api_key = Some(String::new());
+        prepare_binding(&mut candidate, Some(&previous));
+        assert!(candidate.api_key.is_none());
+    }
+
     #[test]
     fn activation_rollback_restores_config_but_never_overwrites_a_newer_save() {
         let dir = tempfile::tempdir().unwrap();

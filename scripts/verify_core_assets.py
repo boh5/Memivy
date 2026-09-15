@@ -73,6 +73,7 @@ def main():
         if not args.models_only:
             for name, cmd in [
                 ('rust-format', ['cargo', 'fmt', '--all', '--', '--check']),
+                ('dev-runtime-tests', [sys.executable, ROOT/'scripts/test_dev_runtime.py']),
                 ('rust-lint', ['cargo', 'clippy', '--workspace', '--all-targets', '--offline', '--', '-D', 'warnings']),
                 ('rust-tests', ['cargo', 'test', '--workspace', '--all-targets', '--offline']),
                 ('ui-tests', ['npm', 'run', 'test:ui']),

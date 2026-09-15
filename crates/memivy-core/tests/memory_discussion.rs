@@ -43,9 +43,7 @@ fn discussion_draft_keeps_materials_and_original_history_pages_across_restart() 
         store
             .append_agent_text(&input, &attempt, &format!("建议{n}"))
             .unwrap();
-        store
-            .finish_agent_input(&input, &attempt, false, &[])
-            .unwrap();
+        store.finish_agent_input(&input, &attempt, &[]).unwrap();
     }
     drop(store);
     let store = MemoryStore::open(dir.path()).unwrap();
@@ -74,7 +72,6 @@ fn discussion_draft_keeps_materials_and_original_history_pages_across_restart() 
 #[path = "support/agent_fixture.rs"]
 pub mod agent_fixture;
 use agent_fixture::{Response, fixture, sse_text};
-use memivy_core::model::tools;
 
 #[tokio::test]
 async fn actual_budget_compaction_keeps_early_conditions_and_original_messages_readable() {
@@ -96,14 +93,12 @@ async fn actual_budget_compaction_keeps_early_conditions_and_original_messages_r
         store
             .append_agent_text(&input, &attempt, "继续比较备选方案，保留原先条件。")
             .unwrap();
-        store
-            .finish_agent_input(&input, &attempt, false, &[])
-            .unwrap();
+        store.finish_agent_input(&input, &attempt, &[]).unwrap();
     }
     let (config, requests, server) = fixture(3, |index, request| match index {
         0 => {
             assert!(
-                request["messages"][0]["content"]
+                request["messages"][0]["content"][0]["text"]
                     .as_str()
                     .unwrap()
                     .contains("Compress earlier")
@@ -123,17 +118,7 @@ async fn actual_budget_compaction_keeps_early_conditions_and_original_messages_r
         }
         _ => Response::stream(sse_text("[\"如何在预算内验证？\",\"怎样比较收费方案？\"]")),
     });
-    tools::save_capabilities(
-        dir.path(),
-        &config,
-        &tools::Capabilities {
-            structured_json: true,
-            streaming_text: true,
-            single_tool: true,
-            multi_turn: true,
-        },
-    )
-    .unwrap();
+
     let input = id();
     let attempt = id();
     store

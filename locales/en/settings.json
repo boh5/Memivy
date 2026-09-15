@@ -22,6 +22,7 @@
     "manageSemanticIndex": "Manage semantic search",
     "reloadSettings": "Reload settings",
     "cancel": "Cancel",
+    "saveSettings": "Save settings",
     "applySettings": "Apply settings",
     "resume": "Resume",
     "retry": "Retry",
@@ -82,7 +83,14 @@
     "assistantDescription": "Discuss ideas, recall memories, and keep them up to date.",
     "embeddingPrivacyDetails": "This includes existing memories during setup, later additions and edits, and queries used to find related memories or search through MCP. Original captures, version history, trash, and drafts are excluded.",
     "privacyDetails": "What is shared?",
-    "reasoningDescription": "May shorten the wait for replies. Only applies to models that support this setting."
+    "reasoningDescription": "May shorten the wait for replies. Only applies to models that support this setting.",
+    "provider": "Provider",
+    "providers": {
+      "openaiCompatible": "OpenAI Compatible",
+      "openaiResponses": "OpenAI Responses",
+      "anthropic": "Anthropic",
+      "gemini": "Google Gemini"
+    }
   },
   "embedding": {
     "status": {

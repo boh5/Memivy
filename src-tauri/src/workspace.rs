@@ -180,7 +180,6 @@ fn launch_discussion(
         if quick
             && let Ok(result) = store.agent_execution(&execution.input_id)
             && result.state == "complete"
-            && result.record_only
             && let Ok(receipts) = store.agent_input_receipts(&execution.input_id)
             && let Some(memory) = receipts
                 .iter()
@@ -1137,6 +1136,26 @@ fn start_embedding(app: tauri::AppHandle) {
     });
 }
 pub fn run(context: tauri::Context<tauri::Wry>) {
+    if cfg!(not(feature = "custom-protocol"))
+        && context.config().identifier != crate::storage::DEVELOPMENT_IDENTIFIER
+    {
+        eprintln!("Start native development with npm run dev:app or npm run qa:app.");
+        std::process::exit(1);
+    }
+    let root = (|| {
+        let home = std::env::var_os("HOME").ok_or("HOME is unavailable.")?;
+        crate::storage::application_root(
+            &context.config().identifier,
+            &PathBuf::from(home),
+            std::env::var_os("MEMIVY_DATA_DIR")
+                .map(PathBuf::from)
+                .as_deref(),
+        )
+    })()
+    .unwrap_or_else(|error: String| {
+        eprintln!("Memivy could not select the library: {error}");
+        std::process::exit(1);
+    });
     let result = tauri::Builder::default()
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -1146,11 +1165,11 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 let _ = w.set_focus();
             }
         }))
-        .setup(|app| {
+        .setup(move |app| {
             // Setup errors inside the native event loop become non-unwinding panics.
             // Handle library failures explicitly, after single-instance initialization.
             let store = match (|| -> Result<MemoryStore> {
-                let store = MemoryStore::open_application(MemoryStore::environment_root()?)?;
+                let store = MemoryStore::open_application(&root)?;
                 store.recover_interrupted_turns()?;
                 store.recover_organization()?;
                 Ok(store)

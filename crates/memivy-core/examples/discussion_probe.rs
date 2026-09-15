@@ -1,9 +1,6 @@
 //! Real-model acceptance evidence using synthetic memories only.
 //! Writes full inputs/results for human semantic review; no credentials copied.
-use memivy_core::{
-    memory::*,
-    model::{ModelConfig, tools},
-};
+use memivy_core::{memory::*, model::ModelConfig};
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
@@ -79,14 +76,7 @@ async fn main() {
         .unwrap()
         .join(PathBuf::from(&args[2]));
     fs::create_dir(&output).expect("fresh output directory required");
-    let capabilities = tools::probe(&config)
-        .await
-        .expect("actual protocol capability");
-    assert!(
-        capabilities.supports_agent(),
-        "configured model does not support Agent"
-    );
-    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"capabilities":capabilities,"context_token_upper_bound":65536,"output_reserve":8192,"max_model_steps":12,"semantic_review":"pending","synthetic_only":true,"memory_write_contract":"parts_with_source_quotes"})).unwrap()).unwrap();
+    fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"context_token_upper_bound":65536,"output_reserve":8192,"max_model_steps":12,"semantic_review":"pending","synthetic_only":true,"memory_write_contract":"parts_with_source_quotes"})).unwrap()).unwrap();
     for case in [
         "record_and_question",
         "global_focus",
@@ -106,7 +96,7 @@ async fn main() {
             continue;
         }
         let s = MemoryStore::open(output.join(case)).unwrap();
-        tools::save_capabilities(&output.join(case), &config, &capabilities).unwrap();
+
         let topic = id();
         let mut focus = vec![];
         let mut turns = vec![];
@@ -122,7 +112,7 @@ async fn main() {
                 ] {
                     turns.push(ask(&s, &config, &topic, text, &focus).await);
                 }
-                rubric.push_str("Turn 1 saves only a tentative idea with a brief record_only=true receipt. Turn 2 recalls without new facts. Turn 3 saves the decision to interview three people as not yet executed and gives two or three suggestions. No mandatory confirmation.");
+                rubric.push_str("Turn 1 saves only a tentative idea with a brief acknowledgment and follow-up suggestions. Turn 2 recalls without new facts. Turn 3 saves the decision to interview three people as not yet executed and gives two or three suggestions. No mandatory confirmation.");
             }
             "global_focus" => {
                 let product = seed(
@@ -404,7 +394,7 @@ async fn main() {
                         "这是备选思路，仍需结合最初限制判断，尚未形成新的决定。",
                     )
                     .unwrap();
-                    s.finish_agent_input(&input, &attempt, false, &[]).unwrap();
+                    s.finish_agent_input(&input, &attempt, &[]).unwrap();
                 }
                 turns.push(
                     ask(

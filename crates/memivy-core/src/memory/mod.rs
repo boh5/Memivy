@@ -17,6 +17,7 @@ mod library;
 mod mcp;
 mod navigation;
 mod organization;
+mod protocol;
 mod records;
 mod related;
 mod retrieval;

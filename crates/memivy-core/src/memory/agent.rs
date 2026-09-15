@@ -1,7 +1,9 @@
 //! Memory tools shared by discussion and explicit-capture maintenance.
 //! This module reads facts; the owning execution applies writes transactionally.
+use super::protocol::{self, Checkpoint};
 use super::{db::*, records::*, *};
 use crate::model::{self, ProbeError, tools};
+use crate::model::{Message, ToolDefinition};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -149,7 +151,7 @@ pub(super) fn evidence_value(memory_id: &str, evidence: Evidence, total: usize) 
         "evidence":evidence,"next_start":(next<total).then_some(next),"total_chars":total})
 }
 
-pub(super) fn collect_evidence(messages: &[Value]) -> Vec<Evidence> {
+pub(super) fn collect_evidence(messages: &[Message]) -> Vec<Evidence> {
     fn collect(value: &Value, out: &mut Vec<Evidence>) {
         match value {
             Value::Object(map) => {
@@ -174,13 +176,10 @@ pub(super) fn collect_evidence(messages: &[Value]) -> Vec<Evidence> {
     }
     let mut evidence = vec![];
     for message in messages {
-        // Only assembled user context and tool results are trusted evidence.
-        // Assistant text and arguments cannot manufacture a memory read.
-        if (message["role"] == "user" || message["role"] == "tool")
-            && let Some(content) = message["content"].as_str()
-            && let Ok(value) = serde_json::from_str::<Value>(content)
-        {
-            collect(&value, &mut evidence);
+        for content in protocol::context_texts(message) {
+            if let Ok(value) = serde_json::from_str::<Value>(content) {
+                collect(&value, &mut evidence);
+            }
         }
     }
     evidence
@@ -189,7 +188,6 @@ pub(super) fn collect_evidence(messages: &[Value]) -> Vec<Evidence> {
 // Stored with the assistant checkpoint, never sent to the provider. Hashes bind
 // character ranges to the exact text visible in the request producing its calls,
 // without duplicating the full bodies in every checkpoint or requiring a table.
-const REQUEST_READS: &str = "_memivy_request_reads";
 #[derive(Serialize, Deserialize)]
 struct RequestRead {
     version_id: String,
@@ -197,7 +195,7 @@ struct RequestRead {
     len: usize,
     hash: Vec<u8>,
 }
-fn request_reads(messages: &[Value]) -> Result<Vec<RequestRead>> {
+fn request_reads(messages: &[Message]) -> Result<Vec<RequestRead>> {
     let mut reads = vec![];
     for evidence in collect_evidence(messages) {
         let SourceRef::Version(version_id) = evidence.source else {
@@ -228,19 +226,20 @@ pub(super) fn write_request_fully_read(
     call_id: &str,
     version_id: &str,
 ) -> Result<bool> {
-    let mut owners = messages.iter().filter(|message| {
-        message["role"] == "assistant"
-            && message["tool_calls"]
-                .as_array()
-                .is_some_and(|calls| calls.iter().any(|call| call["id"] == call_id))
-    });
+    let messages = protocol::decode(messages)?;
+    let mut owners = messages
+        .iter()
+        .filter(|m| protocol::calls(&m.message).any(|c| c.id.as_str() == call_id));
     let Some(owner) = owners.next() else {
         return Ok(false);
     };
     if owners.next().is_some() {
         return Ok(false);
     }
-    let Ok(reads) = serde_json::from_value::<Vec<RequestRead>>(owner[REQUEST_READS].clone()) else {
+    let Some(value) = owner.reads.clone() else {
+        return Ok(false);
+    };
+    let Ok(reads) = serde_json::from_value::<Vec<RequestRead>>(value) else {
         return Ok(false);
     };
     let body: Vec<char> = version(db, version_id)?.body.chars().collect();
@@ -272,15 +271,16 @@ pub(super) fn write_request_fully_read(
 }
 
 impl MemoryStore {
-    pub(super) fn filter_unavailable_evidence(&self, messages: &mut [Value]) -> Result<()> {
+    pub(super) fn filter_unavailable_evidence(&self, messages: &mut [Message]) -> Result<()> {
         let db = self.connection()?;
         for message in messages {
-            if let Some(content) = message["content"].as_str()
-                && let Ok(mut value) = serde_json::from_str::<Value>(content)
-            {
-                redact_unavailable(&db, &mut value)?;
-                message["content"] = json!(value.to_string());
-            }
+            protocol::edit_context(message, |content| {
+                if let Ok(mut value) = serde_json::from_str::<Value>(content) {
+                    redact_unavailable(&db, &mut value)?;
+                    *content = value.to_string();
+                }
+                Ok(())
+            })?;
         }
         Ok(())
     }
@@ -402,19 +402,9 @@ impl MemoryStore {
             _ => Err(DataError::Invalid),
         }
     }
-
-    pub fn model_capabilities(&self, config: &model::ModelConfig) -> Option<tools::Capabilities> {
-        tools::cached(&self.root, config)
-    }
-    pub async fn test_model_capabilities(
-        &self,
-        config: &model::ModelConfig,
-    ) -> std::result::Result<tools::Capabilities, ProbeError> {
-        tools::probe_and_save(&self.root, config).await
-    }
 }
 
-pub(super) fn memory_read_tools() -> Vec<Value> {
+pub(super) fn memory_read_tools() -> Vec<ToolDefinition> {
     vec![
         tools::function(
             "search_memories",
@@ -438,7 +428,7 @@ pub(super) fn memory_read_tools() -> Vec<Value> {
         ),
     ]
 }
-pub(super) fn memory_write_tool() -> Value {
+pub(super) fn memory_write_tool() -> ToolDefinition {
     tools::function(
         "write_memory",
         "Save a user's meaningful idea, fact, constraint or decision now. parts.text concatenate EXACTLY in order into the full Markdown body; include needed spaces and newlines yourself. Each part states one fact or change, with its actual source_id and a verbatim quote (maximum 3000 UTF-8 bytes). Do not put facts from different sources into one part. Read earlier original user messages before saving their facts; 'other conditions unchanged' alone does not source those conditions. For unchanged target text, sources=[] may preserve only complete original lines in their original order, not arbitrary substrings; whitespace-only parts may also use []. To rephrase existing target content, cite its CURRENT expected_version and an exact quote from that body to inherit its old captures. Other sources must be actual user message IDs in this conversation (the task's capture_id for capture maintenance), with at least one such raw source in the write. Never cite an AI message or summary as a user source. Preserve uncertainty, negation, speaker, time, plans versus execution and useful change reasons. Preserve the subject and scope of each quote: these discussed ideas are undecided does not mean no plan has ever been decided. Do not add unsupported all/any/never claims or broaden a local statement into a global user fact. title is only a neutral summary, with no new facts absent from the body. New creates a memory; existing requires the complete current version to be visible in the request and preserves unaffected content. Writes are atomic, versioned and undoable; report only committed receipts.",
@@ -468,7 +458,7 @@ pub(super) const MAX_MODEL_STEPS: usize = 12;
 pub(super) enum AgentEvent<'a> {
     Text(&'a str),
     Checkpoint(&'a [Value]),
-    BeforeRequest(&'a mut Vec<Value>),
+    BeforeRequest(&'a mut Vec<Message>),
     Tool(&'a tools::ToolCall),
 }
 
@@ -482,10 +472,12 @@ pub(super) enum AgentReply {
 /// the driver owns only provider protocol, streaming and bounded continuation.
 pub(super) async fn run_memory_agent(
     config: &model::ModelConfig,
-    mut messages: Vec<Value>,
-    tool_defs: &[Value],
+    messages: Vec<Value>,
+    tool_defs: &[ToolDefinition],
     mut callback: impl FnMut(AgentEvent<'_>) -> std::result::Result<AgentReply, ProbeError>,
 ) -> std::result::Result<Vec<Value>, ProbeError> {
+    let invalid = |_| ProbeError::InvalidResponse;
+    let mut messages = protocol::decode(&messages).map_err(invalid)?;
     let reserve =
         (config.max_output_tokens.unwrap_or(OUTPUT_RESERVE as u32) as usize).max(OUTPUT_RESERVE);
     let budget = CONTEXT_TOKENS
@@ -493,86 +485,71 @@ pub(super) async fn run_memory_agent(
         .ok_or(ProbeError::TooLarge)?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(240);
     for _ in 0..MAX_MODEL_STEPS {
-        // Rebuild missing tool results after a checkpoint/restart before asking
-        // the model to plan again. A committed operation is replayed by its owner.
-        if let Some(index) = messages.iter().rposition(|m| m["role"] == "assistant") {
-            let calls = messages[index]["tool_calls"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
+        // Replay committed effects after a restart before asking for another plan.
+        if let Some(index) = messages
+            .iter()
+            .rposition(|m| matches!(m.message, Message::Assistant { .. }))
+        {
+            let calls: Vec<_> = protocol::calls(&messages[index].message).cloned().collect();
             if calls.is_empty() && index + 1 == messages.len() {
-                return Ok(messages);
+                return protocol::encode(&messages).map_err(invalid);
             }
-            for wire in calls {
-                let call = tools::ToolCall {
-                    id: wire["id"]
-                        .as_str()
-                        .ok_or(ProbeError::InvalidResponse)?
-                        .into(),
-                    name: wire["function"]["name"]
-                        .as_str()
-                        .ok_or(ProbeError::InvalidResponse)?
-                        .into(),
-                    arguments: serde_json::from_str(
-                        wire["function"]["arguments"]
-                            .as_str()
-                            .ok_or(ProbeError::InvalidResponse)?,
-                    )
-                    .map_err(|_| ProbeError::InvalidResponse)?,
-                };
+            for call in calls {
                 if messages[index + 1..]
                     .iter()
-                    .any(|m| m["role"] == "tool" && m["tool_call_id"] == call.id)
+                    .any(|m| protocol::answered(&m.message, &call))
                 {
                     continue;
                 }
                 let result = match callback(AgentEvent::Tool(&call))? {
                     AgentReply::Tool(result) => result,
-                    AgentReply::Complete => return Ok(messages),
+                    AgentReply::Complete => return protocol::encode(&messages).map_err(invalid),
                     AgentReply::Continue => return Err(ProbeError::InvalidResponse),
                 };
-                messages.push(
-                    json!({"role":"tool","tool_call_id":call.id,"content":result.to_string()}),
-                );
-                callback(AgentEvent::Checkpoint(&messages))?;
+                messages.push(protocol::result(&call, &result));
+                callback(AgentEvent::Checkpoint(
+                    &protocol::encode(&messages).map_err(invalid)?,
+                ))?;
             }
         }
-        let mut wire = messages.clone();
-        for message in &mut wire {
-            if let Some(object) = message.as_object_mut() {
-                object.remove(REQUEST_READS);
-            }
-        }
+        let mut wire: Vec<Message> = messages.iter().map(|m| m.message.clone()).collect();
         callback(AgentEvent::BeforeRequest(&mut wire))?;
         let defs_size = serde_json::to_vec(tool_defs)
             .map_err(|_| ProbeError::InvalidResponse)?
             .len();
-        // Raw checkpoints retain the exact protocol. Only the request view
-        // releases older, re-readable tool bodies when the input budget fills.
+        // Release only re-readable evidence in the request view; preserve checkpoints.
         for index in 0..wire.len().saturating_sub(1) {
             if json!(wire).to_string().len() + defs_size + 1024 <= budget {
                 break;
             }
-            if wire[index]["role"] == "tool"
-                && let Some(content) = wire[index]["content"].as_str()
-                && let Ok(mut value) = serde_json::from_str::<Value>(content)
-            {
-                release_evidence_text(&mut value);
-                wire[index]["content"] = json!(value.to_string());
+            if protocol::is_result(&wire[index]) {
+                protocol::edit_context(&mut wire[index], |content| {
+                    if let Ok(mut value) = serde_json::from_str::<Value>(content) {
+                        release_evidence_text(&mut value);
+                        *content = value.to_string();
+                    }
+                    Ok(())
+                })
+                .map_err(invalid)?;
             }
         }
         if json!(wire).to_string().len() + defs_size + 1024 > budget {
             return Err(ProbeError::TooLarge);
         }
-        let reads = request_reads(&wire).map_err(|_| ProbeError::InvalidResponse)?;
-        let needs_separator = messages
-            .iter()
-            .rev()
-            .find(|m| m["role"] == "assistant")
-            .and_then(|m| m["content"].as_str())
-            .is_some_and(|s| !s.is_empty());
+        let reads = request_reads(&wire).map_err(invalid)?;
+        let needs_separator =
+            messages
+                .iter()
+                .rev()
+                .find_map(|m| match &m.message {
+                    Message::Assistant { content, .. } => Some(content.iter().any(
+                        |p| matches!(p, model::AssistantContent::Text(t) if !t.text.is_empty()),
+                    )),
+                    _ => None,
+                })
+                .unwrap_or(false);
         let mut first_text = true;
-        let mut turn = tokio::time::timeout_at(
+        let turn = tokio::time::timeout_at(
             deadline,
             tools::stream_turn(config, &wire, tool_defs, |delta| {
                 if let tools::StreamDelta::Text(text) = delta {
@@ -580,25 +557,23 @@ pub(super) async fn run_memory_agent(
                         callback(AgentEvent::Text("\n\n"))?;
                     }
                     first_text = false;
-                    callback(AgentEvent::Text(&text))?;
+                    callback(AgentEvent::Text(&text.text))?;
                 }
                 Ok(())
             }),
         )
         .await
         .map_err(|_| ProbeError::Network)??;
-        if turn.calls.is_empty() && turn.text.trim().is_empty() {
-            return Err(ProbeError::InvalidResponse);
-        }
-        if !turn.calls.is_empty() {
-            turn.message[REQUEST_READS] = json!(reads);
-        } else if let Some(object) = turn.message.as_object_mut() {
-            object.remove(REQUEST_READS);
-        }
-        messages.push(turn.message);
-        callback(AgentEvent::Checkpoint(&messages))?;
-        if turn.calls.is_empty() {
-            return Ok(messages);
+        let has_calls = model::calls(&turn).next().is_some();
+        messages.push(Checkpoint {
+            message: model::assistant(turn),
+            reads: has_calls.then(|| json!(reads)),
+        });
+        callback(AgentEvent::Checkpoint(
+            &protocol::encode(&messages).map_err(invalid)?,
+        ))?;
+        if !has_calls {
+            return protocol::encode(&messages).map_err(invalid);
         }
     }
     Err(ProbeError::TooLarge)
@@ -686,10 +661,9 @@ mod request_read_tests {
         let first = resolve_excerpt(&db, &source, 3, &[], Some(0)).unwrap();
         let rest = resolve_excerpt(&db, &source, 100, &[], Some(3)).unwrap();
         let authorize = |evidence: Evidence| {
-            let request =
-                vec![json!({"role":"user","content":json!({"evidence":evidence}).to_string()})];
-            let mut response = json!({"role":"assistant","tool_calls":[{"id":"write"}]});
-            response[REQUEST_READS] = json!(request_reads(&request).unwrap());
+            let request = vec![Message::user(json!({"evidence":evidence}).to_string())];
+            let mut response = json!({"role":"assistant","tool_calls":[{"id":"write","function":{"name":"write_memory","arguments":"{}"}}]});
+            response["_memivy_request_reads"] = json!(request_reads(&request).unwrap());
             write_request_fully_read(&db, &[response], "write", &captured.version_id).unwrap()
         };
         let mut complete = first.clone();
@@ -753,16 +727,20 @@ mod request_read_tests {
         )
         .unwrap();
         let mut messages = vec![
-            json!({"role":"user","content":json!({"items":[{"evidence":version},{"evidence":active}]}).to_string()}),
-            json!({"role":"tool","tool_call_id":"read-source","content":json!({"evidence":raw}).to_string()}),
+            Message::user(json!({"items":[{"evidence":version},{"evidence":active}]}).to_string()),
+            Message::tool_result(
+                "read-source",
+                "read_memory",
+                json!({"evidence":raw}).to_string(),
+            ),
         ];
         store
             .trash_memory(&deleted.memory_id, &deleted.version_id)
             .unwrap();
         store.filter_unavailable_evidence(&mut messages).unwrap();
         let context: Value =
-            serde_json::from_str(messages[0]["content"].as_str().unwrap()).unwrap();
-        let tool: Value = serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+            serde_json::from_str(protocol::context_texts(&messages[0])[0]).unwrap();
+        let tool: Value = serde_json::from_str(protocol::context_texts(&messages[1])[0]).unwrap();
         for evidence in [&context["items"][0]["evidence"], &tool["evidence"]] {
             assert_eq!(evidence["unavailable"], true);
             assert!(evidence.get("text").is_none());
@@ -775,8 +753,8 @@ mod request_read_tests {
         let reads = request_reads(&messages).unwrap();
         assert_eq!(reads.len(), 1);
         assert_eq!(reads[0].version_id, retained.version_id);
-        let mut response = json!({"role":"assistant","tool_calls":[{"id":"write"}]});
-        response[REQUEST_READS] = json!(reads);
+        let mut response = json!({"role":"assistant","tool_calls":[{"id":"write","function":{"name":"write_memory","arguments":"{}"}}]});
+        response["_memivy_request_reads"] = json!(reads);
         assert!(!write_request_fully_read(&db, &[response], "write", &deleted.version_id).unwrap());
     }
 }

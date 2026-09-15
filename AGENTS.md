@@ -108,10 +108,10 @@ Use the versions in `.node-version` and `rust-toolchain.toml`. Start with `npm c
 and `cargo fetch --locked`; offline checks require dependencies to be present.
 Ensure Cargo and CMake are on PATH.
 
-- Development: `npm run dev:app` uses the normal application data directory.
-  Do not automatically override it in development launchers. For isolated tests,
-  explicitly set an absolute `MEMIVY_DATA_DIR` and
-  verify the app opened it before testing. `npm run dev` alone is a browser preview.
+- Development: `npm run dev:app` belongs to the development identity and must use
+  a separate development library, following the rules below. `npm run dev` alone
+  is a browser preview. Verify the effective identity and data directory before
+  native testing; do not assume existing launchers already enforce these rules.
 - Frontend: `npm run build`, `npm run test:ui`, `npm run i18n:check`.
 - Rust: `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --offline -- -D warnings`,
@@ -127,6 +127,44 @@ Ensure Cargo and CMake are on PATH.
   Keep real model credentials outside the repository in a private `0600` file.
 - Keep temporary evidence under ignored `research/`. State which checks ran and
   what remains unverified; do not claim user acceptance from tests or review.
+
+## Installed app, development and QA isolation
+
+- Keep exactly two stable application identities: the installed `Memivy`
+  (`com.memivy.app`) for daily use, and `Memivy Dev` (`com.memivy.app.dev`) for
+  development and native QA. Dev commands and QA share the development identity;
+  do not create additional names or identifiers per thread, feature, date or test.
+- Preserve the installed application, normally `/Applications/Memivy.app`, and
+  its production library at `~/Library/Application Support/com.memivy.app/`.
+  Development defaults to `~/Library/Application Support/com.memivy.app.dev/`.
+  QA must explicitly set an absolute `MEMIVY_DATA_DIR` for synthetic isolated
+  test data and verify the opened library before interacting with it. Changing
+  the bundle identifier alone is not proof of data isolation. Preserve developer
+  notes and drafts in the persistent development library as user data.
+- Reuse `~/Applications/Memivy Dev.app` across threads and worktrees. Use
+  `npm run dev:app` for persistent development. For synthetic native QA, set an
+  absolute `MEMIVY_DATA_DIR` and run `npm run qa:app`. Both use `scripts/dev-runtime.py`;
+  do not create alternate bundles or launch raw Cargo binaries for native QA.
+  The launcher stops its owned processes on exit and retains the selected library;
+  explicitly clean only your disposable QA data after inspecting results.
+- Serialize native QA across threads using a shared ownership/lock mechanism.
+  The launcher holds `~/Library/Caches/com.memivy.app.dev/native-session.lock`;
+  an occupied session fails clearly. Wait and retry; never delete the lock file.
+  Check ownership before rebuilding the shared app or starting a session; wait
+  while another thread owns it. Do not overwrite or terminate another session.
+  Independent coding and isolated non-UI tests may continue in parallel.
+- The installed and development apps may coexist. Avoid conflicting global
+  shortcuts without changing the installed app's preferences. Verify coexistence
+  natively; do not quit the user's installed app merely to make a test pass.
+- At test completion, stop only processes owned by the test, release its lock,
+  and remove disposable test data and generated artifacts. Preserve user data,
+  shared model caches and other threads' work. Retain only necessary failure
+  evidence under ignored `research/`, with its purpose recorded. Do not clear
+  shared build caches while another thread is building or testing.
+- Installation, upgrade and uninstall acceptance tests use the release identity.
+  Run them in a separate macOS test account or coordinate explicitly with the
+  user before replacing or removing their installed app. Never silently use the
+  daily installation or production library as a disposable test environment.
 
 ## Distribution and Git
 

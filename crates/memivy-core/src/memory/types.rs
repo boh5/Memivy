@@ -196,7 +196,6 @@ pub struct Message {
     pub followups: Vec<String>,
     pub receipts: Vec<Receipt>,
     pub progress: Option<String>,
-    pub record_only: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Turn {

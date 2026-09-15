@@ -87,7 +87,6 @@ export default function Desktop() {
   useEffect(() => {
     if (!native) return;
     const events = [
-      listen<string>("desktop-record-complete", e => { if (current.current?.topic?.id === e.payload) void dismiss("saved"); }),
       listen("desktop-blur", () => { if (!composing.current) void dismiss("blur"); }),
       listen<number>("desktop-dismiss-request", e => void dismiss("explicit", e.payload)),
       listen("workspace-close-request", () => void dismiss("explicit")),

@@ -190,7 +190,7 @@ fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
         .append_agent_text(&run.input_id, &run.attempt_id, "回答")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let destination = Destination::Existing {
         memory_id: target.memory_id.clone(),
@@ -273,7 +273,7 @@ fn manual_save_consumes_its_draft_atomically_and_replay_preserves_a_newer_draft(
         .append_agent_text(&run.input_id, &run.attempt_id, "回答")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let request = id();
     let destination = Destination::Existing {
@@ -489,7 +489,7 @@ fn deleting_a_discussion_removes_its_unsaved_selection_but_preserves_saved_memor
         .append_agent_text(&run.input_id, &run.attempt_id, "回答")
         .unwrap();
     store
-        .finish_agent_input(&run.input_id, &run.attempt_id, false, &[])
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     let saved = store
         .save_agent_text(

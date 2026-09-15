@@ -47,6 +47,7 @@ fn server(body: &str, status: u16) -> (String, std::thread::JoinHandle<Vec<u8>>)
 }
 fn model(url: String) -> ModelConfig {
     ModelConfig {
+        provider: Default::default(),
         base_url: url,
         model: "synthetic".into(),
         api_key: Some("test-secret".into()),
