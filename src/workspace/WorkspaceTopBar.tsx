@@ -4,7 +4,9 @@ import { Icon } from "../ui";
 import { native } from "./api";
 
 /** Window chrome only: input drafts and submission remain owned by CaptureForm/App. */
-export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOpen, onClose, onNewDiscussion, triggerRef, children }: {
+export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOpen, onClose, onNewDiscussion, triggerRef, children, sidebarHidden = false, onToggleSidebar }: {
+  sidebarHidden?: boolean;
+  onToggleSidebar?: () => void;
   open: boolean;
   preview: string;
   scopeLabel?: string;
@@ -33,7 +35,12 @@ export default function WorkspaceTopBar({ open, preview, scopeLabel, scope, onOp
     ? scopeLabel ? t("topbar.searchTriggerScopedDraft", { scope: scopeLabel }) : t("topbar.searchTriggerDraft")
     : scopeLabel ? t("topbar.searchTriggerScoped", { scope: scopeLabel }) : t("topbar.searchTrigger");
   return <header className={`workspace-topbar${native ? " native-titlebar" : ""}`}>
-    <div className="titlebar-leading" data-tauri-drag-region aria-hidden="true" />
+    <div className="titlebar-leading" data-tauri-drag-region>
+      {onToggleSidebar && <button className="sidebar-toggle icon-button" onClick={onToggleSidebar}
+        aria-label={t(sidebarHidden ? "nav.showSidebar" : "nav.hideSidebar")} aria-expanded={!sidebarHidden} aria-controls="workspace-sidebar">
+        <Icon name="sidebar" size={17} />
+      </button>}
+    </div>
     <div className="titlebar-center" data-tauri-drag-region>
       <div className="titlebar-query" ref={query}
         onCompositionStart={() => { composing.current = true; }}

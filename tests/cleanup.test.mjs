@@ -86,7 +86,7 @@ test('a transient detail refresh failure retains the cleanup session', async t =
   f.overrides.library_detail=async()=>{if(fail)throw Error('database temporarily busy');return {...props.detail,current:{...props.detail.current,capture_ids:[],actor:"user",created_at:1},history:[],sources:[]};};
   const Detail=f.load('src/workspace/MemoryDetail.tsx').default;
   const view=f.mount(Detail,{record:f.keyA,revision:0,query:'',initialReceipt:null,onChanged(){},onBack(){},onDiscuss(){}});await f.settle();
-  f.find(view,n=>n.props.label==="Clean up body").props.onClick();await f.settle();
+  f.find(view,n=>n.props['aria-label']==="Clean up body").props.onClick();await f.settle();
   const toolbar=f.find(view,n=>n.props.className==='cleanup-toolbar');toolbar.props.ref({});await f.settle();
   assert.ok(f.find(view,n=>n.type?.name==='MemoryCleanup'));
   fail=true;f.render(view,{...view.props,revision:1});await f.settle();

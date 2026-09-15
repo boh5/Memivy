@@ -24,8 +24,8 @@ test('background detail refresh keeps the reading toolbar enabled',async t=>{
  const view=f.mount(Detail,props);await f.settle();
  f.overrides.library_detail=()=>new Promise(()=>{});
  f.render(view,{...props,revision:1});await f.settle();
- assert.equal(f.find(view,n=>n.props.label==="Edit body").props.disabled,false);
- assert.equal(f.find(view,n=>n.props.label==="Clean up body").props.disabled,false);
+ assert.equal(f.find(view,n=>n.props['aria-label']==="Edit body").props.disabled,false);
+ assert.equal(f.find(view,n=>n.props['aria-label']==="Clean up body").props.disabled,false);
 });
 
 test('related results and selection survive refresh, but vanish when the source or scope changes',async t=>{
@@ -61,10 +61,10 @@ test('transient detail failure retains reading content; explicit unavailability 
  const view=f.mount(Detail,props);await f.settle();
  f.overrides.library_detail=()=>Promise.reject({code:'busy'});
  f.render(view,{...props,revision:1});await f.settle();
- assert(f.nodes(view.tree).some(n=>n.props.label==="Edit body"));
+ assert(f.nodes(view.tree).some(n=>n.props['aria-label']==="Edit body"));
  f.overrides.library_detail=()=>Promise.reject({code:'unavailable'});
  f.render(view,{...props,revision:2});await f.settle();
- assert(!f.nodes(view.tree).some(n=>n.props.label==="Edit body"));
+ assert(!f.nodes(view.tree).some(n=>n.props['aria-label']==="Edit body"));
 });
 test('desktop state rejects a late snapshot after a newer native event',async t=>{
  const f=workspaceFixture(t,{native:true});let finish;

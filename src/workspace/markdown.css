@@ -1,6 +1,6 @@
 /* One typographic language for reading, reviewing and Milkdown editing. */
 .markdown-prose, .markdown-editor .ProseMirror {
-  color: #42454c; font-family: inherit; font-size: 15px; line-height: 1.95;
+  color: #35383b; font-family: inherit; font-size: 16px; line-height: 1.85;
   overflow-wrap: anywhere; white-space: normal; text-align: left;
 }
 :is(.markdown-prose, .markdown-editor .ProseMirror) > :first-child { margin-top: 0; }

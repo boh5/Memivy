@@ -1,4 +1,5 @@
 const paths: Record<string, string> = {
+  sidebar: "M3 4h18v16H3zM9 4v16",
   plus: "M12 5v14M5 12h14",
   mic: "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8",
   download: "M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4",

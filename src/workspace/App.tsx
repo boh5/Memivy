@@ -12,6 +12,7 @@ import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
 import MemoryDetail from "./MemoryDetail";
 import MemoryList from "./MemoryList";
+import PaneResizeHandle from "./PaneResizeHandle";
 import WorkspaceQuery from "./WorkspaceQuery";
 import WorkspaceSidebar, { type WorkspacePage } from "./WorkspaceSidebar";
 import SettingsPanel from "./Settings";
@@ -28,6 +29,7 @@ import "./workspace.css";
 import "./desktop.css";
 import "./navigation.css";
 import "./topbar.css";
+import "./memory-detail.css";
 
 type Handoff = { generation: number; target: "query" | "topic" | "view" };
 
@@ -57,6 +59,7 @@ export default function App() {
   const closeRecall = useCallback(() => setRecallOpen(false), []);
   const openRecall = useCallback(() => { setRecallOpen(true); setRecallFocus(v => v + 1); }, []);
   const [topicFocus, setTopicFocus] = useState(0);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
 
   const [pendingReceipt, setPendingReceipt] = useState<{ key: string; receipt: Receipt } | null>(null);
   const [handoff, setHandoff] = useState<Handoff | null>(null), handoffRef = useRef<Handoff | null>(null);
@@ -224,9 +227,11 @@ export default function App() {
   const queryScope = page === "collection" ? collectionId : page === "topic" ? topic?.collection_id || null : null;
   const scopeName = collections.find(c => c.id === queryScope)?.name || t("app.removedCollection");
   const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
+  const listIdentity = page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library";
   const reading = page === "topic" || !!selected;
-  return <div className="app-shell memory-app recall-workspace">
+  return <div className={`app-shell memory-app recall-workspace${sidebarHidden ? " sidebar-hidden" : ""}`}>
     <WorkspaceQuery session={`query:${recallQuick}`} bar={{ triggerRef:recallTrigger, open:recallOpen,
+      sidebarHidden, onToggleSidebar:() => setSidebarHidden(value => !value),
       scopeLabel:queryScope ? scopeName : undefined, onOpen:openRecall, onClose:closeRecall, onNewDiscussion:newDiscussion,
       scope:queryScope && <div className="recall-scope"><Icon name="folder" size={12} /><span>{t("app.scopedQuestion", { scope: scopeName })}</span><button aria-label={t("app.allMemoriesAria")} onClick={showLibrary}>{t("app.allMemories")}</button></div>,
     }} form={{ quick:recallQuick, sourceApp:recallQuick ? desktop.state?.source_app : "Memivy", draftKey:page === "topic" && topic ? `discussion:${topic.id}` : undefined, presentation:"query", focus:recallOpen ? recallFocus : 0,
@@ -240,6 +245,7 @@ export default function App() {
       onLibrary={showLibrary} onTrash={() => { setRecallQuick(false); setSelected(null); setPage("trash"); }}
       onTopic={t => { setRecallQuick(false); if (page === "trash") setSelected(null); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); }}
       onDesktop={() => void openDesktop()} onSettings={() => setSettingsOpen(true)} />
+    <PaneResizeHandle pane="sidebar" />
     <main className="main-workspace">
       {!native && <div className="preview-banner">{t("app.previewBanner")}</div>}
       <LanguageRecovery />
@@ -255,7 +261,8 @@ export default function App() {
       {restoreNotice && <div className="restore-notice" role="status">{restoreNotice}<button aria-label={t("app.closeRestoreNotice")} onClick={() => setRestoreNotice("")}>×</button></div>}
       <ErrorNotice text={windowError} />
       <div className={`library-layout ${reading ? "has-selection" : ""}`}>
-        <MemoryList key={page === "trash" ? "trash" : page === "review" ? "review" : listCollectionId ? `collection:${listCollectionId}` : "library"}
+        <PaneResizeHandle pane="list" targetKey={listIdentity} />
+        <MemoryList key={listIdentity}
           review={page === "review"} collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
           selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection", "review"].includes(page)) setPage("library"); }}
           onCapture={newDiscussion} onRefresh={refresh} />

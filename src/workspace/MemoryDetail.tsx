@@ -5,24 +5,21 @@ import { unavailable } from "./api";
 import { useResourceVersion } from "./resources";
 import "./cleanup.css";
 import MemoryCleanup from "./MemoryCleanup";
-import IconButton from "./IconButton";
 import RecordNavigation from "./RecordNavigation";
 import MarkdownEditor from "./MarkdownEditor";
 import Markdown from "./Markdown";
 import RelatedMemories from "./RelatedMemories";
 import OrganizationReceipt from "./OrganizationReceipt";
 import MemoryCollections from "./MemoryCollections";
-import { MemoryChangeHistory } from "./MemoryChanges";
+import MemoryEvidence from "./MemoryEvidence";
 import { notify } from "./Toast";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
 import {
   call,
   date,
-  fullDate,
   errorText,
   keyOf,
-  sourceName,
   uid,
   type Detail,
   type Source,
@@ -191,8 +188,7 @@ export default function MemoryDetail({
     [error, setError] = useNotice(),
     [loading, setLoading] = useState(true),
     [, setExportNotice, exportMessage] = useNotice();
-  const [tab, setTab] = useState<"current" | "sources" | "history">("current"),
-    [editing, setEditing] = useState(false),
+  const [editing, setEditing] = useState(false),
     [version, setVersion] = useState<Version | null>(null);
   const [archive, setArchive] = useState<{ id: string; text: string } | null>(null);
   const [confirmation, setConfirmation] = useState<
@@ -213,7 +209,6 @@ export default function MemoryDetail({
   useEffect(() => { if (exportMessage) notify(exportMessage); }, [exportMessage]);
   const loadedRecord = useRef<string | null>(null);
   const [pendingDetail, setPendingDetail] = useState<Detail | null>(null);
-  const [archiveLoading, setArchiveLoading] = useState(false);
   const currentDetail = useRef(detail); currentDetail.current = detail;
   const hasUnsavedReview = useRef(false);
   hasUnsavedReview.current = cleaning || editing;
@@ -223,13 +218,13 @@ export default function MemoryDetail({
   useEffect(() => {
     let alive = true;
     setLoading(loadedRecord.current !== keyOf(record));
-    setError(""); setArchiveLoading(tab !== "current");
-    void call<Detail>("library_detail", { key: record, archives: tab !== "current" })
+    setError("");
+    void call<Detail>("library_detail", { key: record, archives: false })
       .then((d) => {
         if (alive) {
           const previous = currentDetail.current;
           const backgroundHead = loadedRecord.current === keyOf(record) && previous?.state === "active" && d.state === "active" &&
-            previous.current?.id !== d.current?.id && tab === "current" && !hasUnsavedReview.current && !actionLock.current;
+            previous.current?.id !== d.current?.id && !hasUnsavedReview.current && !actionLock.current;
           loadedRecord.current = keyOf(record);
           if (backgroundHead) setPendingDetail(d);
           else { setDetail(d); setPendingDetail(null); }
@@ -245,12 +240,12 @@ export default function MemoryDetail({
         }
       })
       .finally(() => {
-        if (alive) { setLoading(false); setArchiveLoading(false); }
+        if (alive) { setLoading(false); }
       });
     return () => {
       alive = false;
     };
-  }, [record.id, record.kind, revision, tab]);
+  }, [record.id, record.kind, revision]);
   async function action(
     kind: "trash" | "purge" | "restore" | "restore_version" | "restore_archive" | "undo",
   ) {
@@ -304,7 +299,6 @@ export default function MemoryDetail({
           kind === "undo" ? message("workspace", "detail.undoNotice") : message("workspace", "detail.restoredVersion"),
         );
         setVersion(null);
-        setTab("current");
         onChanged(record, r || undefined);
       }
     } catch (e) {
@@ -369,27 +363,17 @@ export default function MemoryDetail({
               </>
             ) : !detail.current ? null : (
               <>
-                <IconButton label={t("detail.discuss")} icon="chat"
-                  disabled={busy || loading || editing}
-                  onClick={() => {
-                    setError("");
-                    setBusy(true);
-                    void onDiscuss(detail)
-                      .catch((e) => setError(errorText(e)))
-                      .finally(() => setBusy(false));
-                  }}
-                />
-                {detail.current && <IconButton label={t("detail.cleanup")} icon="wand" disabled={busy || loading} onClick={() => { setTab("current"); setCleaning(true); }} />}
-                <IconButton label={t("detail.edit")} icon="pencil"
-                  disabled={busy || loading}
-                  onClick={() => {
-                    setTab("current");
-                    setEditing(true);
-                  }}
-                />
+                <button className="detail-edit-action" aria-label={t("detail.edit")} disabled={busy || loading || editing} onClick={() => setEditing(true)}>
+                  <Icon name="pencil" size={15} />{t("detail.edit")}
+                </button>
+                <button className="detail-discuss-action" disabled={busy || loading || editing} onClick={() => {
+                  setError(""); setBusy(true);
+                  void onDiscuss(detail).catch(e => setError(errorText(e))).finally(() => setBusy(false));
+                }}><Icon name="chat" size={15} />{t("detail.discuss")}</button>
                 <span className="toolbar-divider" aria-hidden="true" />
                 <RecordNavigation record={record} onChanged={() => onChanged()} />
                 <MoreMenu>
+                  <button aria-label={t("detail.cleanup")} disabled={busy || loading || editing} onClick={() => setCleaning(true)}>{t("detail.cleanup")}</button>
                   <button
                     disabled={busy || loading || editing}
                     title={
@@ -423,53 +407,23 @@ export default function MemoryDetail({
         <>
           <div className="memory-detail-scroll">
             <header className="memory-title-block">
+              <h1>
+                <Highlight text={detail.title} query={query} />
+              </h1>
               <span className="eyebrow">
                 <Icon name="leaf" size={14} />
                 {detail.current
                   ? t("detail.versionMeta", { actor: detail.current.reason === "cleanup" ? t("detail.cleanupConfirmed") : detail.current.actor === "user" ? (detail.current.reason === "create" ? t("detail.recordedByMe") : t("detail.editedByMe")) : t("detail.aiOrganized"), date: date(detail.current.created_at) })
                   : t("detail.originalSaved")}
               </span>
-              <h1>
-                <Highlight text={detail.title} query={query} />
-              </h1>
               {!detail.current && <p>{t("detail.archiveOnly")}</p>}
-              {!trashed && <OrganizationReceipt presentation="status" record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
             </header>
             {!trashed && detail.current && <MemoryCollections record={record} currentVersion={detail.current?.id} onRefresh={() => onChanged()} />}
-            <div className="detail-tabs" hidden={cleaning} role="tablist" aria-label={t("detail.tabsAria")}>
-              <button
-                role="tab"
-                aria-selected={tab === "current"}
-                onClick={() => setTab("current")}
-              >
-                {t("detail.currentTab")}
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "sources"}
-                onClick={() => setTab("sources")}
-              >
-                {t("detail.sourcesTab")} <span>{detail.source_count ?? detail.sources.length}</span>
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "history"}
-                onClick={() => setTab("history")}
-              >
-                {t("detail.historyTab")} <span>{detail.history_count ?? detail.history.length}</span>
-              </button>
-            </div>
-            <div role="tabpanel">
-              {archiveLoading && <p role="status" className="field-help">{t("detail.readingArchive")}</p>}
-              {!cleaning && !editing && !trashed && receipt && detail.current?.reason === "cleanup" && receipt.after_version === detail.current.id && <div className="cleanup-receipt" role="status">{t("detail.cleanupReceipt")}<button className="quiet" disabled={busy} onClick={() => void action("undo")}>{t("detail.undoCleanup")}</button></div>}
-              {tab === "history" && !trashed && <>
-                {receipt && <button className="toolbar-button" disabled={busy} onClick={() => void action("undo")}>{t("detail.undoChange")}</button>}
-                <OrganizationReceipt record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />
-              </>}
+            <div className="memory-reading-content">
               {cleaning && cleanupToolbar && <MemoryCleanup key={detail.key.id} detail={detail} toolbar={cleanupToolbar}
                 onClose={() => setCleaning(false)}
                 onSaved={r => { setCleaning(false); setEditing(false); setReceipt(r); undoId.current = uid(); setNotice(message("workspace", "detail.cleanupSavedNotice")); onChanged(record, r); }} />}
-              {!cleaning && tab === "current" &&
+              {!cleaning &&
                 (editing && !trashed ? (
                   <Editor
                     detail={detail}
@@ -490,110 +444,25 @@ export default function MemoryDetail({
                 ) : (
                   <>
                     <div>{detail.current ? <Markdown text={detail.body} query={query} /> : <div className="readable-text"><Highlight text={detail.body} query={query} /></div>}</div>
-                    {!trashed && detail.current && <RelatedMemories
-                      collectionId={collectionId} paused={!!pendingDetail}
-                      key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
-                      onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
+
                   </>
                 ))}
-              {!cleaning && tab === "sources" && (
-                <div className="source-list">
-                  {!trashed && record.kind === "memory" && <MemoryChangeHistory memoryId={record.id} onOpenRecord={onChanged} onRefresh={() => onChanged(record)} />}
-                  {detail.sources.map((s) => (
-                    <article key={s.id} className="source-block">
-                      <div className="section-heading">
-                        <strong>
-                          {s.capture
-                            ? sourceName(s.capture.origin)
-                            : t("detail.sourceUnavailable")}
-                        </strong>
-                        <span>{s.capture && date(s.capture.created_at)}</span>
-                      </div>
-                      {s.capture ? (
-                        <>
-                          <div className="readable-text">
-                            <Highlight text={s.capture.text} query={query} />
-                          </div>
-                          {s.capture.origin.conversation_id && <p className="source-metadata">
-                            {s.conversation_available ? <button className="quiet" onClick={() => void onOpenDiscussion(s.capture!.origin.conversation_id!)}>{t("input.openOriginalDiscussion")}</button> : t("input.originalDiscussionUnavailable")}
-                          </p>}
-                          {s.capture.origin.project && (
-                            <p className="source-metadata">
-                              {t("detail.project", { project: s.capture.origin.project })}
-                            </p>
-                          )}
-                          {s.capture.origin.uri && (
-                            <p className="source-metadata">
-                              {t("detail.attachedSource", { uri: s.capture.origin.uri })}
-                            </p>
-                          )}
-                          {!trashed && detail.current && <button className="outline-button" disabled={busy || editing} onClick={() => {
-                            setArchive({ id: s.id, text: s.capture!.text }); actionId.current = uid(); setConfirmation("restore_archive");
-                          }}>{t("detail.restoreArchive")}</button>}
-                          <small>
-                            {t("detail.originalInput", { date: fullDate(s.capture.created_at) })}
-                          </small>
-                        </>
-                      ) : (
-                        <p className="field-help">
-                          {t("detail.deletedSource")}
-                        </p>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              )}
-              {tab === "history" &&
-                (detail.history.length ? (
-                  <div className="history-view">
-                    <div className="history-list">
-                      {detail.history.map((v, i) => (
-                        <button
-                          key={v.id}
-                          className={version?.id === v.id ? "selected" : ""}
-                          onClick={() => {
-                            setVersion(v);
-                            actionId.current = uid();
-                          }}
-                        >
-                          <span>
-                            {t("detail.historyEntry", { version: detail.history.length - i, actor: v.reason === "cleanup" ? t("detail.historyCleanup") : v.actor === "user" ? t("detail.historyMe") : t("detail.historyAi"), current: v.id === detail.current?.id ? t("detail.currentSuffix") : "" })}
-                          </span>
-                          <small>{fullDate(v.created_at)}</small>
-                        </button>
-                      ))}
-                    </div>
-                    {version ? (
-                      <article className="history-preview">
-                        <div className="section-heading">
-                          <h3>{version.title}</h3>
-                          {version.id !== detail.current?.id && !trashed && (
-                            <button
-                              className="outline-button"
-                              disabled={busy}
-                              onClick={() => setConfirmation("restore_version")}
-                            >
-                              {t("detail.restoreVersion")}
-                            </button>
-                          )}
-                        </div>
-                        <Markdown text={version.body} />
-                        <p className="field-help">
-                          {t("detail.historyBasis", { count: version.capture_ids.length })}
-                        </p>
-                      </article>
-                    ) : (
-                      <p className="field-help">
-                        {t("detail.selectVersion")}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <Empty
-                    title={t("detail.originalAlways")}
-                    text={t("detail.historyEmpty")}
-                  />
-                ))}
+              {!cleaning && !editing && <>
+                {!trashed && receipt?.status === "applied" && receipt.after_version === detail.current?.id && <div className="memory-change-receipt" role="status">
+                  <Icon name="check" size={15} /><span>{t(detail.current?.reason === "cleanup" ? "detail.cleanupReceipt" : "detail.savedNewVersion")}</span>
+                  <button disabled={busy} onClick={() => void action("undo")}>{t("detail.undoChange")}</button>
+                </div>}
+                {!trashed && <OrganizationReceipt presentation="summary" currentVersion={detail.current?.id} excludedReceipt={receipt?.request_id} record={record} onOpen={key => onChanged(key)} onRefresh={() => onChanged(record)} />}
+                <MemoryEvidence detail={detail} revision={revision} query={query} busy={busy}
+                  onRefresh={onChanged} onOpenDiscussion={onOpenDiscussion}
+                  onRestoreArchive={value => { setArchive(value); actionId.current = uid(); setConfirmation("restore_archive"); }}
+                  onRestoreVersion={value => { setVersion(value); actionId.current = uid(); setConfirmation("restore_version"); }} />
+                {!trashed && detail.current && <RelatedMemories
+                  collectionId={collectionId} paused={!!pendingDetail}
+                  key={detail.current.id} memoryId={detail.key.id} versionId={detail.current.id}
+                  onOpen={onChanged} onDiscuss={sources => onDiscuss(detail, sources)} />}
+              </>}
+
             </div>
           </div>
         </>

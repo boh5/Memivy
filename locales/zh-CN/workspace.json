@@ -13,7 +13,11 @@
     "settings": "设置与数据",
     "modelConfigured": "已配置模型",
     "localAvailable": "本地记录可用",
-    "localStorage": "记忆留在这台 Mac"
+    "localStorage": "记忆留在这台 Mac",
+    "hideSidebar": "隐藏侧栏",
+    "showSidebar": "显示侧栏",
+    "resizeSidebar": "调整侧栏宽度",
+    "resizeList": "调整记忆列表宽度"
   },
   "topbar": {
     "searchTrigger": "表达想法或提问",
@@ -398,7 +402,9 @@
     "cancel": "取消",
     "processing": "处理中…",
     "confirmRestore": "确认恢复",
-    "exportedTo": "这一篇已导出到{{path}}"
+    "exportedTo": "这一篇已导出到{{path}}",
+    "evidenceAria": "来源与版本历史",
+    "retryEvidence": "重新读取"
   },
   "receipt": {
     "versionUnavailable": "这个版本已不可用。",
@@ -425,7 +431,9 @@
     "collapseHistory": "收起更早回执",
     "changeTitle": "记忆修改",
     "before": "修改前",
-    "after": "修改后"
+    "after": "修改后",
+    "summaryOrganized": "已整理这条记忆",
+    "summaryMerge": "已合并记忆"
   },
   "saveConclusion": {
     "destinationChanged": "保存目标已经变化。审核稿已保留，请重新核对去向和正文。",

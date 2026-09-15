@@ -1,0 +1,55 @@
+/* The reading surface owns typography; evidence and actions remain secondary. */
+.memory-detail-toolbar {
+  min-height: 58px;
+  padding: 11px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.memory-detail-toolbar .toolbar-actions { align-items: center; flex-wrap: wrap; }
+.memory-detail-toolbar .toolbar-actions > button { border: 0; border-radius: 8px; min-height: 32px; padding: 6px 9px; font-size: 13px; }
+.memory-detail-toolbar .detail-edit-action,
+.memory-detail-toolbar .detail-discuss-action { display: inline-flex; align-items: center; gap: 6px; }
+.memory-detail-toolbar .toolbar-actions > .detail-discuss-action { background: var(--accent-soft); color: var(--accent-ink); }
+.memory-detail-toolbar .toolbar-actions > .detail-discuss-action:hover { background: #f8e8a0; }
+.memory-detail-scroll { padding: 30px clamp(24px, 4vw, 56px) 56px; scrollbar-gutter: stable; }
+.memory-title-block, .memory-reading-content, .memory-detail-scroll > .memory-collections { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
+.memory-title-block { padding: 0 0 24px; }
+.memory-title-block h1 { margin: 0 0 10px; font-size: 27px; line-height: 1.45; letter-spacing: -.5px; }
+.memory-title-block .eyebrow { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.memory-title-block .eyebrow > svg { display: none; }
+.memory-title-block > p { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.memory-detail-scroll > .memory-collections:empty { display: none; }
+.memory-detail-scroll > .memory-collections { margin-top: -8px; margin-bottom: 24px; }
+.memory-detail-scroll .collection-tag { font-size: 12px; color: var(--muted); background: var(--soft); border-color: var(--line); }
+.memory-reading-content > .readable-text,
+.memory-reading-content > div > .readable-text { font-size: 16px; line-height: 1.85; }
+.memory-evidence { border-top: 1px solid var(--line); margin-top: 30px; }
+.evidence-section { border-bottom: 1px solid var(--line); }
+.evidence-toggle { display: flex; align-items: center; gap: 9px; padding: 15px 0; width: 100%; text-align: left; font-size: 13px; color: var(--muted); }
+.evidence-toggle:hover { color: var(--ink); }
+.evidence-toggle > svg:last-child { margin-left: auto; transition: transform .15s; }
+.evidence-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(90deg); }
+.evidence-toggle[aria-expanded="true"] { color: var(--ink); }
+.evidence-count { font-variant-numeric: tabular-nums; color: var(--muted); }
+.evidence-section > div { padding-bottom: 18px; }
+.evidence-section > div[hidden] { display: none; }
+.memory-evidence .source-block { border: 0; border-radius: 8px; background: var(--soft); padding: 16px 18px; }
+.memory-evidence .source-block .readable-text { font-size: 14px; line-height: 1.85; }
+.memory-evidence .source-metadata,
+.memory-evidence .source-block small { font-size: 12px; color: var(--muted); }
+.memory-evidence .history-list { flex-direction: column; gap: 3px; margin-bottom: 18px; }
+.memory-evidence .history-list > button { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 10px 12px; text-align: left; border-radius: 8px; }
+.memory-evidence .history-list > button small { color: var(--muted); font-size: 12px; }
+.memory-change-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 26px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.memory-change-receipt > svg { color: #547044; }
+.memory-change-receipt button { padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
+.memory-change-receipt + .memory-evidence { margin-top: 12px; }
+.memory-reading-content > .organization-inline-state { margin-top: 22px; }
+.memory-detail-scroll .related-memories { margin-top: 28px; }
+@media (max-width: 1050px) {
+  .memory-detail-toolbar { padding-left: 16px; padding-right: 16px; }
+  .memory-detail-scroll { padding: 24px 24px 40px; }
+}
+@media (prefers-contrast: more) {
+  .memory-evidence, .evidence-section, .memory-detail-toolbar { border-color: #9b9ca2; }
+}

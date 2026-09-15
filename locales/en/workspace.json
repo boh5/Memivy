@@ -13,7 +13,11 @@
     "settings": "Settings & data",
     "modelConfigured": "Model configured",
     "localAvailable": "Local notes available",
-    "localStorage": "Memories stay on this Mac"
+    "localStorage": "Memories stay on this Mac",
+    "hideSidebar": "Hide sidebar",
+    "showSidebar": "Show sidebar",
+    "resizeSidebar": "Resize sidebar",
+    "resizeList": "Resize memory list"
   },
   "topbar": {
     "searchTrigger": "Share an idea or ask a question",
@@ -398,7 +402,9 @@
     "cancel": "Cancel",
     "processing": "Processing…",
     "confirmRestore": "Confirm restore",
-    "exportedTo": "This entry was exported to {{path}}"
+    "exportedTo": "This entry was exported to {{path}}",
+    "evidenceAria": "Sources and version history",
+    "retryEvidence": "Try again"
   },
   "receipt": {
     "versionUnavailable": "This version is no longer available.",
@@ -425,7 +431,9 @@
     "collapseHistory": "Collapse earlier receipts",
     "changeTitle": "Memory changes",
     "before": "Before",
-    "after": "After"
+    "after": "After",
+    "summaryOrganized": "Memory organized",
+    "summaryMerge": "Memories combined"
   },
   "saveConclusion": {
     "destinationChanged": "The save destination changed. Your review draft is preserved; review the destination and text again.",

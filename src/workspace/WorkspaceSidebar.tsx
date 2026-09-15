@@ -13,7 +13,7 @@ export default function WorkspaceSidebar({ page, topic, topics, selected, pins, 
   onPin: (key: Key) => void; onCollection: (id: string) => void; onNewCollection: () => void;
 }) {
   const { t } = useTranslation("workspace");
-  return <aside className="sidebar">
+  return <aside className="sidebar" id="workspace-sidebar">
     <div className="brand"><img src={logo} alt="Memivy" /></div>
     <nav aria-label={t("nav.main")}>
       <button className={page === "library" ? "selected" : ""} aria-current={page === "library" ? "page" : undefined} onClick={onLibrary}><Icon name="book" />{t("nav.library")}</button>

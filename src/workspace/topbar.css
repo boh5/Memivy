@@ -1,12 +1,14 @@
 /* One shared compact bar; native macOS controls occupy the leading drag area. */
 .recall-workspace.app-shell {
-  --sidebar-width: 204px;
+  --sidebar-width: clamp(164px, var(--preferred-sidebar-width, 204px), 24vw);
+  --list-width: clamp(230px, var(--preferred-list-width, 276px), 34%);
+  position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   grid-template-rows: 52px minmax(0, 1fr);
 }
-.recall-workspace > .sidebar { grid-row: 2; width: auto; min-height: 0; padding-top: 18px; }
-.recall-workspace > .main-workspace { grid-row: 2; height: auto; min-height: 0; }
+.recall-workspace > .sidebar { grid-column: 1; grid-row: 2; width: auto; min-height: 0; padding-top: 18px; }
+.recall-workspace > .main-workspace { grid-column: 2; grid-row: 2; height: auto; min-height: 0; }
 .workspace-topbar {
   grid-column: 1 / -1;
   display: grid;
@@ -19,7 +21,21 @@
   min-width: 0;
   user-select: none;
 }
-.titlebar-leading { background: #f8f9fb; border-right: 1px solid #ebecf0; }
+.titlebar-leading { display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; background: #f8f9fb; border-right: 1px solid #ebecf0; }
+.native-titlebar .titlebar-leading { padding-left: 82px; }
+.titlebar-leading .sidebar-toggle { flex-shrink: 0; }
+.recall-workspace.sidebar-hidden { grid-template-columns: 0 minmax(0, 1fr); }
+.sidebar-hidden > .sidebar, .sidebar-hidden > .sidebar-resizer { display: none; }
+.sidebar-hidden .workspace-topbar { grid-template-columns: 124px minmax(0, 1fr) auto; }
+.sidebar-hidden .titlebar-leading { background: var(--surface); border-right: 0; }
+.recall-workspace .library-layout { position: relative; }
+.recall-workspace .library-list-pane { width: var(--list-width); }
+.pane-resizer { position: absolute; z-index: 10; width: 7px; cursor: col-resize; touch-action: none; user-select: none; }
+.pane-resizer::after { content: ""; position: absolute; width: 2px; top: 0; bottom: 0; left: 2px; background: transparent; }
+.pane-resizer:hover::after, .pane-resizer:focus-visible::after { background: #baa456; }
+.pane-resizer:focus-visible { outline: 2px solid #b89b35; outline-offset: 1px; }
+.sidebar-resizer { left: calc(var(--sidebar-width) - 3px); top: 52px; bottom: 0; }
+.list-resizer { left: calc(var(--list-width) - 3px); top: 0; bottom: 0; }
 .titlebar-center { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 0 20px; }
 .titlebar-query { position: relative; width: 100%; max-width: 560px; min-width: 0; }
 .recall-trigger {
@@ -67,14 +83,17 @@
 .workspace-topbar button:focus-visible { outline: 2px solid #b89b35; outline-offset: 2px; }
 .capture-dialog.workspace-dialog { margin-top: 66px; }
 @media (max-width: 1050px) {
-  .recall-workspace.app-shell { --sidebar-width: 182px; }
   .new-capture-button kbd { display: none; }
 }
+@media (max-width: 960px) {
+  .recall-workspace .library-list-pane { width: 100%; }
+  .list-resizer { display: none; }
+}
 @media (max-width: 760px) {
-  .recall-workspace.app-shell { --sidebar-width: 164px; }
   .titlebar-center { padding: 0 14px; }
   .titlebar-actions { padding-right: 14px; }
   .recall-trigger kbd { display: none; }
   .recall-scope-badge { max-width: 70px; }
   .recall-panel { min-width: 0; width: min(480px, calc(100vw - var(--sidebar-width) - 28px)); }
+  .sidebar-hidden .recall-panel { width: min(480px, calc(100vw - 152px)); }
 }

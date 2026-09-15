@@ -8,6 +8,9 @@
   --muted: #74757e;
   --ink: #1c1c1e;
   --soft: #f7f8fa;
+  --surface: #fff;
+  --accent-soft: #fff1b8;
+  --accent-ink: #51430d;
 }
 * {
   box-sizing: border-box;
@@ -192,8 +195,8 @@ p {
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  font-size: 12px;
-  color: #71737b;
+  font-size: 13px;
+  color: #62646d;
 }
 .topic-list > button > span {
   overflow: hidden;
@@ -270,6 +273,9 @@ p {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+@media (prefers-contrast: more) {
+  :root { --muted: #4e5058; --line: #989ba3; }
 }
 @media (max-width: 1000px) {
   .sidebar {

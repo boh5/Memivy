@@ -4,13 +4,15 @@ import { useTranslation } from "react-i18next";
 import { useResourceVersion } from "./resources";
 import { useEffect, useRef, useState } from "react";
 import { call, errorText, uid, type Detail, type Key, type Receipt } from "./api";
+import { Icon } from "../ui";
 import { ErrorNotice, Modal } from "./components";
 
 
 
 type Job = { can_retry: boolean; memory_id: string; capture_id: string; attempt_id: string; status: string; reason: string; reason_code?: string | null; receipt: Receipt | null };
-export default function OrganizationReceipt({ record, revision: requestedRevision = 0, onOpen, onRefresh, presentation = "history" }: {
-  presentation?: "history" | "status";
+export default function OrganizationReceipt({ record, revision: requestedRevision = 0, onOpen, onRefresh, presentation = "history", currentVersion, excludedReceipt }: {
+  presentation?: "history" | "status" | "summary";
+  currentVersion?: string; excludedReceipt?: string;
   record: Key; revision?: number; onOpen: (key: Key) => void; onRefresh: () => void;
 }) {
   const { t } = useTranslation("workspace");
@@ -78,7 +80,15 @@ export default function OrganizationReceipt({ record, revision: requestedRevisio
       const reason = job.reason_code ? translateCatalog(job.reason_code, { ns: "errors" }) : job.reason;
       const reasonSuffix = reason ? ` ${reason}` : "";
       const label = undone ? t("receipt.statusUndone") : job.status === "pending" ? t("receipt.statusPending") : job.status === "processing" ? t("receipt.statusProcessing") : job.status === "deferred" ? t("receipt.statusDeferred", { reason: reasonSuffix }) : job.status === "failed" ? t("receipt.statusFailed", { reason: reasonSuffix }) : job.status === "paused" ? t("receipt.statusPaused", { reason: reasonSuffix }) : t(receipt?.action === "merge" ? "receipt.statusMerge" : "receipt.statusSeparate", { reason: reasonSuffix });
-      if (presentation === "status") {
+      if (presentation === "summary" && applied) {
+        if (receipt?.after_version !== currentVersion || receipt.request_id === excludedReceipt) return null;
+        return <div className="memory-change-receipt" role="status" key={job.attempt_id}>
+          <Icon name="check" size={15} /><span>{t(receipt.action === "merge" ? "receipt.summaryMerge" : "receipt.summaryOrganized")}</span>
+          <button disabled={busy} onClick={() => void run(job, "changes")}>{t("receipt.viewChanges")}</button>
+          <button disabled={busy} onClick={() => void run(job, "undo")}>{t("receipt.undo")}</button>
+        </div>;
+      }
+      if (presentation === "status" || presentation === "summary") {
         if (job !== jobs[0] || applied || undone || dismissed === job.attempt_id) return null;
         const processing = job.status === "processing" || job.status === "pending";
         return <div className="organization-inline-state" role="status" key={job.attempt_id}>

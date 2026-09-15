@@ -145,10 +145,12 @@ test('source provenance opens a live conversation and labels a deleted one witho
   const f=workspaceFixture(t);let opened;
   f.overrides.library_detail=async()=>({key:f.keyA,state:'active',title:"Walking plan",body:"Plan",current:{id:'v-a',capture_ids:['raw'],created_at:1,actor:'ai'},history:[],sources:[{id:'raw',conversation_available:available,capture:{id:'raw',text:"Original: keep the budget within 80 yuan.",created_at:1,origin:{kind:'discussion',conversation_id:'original-topic',message_id:'user-message',app:'Memivy'}}}]});
   const view=f.mount(f.load('src/workspace/MemoryDetail.tsx').default,{record:f.keyA,initialReceipt:null,query:'',onChanged(){},onBack(){},onDiscuss:async()=>{},onOpenDiscussion:async id=>{opened=id;}});await f.settle();
-  f.find(view,n=>n.type==='button'&&n.props.role==='tab'&&f.text(n).startsWith("Sources")).props.onClick();await f.settle();
-  assert(f.nodes(view.tree).some(n=>n.props?.text==="Original: keep the budget within 80 yuan."));
-  if(available){f.find(view,n=>n.type==='button'&&f.text(n)==="Open original discussion").props.onClick();await f.settle();assert.equal(opened,'original-topic');}
-  else assert(f.text(view.tree).includes("Original discussion is no longer available"));
+  const evidenceNode=f.find(view,n=>n.type?.name==='MemoryEvidence');
+  const evidence=f.mount(evidenceNode.type,evidenceNode.props);await f.settle();
+  f.find(evidence,n=>n.type==='button'&&f.text(n).startsWith("Sources")).props.onClick();await f.settle();
+  assert(f.nodes(evidence.tree).some(n=>n.props?.text==="Original: keep the budget within 80 yuan."));
+  if(available){f.find(evidence,n=>n.type==='button'&&f.text(n)==="Open original discussion").props.onClick();await f.settle();assert.equal(opened,'original-topic');}
+  else assert(f.text(evidence.tree).includes("Original discussion is no longer available"));
   f.unmount(view);
  }
 });
