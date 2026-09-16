@@ -31,8 +31,9 @@ npm run build:release
 ## Create a draft
 
 Create an annotated `v<version>` tag on the checked commit on `main` and push the tag.
-The Release draft workflow runs the checks, builds the app and creates a GitHub
-Release draft containing the DMG and its `.sha256` file. The notes include only
+The Release draft workflow runs the checks and builds the app in parallel. Only
+after both succeed does it create a GitHub Release draft containing the DMG and
+its `.sha256` file. The notes include only
 that version's changelog entry and the source commit.
 
 The workflow does not publish the release. It stops if a release already exists

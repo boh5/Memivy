@@ -11,7 +11,6 @@ jobs:
   verify:
     uses: ./.github/workflows/ci.yml
   package:
-    needs: verify
     runs-on: macos-26
     timeout-minutes: 90
     env:
@@ -25,13 +24,22 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
       - name: Prepare native toolchain
+        id: toolchain
         run: |
           test "$(uname -m)" = arm64
           xcrun --show-sdk-version
           cmake --version
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           "$HOME/.cargo/bin/rustup" show
+          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: macos-26-${{ steps.toolchain.outputs.xcode }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT DEVELOPER_DIR
+          cache-bin: false
       - run: npm ci
       - run: cargo fetch --locked
       - name: Verify tag and source
@@ -69,7 +77,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   draft:
-    needs: package
+    needs: [verify, package]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
