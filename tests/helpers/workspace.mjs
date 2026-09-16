@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createInstance } from 'i18next';
 import { renderMessage } from '../../src/i18n/messages.ts';
 
-export function workspaceFixture(t, {native = false, modules = {}, timers = {setTimeout, clearTimeout}} = {}) {
+export function workspaceFixture(t, {native = false, modules = {}, clipboard, timers = {setTimeout, clearTimeout}} = {}) {
 const translation = createInstance();
 const resources = {};
 for (const language of ['en', 'zh-CN']) {
@@ -111,7 +111,7 @@ function load(file) {
   vm.runInNewContext(code,{require:req,module,exports:module.exports,console,...timers,performance,crypto:{randomUUID},window:{
     addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
     removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
-  },document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
+  },navigator:{clipboard},document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
   return module.exports;
 }
 function mount(component,props={}) {

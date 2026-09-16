@@ -47,7 +47,7 @@ try {
   // Check the actual bundle that will enter the DMG, including its embedded signature.
   verifyMicrophoneAccess(stagedApp);
   cpSync(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
-  cpSync(path.join(root, 'docs/INSTALL.md'), path.join(stage, 'Installation.md'));
+  cpSync(path.join(root, 'README.zh-CN.md'), path.join(stage, 'README.zh-CN.md'));
   symlinkSync('/Applications', path.join(stage, 'Applications'));
   // Standard disk image, with an Applications link. No Finder/AppleScript or
   // machine-specific window arrangement is required to build the installer.

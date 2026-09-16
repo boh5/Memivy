@@ -1,9 +1,15 @@
 name: Feature request
-description: Explain the problem you want to solve.
+description: Suggest a way to improve Memivy.
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem and desired outcome
+      label: What would you like to do?
+      description: Describe a situation where Memivy does not meet your needs, and how you handle it now.
     validations:
       required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: How could Memivy help?
+      description: Share your idea, if you have one. Describing the problem is enough if you do not have a solution yet.

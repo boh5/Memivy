@@ -14,7 +14,7 @@ function fixture(t) {
   }
   put('scripts/check-release.mjs', '');
   put('LICENSE', 'test license');
-  put('docs/INSTALL.md', 'test instructions');
+  put('README.zh-CN.md', 'test instructions');
   put('src-tauri/tauri.conf.json',JSON.stringify({version:'0.1.0'}));
   put('target/release/memivy-mcp','STALE MCP');
   put('target/release/bundle/macos/Memivy.app/build-marker','STALE APP');

@@ -1,22 +1,27 @@
-# Release Memivy
+# Releasing Memivy
 
-Releases support Apple Silicon and macOS 26+. The build uses ad-hoc signing without
-Apple notarization. No Apple signing credentials are needed.
+Pushing a version tag starts the release workflow. It builds a DMG and creates a
+GitHub Release draft. Test the downloaded app before publishing the draft.
 
-## Set up the repository
+Packages target Apple Silicon and macOS 26+. They are ad-hoc signed, without Apple
+notarization. Building them does not require an Apple Developer account.
 
-Enable GitHub Actions and private vulnerability reporting in `boh5/memivy`.
-Use read-only workflow permissions by default; the draft upload job requests write
-access. Protect `main` with the CI check and restrict release tags to maintainers.
-Check the actual CI check name after the first run when configuring branch rules.
+## Repository setup
 
-## Prepare a version
+Before the first release:
 
-1. Update the version in `package.json`, the root entries of `package-lock.json`,
-   the Cargo workspace and its lockfile entries, and `src-tauri/tauri.conf.json`.
-2. Add a `## <version>` section to `CHANGELOG.md` describing changes users will notice.
-3. Run the checks below and review dependency vulnerabilities and possible leaked secrets.
-4. Commit the changes and wait for CI to pass on `main`.
+- Enable GitHub Actions and private vulnerability reporting in `boh5/memivy`.
+- Use read-only workflow permissions by default. The draft job requests the write access it needs.
+- Protect `main` with the CI check, using its name from a completed run, and restrict release tags to maintainers.
+
+## 1. Prepare the version
+
+Update the version in `package.json`, the root entries in `package-lock.json`,
+`Cargo.toml`, the workspace packages' entries in `Cargo.lock`, and
+`src-tauri/tauri.conf.json`. Add a `## <version>` entry to `CHANGELOG.md` describing
+what changed for users. The release workflow uses that entry as its release notes.
+
+With the [build prerequisites](../CONTRIBUTING.md#run-the-app-locally) installed, run:
 
 ```sh
 npm ci
@@ -28,45 +33,60 @@ python3 scripts/verify_restore.py
 npm run build:release
 ```
 
-## Create a draft
+`release:check` validates version and license metadata. The core suite runs the
+Rust checks, UI tests, frontend build, and data regression checks. The release
+build writes the DMG and its `.sha256` file to `target/release/bundle/dmg/`.
 
-Create an annotated `v<version>` tag on the checked commit on `main` and push the tag.
-The Release draft workflow runs the checks and builds the app in parallel. Only
-after both succeed does it create a GitHub Release draft containing the DMG and
-its `.sha256` file. The notes include only
-that version's changelog entry and the source commit.
+Review dependency vulnerabilities and check for accidentally included secrets.
+Commit the release changes, merge them into `main`, and wait for CI to pass.
 
-The workflow does not publish the release. It stops if a release already exists
-for that tag. If a run fails before creating a draft, fix the cause and rerun it.
-If a draft already exists, inspect it before retrying.
+## 2. Create the draft
 
-## Test the download
+Create an annotated tag named `v<version>` on the checked commit on `main`, then
+push that tag. This starts the **Release draft** workflow.
 
-Download the draft DMG through a browser on another supported Mac or a separate
-user account without development tools or cached models. Follow the
-[installation guide](INSTALL.md), including the checksum check, and confirm:
+The workflow verifies the source and builds the app in parallel. Both jobs must
+pass before the DMG, checksum, changelog entry, and source commit appear in the
+draft.
 
-- First launch works, including the macOS permission to open the app.
-- Notes can be saved without a model and are still there after restarting.
-- Chinese typing, the desktop quick window and the global shortcut work.
-- Voice input handles microphone permission being allowed or denied; local models
-  download and load, and interrupted downloads can be retried.
-- AI chat can find saved notes, show its changes and undo them.
-- MCP starts disabled; after enabling it, another tool can save and search notes.
-- Backup, restore and replacing the app preserve the expected notes, drafts and settings.
+A failed build or upload can be rerun against the same tag if no source change is
+needed. If a fix changes the source, prepare and tag a new version instead.
+The workflow stops when a release already exists for the tag; inspect that draft
+before retrying, since it will not be overwritten.
 
-Use made-up notes. Record the test results and any failures in DEVELOPMENT_PLAN.md.
+## 3. Test the downloaded app
 
-## Publish
+Download the draft DMG through a browser and follow [Install Memivy (Chinese)](../README.zh-CN.md#安装),
+including checksum verification. Use another supported Mac or a separate macOS
+test account without development tools or cached models.
 
-Once the download checks pass, publish the tested draft with Pre-release unchecked
-and Latest selected. Download the public asset and verify its checksum once more.
-Do not move a published tag or replace its binaries; ship a new version for a fix.
+Use sample notes and check the following:
 
-## Database changes
+- Install and open the app, including the macOS first-launch exception.
+- Save notes without configuring a model. Restart and confirm they are still there.
+- Type Chinese text, open the quick window with the global shortcut, and continue in the main window.
+- Try voice input with microphone permission allowed and denied. Download the local models, load them, and retry an interrupted download.
+- Ask AI about saved notes. Follow its sources, inspect a memory change, and undo it.
+- Confirm MCP starts disabled. Enable it and use another AI app to save and search a memory.
+- Back up and restore a library. Replace an existing installation with the new app and check that its notes, drafts, and settings are preserved.
 
-Version 0.1.0 starts the public database at schema 1. Development databases using
-other schemas are unsupported. Keep the shipped initial schema unchanged and add
-future changes as schema 2+ migrations, with backup and recovery tests.
-An older app may not open a newer database, so returning to an older version may
-also require restoring a compatible backup. There is no automatic app updater.
+Record results and any failures in `DEVELOPMENT_PLAN.md`. Publish after these
+checks pass.
+
+## 4. Publish
+
+Publish the tested draft with **Pre-release** unchecked and **Latest** selected.
+Download the public DMG and verify its checksum again.
+
+Keep published tags and binaries unchanged. If a fix is needed, release a new
+version. Users install updates manually; Memivy has no automatic updater.
+
+## Database compatibility
+
+The first public release, 0.1.0, uses schema 1. Pre-release development databases
+with other schema numbers are unsupported.
+
+Leave the shipped `migrations/memory/001_initial.sql` unchanged. Add later database
+changes as migrations starting at schema 2, and test backup and recovery with each
+change. Downgrading the app may require restoring a backup compatible with the
+older version.

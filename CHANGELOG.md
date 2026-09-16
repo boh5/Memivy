@@ -12,4 +12,4 @@ First public release.
 - Chinese and English interfaces.
 
 Apple Silicon and macOS 26 or later only. Ad-hoc signed; not notarized by Apple.
-No automatic updater. See [installation and upgrade instructions](https://github.com/boh5/memivy/blob/main/docs/INSTALL.md).
+No automatic updater. See [installation and upgrade instructions (Chinese)](https://github.com/boh5/memivy/blob/main/README.zh-CN.md#开始使用).

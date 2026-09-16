@@ -66,3 +66,63 @@ test('an old focus read cannot replace a newly acknowledged MCP switch', async t
   finish({enabled:false,executable_available:true,configuration:'{}'});await f.settle();
   assert.equal(f.find(view,n=>n.type==='input').props.checked,true);
 });
+
+for (const language of ['en', 'zh-CN']) {
+  test(`MCP setup copies the visible agent prompt with the exact library configuration in ${language}`, async t => {
+    const copied = [];
+    const f = workspaceFixture(t, {native:true, clipboard:{writeText:async value=>{copied.push(value);}}});
+    const server = {
+      command:'/Users/test/Applications/Memory 测试.app/Contents/MacOS/memivy-mcp',
+      args:[],
+      env:{MEMIVY_DATA_DIR:'/private/tmp/memivy test/记忆库'}
+    };
+    const configuration = JSON.stringify({mcpServers:{memivy:server}}, null, 2);
+    f.overrides.mcp_settings = async()=>({enabled:true,executable_available:true,configuration});
+    const view = f.mount(f.load('src/workspace/McpSettings.tsx').default);
+    await f.settle(); await f.language(language);
+    const prompt = f.find(view, n=>n.type==='textarea'&&n.props.className==='mcp-installation-prompt');
+    assert.equal(prompt.props.readOnly, true);
+    const instructions = f.find(view, n=>n.props.id===prompt.props['aria-describedby']);
+    const copy = f.find(view, n=>n.type==='button'&&f.text(n)===(language==='en'?'Copy setup prompt':'复制安装提示词'));
+    const elements = f.nodes(view.tree);
+    assert(elements.indexOf(instructions)<elements.indexOf(prompt));
+    assert(elements.indexOf(prompt)<elements.indexOf(copy));
+    copy.props.onClick(); await f.settle();
+    assert.deepEqual(copied, [prompt.props.value]);
+    const embedded = copied[0].match(/```json\n([\s\S]*?)\n```/);
+    assert(embedded, 'The prompt must include usable server configuration');
+    assert.deepEqual(JSON.parse(embedded[1]), {mcpServers:{memivy:server}});
+    assert.match(copied[0], /memory_capture/);
+    assert.match(copied[0], /memory_search/);
+    assert.match(copied[0], /Preserve all other servers and settings/);
+    assert.match(copied[0], /Only report success after verifying/);
+    assert(f.text(view.tree).includes(language==='en'?'Copied. Send the prompt to your agent':'已复制。发给你的 Agent'));
+    assert(!f.calls.some(c=>c.name==='mcp_diagnose'||c.name==='mcp_set_enabled'));
+  });
+}
+
+test('MCP setup requires enabled access and a server configuration before copying', async t => {
+  const f = workspaceFixture(t, {native:true});
+  let state = {enabled:false,executable_available:true,configuration:'{}'};
+  f.overrides.mcp_settings = async()=>state;
+  const view = f.mount(f.load('src/workspace/McpSettings.tsx').default); await f.settle();
+  const copy = ()=>f.find(view, n=>n.type==='button'&&f.text(n)==='Copy setup prompt');
+  assert.equal(copy().props.disabled, true);
+  state = {...state,enabled:true}; f.focus(); await f.settle();
+  assert.equal(copy().props.disabled, false);
+  state = {...state,executable_available:false,configuration:null}; f.focus(); await f.settle();
+  assert.equal(copy().props.disabled, true);
+  assert(!f.nodes(view.tree).some(n=>n.props.className==='mcp-installation-prompt'));
+});
+
+test('a clipboard failure does not report a successful MCP setup copy and releases the section', async t => {
+  const busy = [];
+  const f = workspaceFixture(t, {native:true,clipboard:{writeText:async()=>{throw 'Clipboard unavailable';}}});
+  f.overrides.mcp_settings = async()=>({enabled:true,executable_available:true,configuration:'{}'});
+  const view = f.mount(f.load('src/workspace/McpSettings.tsx').default, {onBusyChange:value=>busy.push(value)});
+  await f.settle();
+  f.find(view, n=>n.type==='button'&&f.text(n)==='Copy setup prompt').props.onClick(); await f.settle();
+  assert(f.find(view, n=>n.props.text==='Clipboard unavailable'));
+  assert(!f.text(view.tree).includes('Copied.'));
+  assert.deepEqual(busy, [true,false]);
+});

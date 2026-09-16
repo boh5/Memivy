@@ -1,19 +1,44 @@
 name: Bug report
-description: Tell us what went wrong and how to reproduce it.
+description: Report something that is not working as expected.
 body:
   - type: markdown
     attributes:
-      value: "Do not attach private memories, databases, model configuration, API keys or recordings. Report vulnerabilities privately as described in SECURITY.md."
+      value: |
+        Please use sample notes and check screenshots or logs for personal information.
+        For vulnerabilities, use [private reporting](https://github.com/boh5/memivy/security/advisories/new).
   - type: input
     id: environment
     attributes:
-      label: Environment
-      description: Memivy version, macOS version, Apple chip
+      label: App and system versions
+      description: Include your Memivy version, macOS version, and Mac chip.
+      placeholder: Memivy 0.1.0, macOS 26.0, Apple M1
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps, expected and actual behavior
+      label: Steps to reproduce
+      description: What steps can we follow to see the problem? Include a small example if it helps.
+      placeholder: |
+        1. Open ...
+        2. ...
     validations:
       required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: Include the error message or a screenshot if available.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else that might help?
+      description: For AI issues, include the provider and model name, but not your API key or model configuration file.

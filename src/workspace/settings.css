@@ -43,6 +43,7 @@
 .model-settings .model-privacy{border:0}
 .model-settings .mcp-details textarea{font-family:ui-monospace,monospace;font-size:11px;line-height:1.7;resize:vertical;min-height:160px}
 .model-settings .mcp-actions{margin-top:18px;flex-wrap:wrap}
+.model-settings .mcp-installation-prompt{font-family:inherit;font-size:12px;line-height:1.6;resize:vertical;min-height:180px}
 @media(max-width:800px){.model-parameter-options{grid-template-columns:1fr}}
 
 .model-cap-meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:13px;line-height:1.5;color:#727272}

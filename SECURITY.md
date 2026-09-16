@@ -1,14 +1,21 @@
-# Report a security issue
+# Security
 
-Use [GitHub's private vulnerability report](https://github.com/boh5/memivy/security/advisories/new)
-to report a security problem. Include the affected version, what could go wrong,
-and steps to reproduce it using examples without private information.
+## Report a vulnerability
 
-If private reporting is unavailable, open an issue asking for it to be enabled.
-Keep the vulnerability details out of that public issue.
+Please [submit a private vulnerability report](https://github.com/boh5/memivy/security/advisories/new)
+for issues that could expose data or compromise a user's Mac.
 
-Do not include real API keys, private notes, databases or recordings. Check logs
-before sharing them. If an API key has been exposed, revoke or replace it with
-your provider.
+Include the affected Memivy version, the potential impact, and steps to reproduce
+the problem with sample data. Leave out real API keys, private notes, databases,
+and recordings. Review any logs before attaching them.
 
-Security fixes are provided for the latest released version.
+If GitHub's private reporting form is unavailable, open a public issue asking for
+it to be enabled, without disclosing the vulnerability. If a key has already been
+exposed, revoke it with the provider.
+
+## Supported versions
+
+Security fixes are provided for the latest released version. See the
+[installation guide (Chinese)](README.zh-CN.md#备份更新与卸载) for update instructions.
+
+For information about local storage and model providers, read [Data and models (Chinese)](README.zh-CN.md#数据和模型).

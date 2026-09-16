@@ -4,6 +4,7 @@ import { ErrorNotice } from "./components";
 import {useTranslation} from "react-i18next";
 import {message} from "../i18n/messages";
 import {useNotice} from "../i18n/react";
+import {buildMcpSetupPrompt} from "./mcpSetupPrompt";
 
 type McpState = { enabled: boolean; executable_available: boolean; configuration: string | null };
 type Diagnostic = { server_version: string; protocol_version: string; tools: string[]; enabled: boolean; scope: "local_stdio_only" };
@@ -12,6 +13,7 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
   const [state, setState] = useState<McpState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useNotice(), [notice, setNotice] = useNotice();
   const [diagnostic, setDiagnostic] = useState<Diagnostic | null>(null);
+  const setupPrompt = state?.configuration ? buildMcpSetupPrompt(state.configuration) : "";
   const locked = useRef(false), reads = useRef(0);
   useEffect(() => {
     let active = true;
@@ -58,11 +60,13 @@ export default function McpSettings({ onBusyChange }: { onBusyChange?: (busy: bo
     </div>
     {!native && <p>{t('preview.mcpReadOnly')}</p>}
     {native && state && !state.executable_available && <p>{t('mcp.executableMissing')}</p>}
+    <p id="mcp-setup-instructions">{t('mcp.setupInstructions')}</p>
+    {setupPrompt && <textarea className="mcp-installation-prompt" aria-label={t('mcp.setupPromptLabel')} aria-describedby="mcp-setup-instructions" readOnly value={setupPrompt} rows={9} />}
     <div className="action-row mcp-actions">
-      <button className="outline-button" disabled={busy || !state?.configuration} onClick={() => void run(async () => {
-        await navigator.clipboard.writeText(state!.configuration!);
-        setNotice(message("settings", "mcp.configurationCopied"));
-      })}>{t('mcp.copyConfiguration')}</button>
+      <button className="outline-button" disabled={busy || !state?.enabled || !setupPrompt} onClick={() => void run(async () => {
+        await navigator.clipboard.writeText(setupPrompt);
+        setNotice(message("settings", "mcp.setupPromptCopied"));
+      })}>{t('mcp.copySetupPrompt')}</button>
       <button className="outline-button" disabled={busy || !native || !state?.executable_available} onClick={() => void run(async () => {
         setDiagnostic(null);
         const report = await call<Diagnostic>("mcp_diagnose");

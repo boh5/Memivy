@@ -1,8 +1,7 @@
-## Change
+## What does this change?
 
-Describe the problem and resulting behavior.
+<!-- Explain the problem and how this PR addresses it. Link a related issue if there is one. -->
 
-## Validation
+## How did you test it?
 
-Describe how you tested the change and anything you could not test.
-Do not attach private data or credentials.
+<!-- List the checks you ran and anything you could not verify. For visible changes, add a screenshot. Review attachments for private notes or credentials before posting. -->
