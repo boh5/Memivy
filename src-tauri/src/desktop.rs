@@ -118,8 +118,9 @@ pub struct Snapshot {
     pub receipt: bool,
 }
 impl Desktop {
-    fn remember_topic(&self, topic: Conversation) {
+    fn remember_topic(&self, topic: Conversation) -> bool {
         let mut state = self.inner.lock().unwrap();
+        let enter_discussion = state.expanded && state.prefs.topic_id.is_none();
         state.prefs.topic_id = Some(topic.id.clone());
         state.topic = Some(topic);
         // The conversation is already durable. A failed optional window setting
@@ -127,6 +128,7 @@ impl Desktop {
         if let Err(error) = self.persist(&state.prefs) {
             state.error = Some(error.to_string());
         }
+        enter_discussion
     }
     fn refresh_topic_title(&self, topic: &Conversation) -> bool {
         let mut state = self.inner.lock().unwrap();
@@ -1088,7 +1090,13 @@ pub async fn desktop_ready(
 pub(crate) async fn remember_topic(app: &tauri::AppHandle, topic: &Conversation) -> HostResult<()> {
     let topic = topic.clone();
     on_main(app, move |app| {
-        app.state::<Desktop>().remember_topic(topic);
+        let desktop = app.state::<Desktop>();
+        if desktop.remember_topic(topic)
+            && let Err(error) = layout(&app, 500.0, 620.0, Placement::KeepTop)
+        {
+            // Input is already saved; an optional panel resize must not stop it.
+            desktop.inner.lock().unwrap().error = Some(error.to_string());
+        }
         publish(&app);
         Ok(())
     })
@@ -1685,6 +1693,43 @@ mod tests {
         assert_eq!(prefs.shortcut, "Super+Shift+KeyM");
     }
     #[test]
+    fn first_quick_submission_expands_capture_but_followups_preserve_geometry() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
+        let topic = store
+            .create_conversation(&uuid::Uuid::new_v4().to_string(), "Quick discussion")
+            .unwrap();
+        let desktop = Desktop::new(dir.path().join("desktop.json"));
+        desktop.inner.lock().unwrap().expanded = true;
+
+        assert!(desktop.remember_topic(topic.clone()));
+        assert!(!desktop.remember_topic(topic.clone()));
+
+        // Starting a fresh discussion must expand again after capture shrinks.
+        {
+            let mut state = desktop.inner.lock().unwrap();
+            state.prefs.topic_id = None;
+            state.topic = None;
+        }
+        assert!(desktop.remember_topic(topic));
+    }
+
+    #[test]
+    fn background_quick_submission_does_not_resize_the_collapsed_leaf() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
+        let topic = store
+            .create_conversation(&uuid::Uuid::new_v4().to_string(), "Background discussion")
+            .unwrap();
+        let desktop = Desktop::new(dir.path().join("desktop.json"));
+
+        assert!(!desktop.remember_topic(topic.clone()));
+        let state = desktop.inner.lock().unwrap();
+        assert!(!state.expanded);
+        assert_eq!(state.prefs.topic_id.as_deref(), Some(topic.id.as_str()));
+    }
+
+    #[test]
     fn failed_optional_preferences_keep_the_durable_discussion_available_in_memory() {
         let dir = tempfile::tempdir().unwrap();
         let store = memivy_core::memory::MemoryStore::open(dir.path()).unwrap();
@@ -1695,7 +1740,8 @@ mod tests {
         let desktop = Desktop::new(path.clone());
         // Block only this optional preference file, leaving SQLite writable.
         fs::create_dir(path.with_extension("json.tmp")).unwrap();
-        desktop.remember_topic(topic.clone());
+        desktop.inner.lock().unwrap().expanded = true;
+        assert!(desktop.remember_topic(topic.clone()));
         let state = desktop.inner.lock().unwrap();
         assert_eq!(state.topic.as_ref().unwrap().id, topic.id);
         assert_eq!(state.prefs.topic_id.as_deref(), Some(topic.id.as_str()));
