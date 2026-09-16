@@ -185,4 +185,5 @@ create a remote repository, tag or publish a release without explicit authorizat
 - `DEVELOPMENT_PLAN.md`: implementation history and verification evidence.
 - `docs/goals/second-memory-agent-plan-goal.md` and its progress document: agent
   behavior and acceptance scenarios. Current rules above supersede older conflicts.
-- `docs/INSTALL.md`, `docs/PRIVACY.md`, `docs/RELEASING.md`: public use and maintenance.
+- `README.md` and `README.zh-CN.md`: installation, usage, and data privacy.
+- `docs/RELEASING.md`: release preparation, verification, and publication.
