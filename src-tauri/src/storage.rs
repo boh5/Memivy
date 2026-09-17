@@ -2,6 +2,14 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const DEVELOPMENT_IDENTIFIER: &str = "com.memivy.app.dev";
 
+pub(crate) fn validate_runtime_identity(identifier: &str) -> Result<(), &'static str> {
+    // Use the framework's actual mode, including dependency features enabled by its CLI.
+    if tauri::is_dev() && identifier != DEVELOPMENT_IDENTIFIER {
+        return Err("Start native development with npm run dev:app or npm run qa:app.");
+    }
+    Ok(())
+}
+
 fn resolved_path(path: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute()
         || path
@@ -103,6 +111,21 @@ pub(crate) fn validate_config_path(path: &Path, home: Option<&Path>) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_identity_is_valid_in_both_build_modes() {
+        assert!(validate_runtime_identity(DEVELOPMENT_IDENTIFIER).is_ok());
+    }
+
+    #[test]
+    fn production_identity_uses_the_framework_build_mode() {
+        // Run with and without --features tauri/custom-protocol. Release builds
+        // must work without an application-owned feature forwarding alias.
+        assert_eq!(
+            validate_runtime_identity("com.memivy.app").is_ok(),
+            !tauri::is_dev()
+        );
+    }
 
     #[test]
     fn installed_and_development_libraries_are_separate() {

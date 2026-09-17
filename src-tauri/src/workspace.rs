@@ -1157,10 +1157,8 @@ fn start_embedding(app: tauri::AppHandle) {
     });
 }
 pub fn run(context: tauri::Context<tauri::Wry>) {
-    if cfg!(not(feature = "custom-protocol"))
-        && context.config().identifier != crate::storage::DEVELOPMENT_IDENTIFIER
-    {
-        eprintln!("Start native development with npm run dev:app or npm run qa:app.");
+    if let Err(error) = crate::storage::validate_runtime_identity(&context.config().identifier) {
+        eprintln!("{error}");
         std::process::exit(1);
     }
     let root = (|| {

@@ -41,3 +41,5 @@ jobs:
       - run: npm run i18n:check
       - run: npm run test:core-assets
       - run: python3 scripts/verify_restore.py
+      - name: Check production identity with Tauri release mode
+        run: cargo test -p memivy --locked --offline --features tauri/custom-protocol storage::tests
