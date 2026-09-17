@@ -17,11 +17,11 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '26.0'
       CARGO_BUILD_JOBS: '3'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -49,7 +49,11 @@ jobs:
           node scripts/check-release.mjs "$RELEASE_TAG"
           git merge-base --is-ancestor HEAD origin/main
       - run: npm run build:release
+      - name: Build MCP verification probe
+        run: cargo build --locked --offline --release --target aarch64-apple-darwin -p memivy-core --example memory_probe
       - name: Check packaged MCP
+        env:
+          MEMIVY_TEST_PROBE: ${{ github.workspace }}/target/aarch64-apple-darwin/release/examples/memory_probe
         run: python3 scripts/verify_mcp.py --binary target/aarch64-apple-darwin/release/bundle/macos/Memivy.app/Contents/MacOS/memivy-mcp
       - name: Prepare assets
         env:
@@ -70,7 +74,7 @@ jobs:
           printf '\nSource commit: %s\n' "$(git rev-parse HEAD)" >> release-assets/release-notes.md
           cd release-assets
           shasum -a 256 -c *.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-assets
           path: release-assets/

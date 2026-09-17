@@ -1240,3 +1240,10 @@ No UI QA, native build or app launch was performed for this review. Verification
 - 验证：新增首次提交／后续提交／新讨论与收起状态回归测试，补充可选偏好保存失败时的扩展断言。`npm run build`、`npm run i18n:check`、前端 256 项测试、Rust workspace 288 项测试（既有 2 项 ignored）、fmt、全 workspace/all-targets Clippy 与 diff 检查通过。独立只读审查无可确认问题。
 - 原生验证：使用现有 QA 启动器和共享锁，确认资料库为 `/private/tmp/memivy-readme-media-rufdeg6k`。检查了中英文首次发送立即扩展、连续对话、长草稿、附件展开、Command+Enter，以及主窗口接力后草稿保留。未测试真实麦克风、输入法候选组合或更小的物理显示器；工作区约束由现有几何测试覆盖。
 - 必要的故障与修复截图、测试输出保留于忽略目录 `research/quick-window-layout-20260916/`。原生热重载期间一次签名进程 SIGBUS，正常退出并通过原启动器重启后完成验证；没有更换应用身份或绕过签名。该隔离库包含用户现场输入，保留其内容供后续工作。README 素材制作暂停，未修改 README、未提交或发布。
+
+## 2026-09-17: Release workflow repair and 0.1.1 preparation
+
+- The v0.1.0 release run built the DMG but failed packaged MCP verification because the independent package job had not built `memory_probe`. Build the release/arm64 probe in that job and pass its explicit absolute path through `MEMIVY_TEST_PROBE`.
+- Upgrade checkout, setup-node and upload-artifact to official Node 24 versions pinned by commit SHA. Preserve the application's Node 24.12.0 toolchain and existing permissions/caches.
+- Prepare 0.1.1 and retain the failed v0.1.0 tag unchanged, following the new-version rule for source fixes. No public release or database migration occurred.
+- Validation: release metadata, 15 release tests, actionlint, diff check and independent review passed. Built the probe with the exact new Cargo command; the packaged MCP protocol/concurrency/durability/integrity suite passed using this probe and the existing local packaged MCP binary. The new CI-generated 0.1.1 package still requires remote validation and downloaded-app installation acceptance.
