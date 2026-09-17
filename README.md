@@ -1,12 +1,20 @@
-<p align="center"><img src="design-demo/brand/memivy-logo.svg" alt="Memivy" width="240"></p>
+![Memivy: Capture a thought. Pick up the conversation.](docs/media/en/memivy.gif)
+
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/boh5/memivy/releases/latest">Download Memivy</a> ·
+  <a href="#get-started">Get started</a> ·
+  <a href="docs/media/en/memivy.mp4">Watch video</a>
+</p>
 
 # Memivy, your personal AI memory assistant
 
-**Tell Memivy what's on your mind.** Press a shortcut and talk. Memivy remembers your ideas and keeps your memories organized, without folders or categories to manage.
+**Capture a thought. Pick up the conversation.**
 
-When you want to look back, just ask. Memivy helps you find your earlier thoughts and pick up where you left off.
-
-[简体中文](README.zh-CN.md) · [Download](https://github.com/boh5/memivy/releases/latest) · [Installation and setup](#get-started)
+Press a shortcut and speak or type. Memivy captures your ideas and keeps your memories organized. When you want to revisit something, just ask—or pick up where you left off.
 
 ## Features
 
@@ -21,7 +29,7 @@ When you want to look back, just ask. Memivy helps you find your earlier thought
 
 You need **an Apple Silicon (M-series) Mac running macOS 26 or later**.
 
-### Install
+### 1. Install
 
 1. Download the latest DMG from [Releases](https://github.com/boh5/memivy/releases/latest).
 2. Open the DMG and drag Memivy into Applications.
@@ -42,53 +50,74 @@ A result ending in `OK` means the file passed verification.
 
 </details>
 
-### Set up your AI assistant
+### 2. Set up your AI assistant
+
+Have your provider’s API address, model ID, and API key ready. Choose a model that supports tool calling so Memivy can find and organize your memories.
+
+![Set up your AI assistant: choose an API type, enter your settings, test, and save](docs/media/en/ai-setup.gif)
 
 1. Open **Settings → AI & models → AI assistant**.
 2. Follow your provider's instructions to choose the API type: **OpenAI Compatible**, **OpenAI Responses**, **Anthropic**, or **Google Gemini**.
 3. Enter the **API address**, **Model ID**, and **API Key** from your provider.
 4. Click **Test connection**, then **Save settings** once the test passes.
 
-Choose a model that supports tool calling so Memivy can find and organize your memories. Your model provider handles API usage and billing.
+Your model provider handles API usage and billing.
 
-### Enable local search and voice input
+### 3. Enable local search and voice input
 
-Return to **Settings → AI & models** and set up both features:
+Return to **Settings → AI & models** to enable these local features. Keep Memivy open during the first download. Once downloaded, both features run on your Mac.
 
-1. Open **Semantic search**, choose **On this Mac**, click **Download and enable**, then **Confirm and start**. Wait for the model download and search preparation to finish.
-2. Open **Voice input**, choose **On this Mac**, and click **Download model**. Once the download finishes, click **Enable Voice input**.
+#### Semantic search
 
-Keep Memivy open during the first download. The search model is about 640 MB and the speech model about 1.02 GB. Once downloaded, both features run on your Mac.
+Find related memories without remembering the exact words. Download the 640 MB model on first use; the demo shows it already downloaded.
 
-### Start a conversation
+![Enable local semantic search](docs/media/en/search.gif)
+
+1. Open **Semantic search** and choose **On this Mac**.
+2. Click **Download and enable**, then **Confirm and start**.
+3. Wait for the model download and search preparation to finish.
+
+#### Voice input
+
+Speak your thoughts, then review the text before sending. Download the 1.02 GB model on first use; the demo shows it already downloaded.
+
+![Enable local voice input](docs/media/en/voice.gif)
+
+1. Open **Voice input** and choose **On this Mac**.
+2. Click **Download model** and wait for the download to finish.
+3. Click **Enable Voice input**.
+
+### 4. Start a conversation
+
+This demo uses voice input. Allow microphone access when prompted the first time you record.
+
+![Start a voice conversation: open, record, review, and send](docs/media/en/start-chat.gif)
 
 1. Press the default voice shortcut, **Option+R**, to open the quick window and start recording. Say what's on your mind.
 2. Press **Option+R** again to stop recording and wait for transcription to finish.
 3. Review the text, then press **Command+Enter** to send it.
 
-Allow microphone access when prompted the first time you record. To type instead, press **Option+M** to open the quick window. **Enter** adds a new line.
+To type instead, press **Option+M** to open the quick window. **Enter** adds a new line; **Command+Enter** sends.
 
 To revisit something, press **Option+R** and ask. Describe what you remember; you don't need to find the original conversation first.
 
 ## Connect other AI apps
 
-Through MCP, your other agents can save and search memories in Memivy. Send your agent the setup prompt and let it configure the connection for you.
+Through MCP, your other AI assistants can save and search memories in Memivy. The other app must support local MCP servers (stdio), and the agent needs permission to edit its configuration.
+
+![Connect other AI apps: enable access, copy the setup prompt, and give it to your agent](docs/media/en/mcp.gif)
 
 1. Open **Settings → External access** and turn on **Allow other AI apps to save and search memories**.
 2. Click **Copy setup prompt** and send it directly to the agent you want to connect. The prompt already includes the Memivy configuration for this Mac.
 3. The prompt asks your agent to add the MCP configuration and check the connection. Follow its instructions if it needs a restart or additional permissions.
 
-The other app must support local MCP servers (stdio), and the agent needs permission to edit its configuration. You can also expand **Manual configuration** to set up the connection yourself. If you move Memivy later, copy the prompt again and ask your agent to update the configuration. To stop access, turn off the switch in Memivy's **External access** settings.
+You can also expand **Manual configuration** to set up the connection yourself. If you move Memivy later, copy the prompt again and ask your agent to update the configuration.
 
-## Data and models
-
-Memories and conversations are stored on your Mac. No Memivy account is required. Your library and settings are in `~/Library/Application Support/com.memivy.app/`; downloaded models are in `~/Library/Caches/com.memivy.app/models/`.
-
-Local voice input and semantic search process content on your Mac. Downloading the models connects to Hugging Face. When you chat with a remote AI model, your messages and relevant memories are sent to your chosen provider. If you switch voice input or semantic search to an API service, that provider receives the audio or text it needs to process. Other AI apps connected through MCP may also send search results to their own model providers.
-
-Memivy does not encrypt the library or model configuration. API keys are stored separately in a local `models.json` file, not in macOS Keychain. Keep these files out of shared attachments and bug reports.
+To stop access, turn off the switch in Memivy's **External access** settings.
 
 ## Back up, update, and uninstall
+
+Your library and settings are in `~/Library/Application Support/com.memivy.app/`; downloaded models are in `~/Library/Caches/com.memivy.app/models/`.
 
 <details>
 <summary>Back up and restore</summary>
@@ -126,12 +155,10 @@ The [contributing guide](CONTRIBUTING.md#run-the-app-locally) covers dependencie
 
 ## Feedback and contributions
 
-[Open an issue](https://github.com/boh5/memivy/issues/new/choose) if something isn't working or you have a suggestion.
-
-Fixes, documentation improvements, and translations are welcome. Read the [contributing guide](CONTRIBUTING.md) before sending a PR.
-
-Please report security issues [privately](SECURITY.md).
+- Bugs and suggestions: [Open an issue](https://github.com/boh5/memivy/issues/new/choose).
+- Code, documentation, and translations: Read the [contributing guide](CONTRIBUTING.md) before sending a PR.
+- Security issues: Please report them [privately](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE) · Copyright (c) 2026 Huang Bo.
+[MIT](LICENSE)
