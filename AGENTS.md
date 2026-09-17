@@ -168,7 +168,7 @@ Ensure Cargo and CMake are on PATH.
 
 ## Distribution and Git
 
-The initial public release is `0.1.1` / `v0.1.1`, MIT, copyright Huang Bo, for `boh5/memivy`.
+The initial public release is `0.1.2` / `v0.1.2`, MIT, copyright Huang Bo, for `boh5/memivy`.
 Use `npm run build:release` and `src-tauri/tauri.release.conf.json`. Packages are
 ad-hoc signed and unnotarized; no paid Apple Developer account is assumed.
 Follow `docs/RELEASING.md`: CI creates a draft, and the actual download needs

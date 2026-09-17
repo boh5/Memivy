@@ -83,7 +83,7 @@ version. Users install updates manually; Memivy has no automatic updater.
 
 ## Database compatibility
 
-The first public release, 0.1.1, uses schema 1. Pre-release development databases
+The first public release, 0.1.2, uses schema 1. Pre-release development databases
 with other schema numbers are unsupported.
 
 Leave the shipped `migrations/memory/001_initial.sql` unchanged. Add later database

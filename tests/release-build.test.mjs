@@ -51,19 +51,36 @@ function releaseBuildFixture(t,{entitlement='<true/>',tamper=false}={}) {
   f.command('hdiutil',`const fs=require('fs'),p=require('path');fs.writeFileSync('dmg-packaging-started','yes');const a=process.argv.slice(2),stage=a[a.indexOf('-srcfolder')+1];fs.writeFileSync(a.at(-1),fs.readFileSync(p.join(stage,'Memivy.app/Contents/Resources/build-marker')));`);
   return f;
 }
-test('MCP staging uses the artifact emitted by Cargo with a custom target directory', {skip:!supported}, async t=>{
-  const f=fixture(t);
-  await f.command('cargo',`const fs=require('fs'),p=require('path');const name=process.argv[process.argv.indexOf('-p')+1];const executable=p.join(process.env.CARGO_TARGET_DIR,'release',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));`);
-  await f.command('lipo','process.exit(0);');
+function sidecarCargo(f, {missing, wrongArch} = {}) {
+  f.command('cargo', `
+    const fs=require('fs'),p=require('path'),args=process.argv.slice(2);
+    fs.appendFileSync('cargo-calls.jsonl',JSON.stringify(args)+'\\n');
+    const names=args.flatMap((arg,i)=>arg==='-p'?[args[i+1]]:[]),target=args.indexOf('--target');
+    for(const name of names) {
+      if(name===${JSON.stringify(missing)})continue;
+      const executable=p.join(process.env.CARGO_TARGET_DIR,...(target>=0?[args[target+1]]:[]),args.includes('--release')?'release':'debug',name);
+      fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);
+      console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));
+    }
+  `);
+  f.command('lipo', `process.exit(process.argv[2].endsWith(${JSON.stringify(wrongArch || 'no-invalid-binary')})?1:0);`);
+}
+test('release sidecars share one Cargo build and the app target with a custom directory', {skip:!supported}, t=>{
+  const f=fixture(t);sidecarCargo(f);
   const result=f.run('prepare-mcp.mjs');assert.equal(result.status,0,result.stderr);
-  assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin'),'utf8'),'FRESH memivy-mcp');
-  assert.equal(readFileSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin'),'utf8'),'FRESH memivy-embedding');
+  const calls=readFileSync(path.join(f.root,'cargo-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(calls.length,1,'sidecars must share a single dependency graph');
+  assert.equal(calls[0][calls[0].indexOf('--target')+1],'aarch64-apple-darwin');
+  assert(calls[0].includes('--release'));
+  for(const name of ['memivy-mcp','memivy-embedding','memivy-speech']) {
+    assert.equal(readFileSync(path.join(f.root,`src-tauri/binaries/${name}-aarch64-apple-darwin`),'utf8'),'FRESH '+name);
+  }
 });
 test('development helpers are built beside the default Cargo debug app', {skip:!supported}, t=>{
-  const f=fixture(t);
-  f.command('cargo',`const fs=require('fs'),p=require('path'),args=process.argv.slice(2);const name=args[args.indexOf('-p')+1],i=args.indexOf('--target');const executable=p.join(process.env.CARGO_TARGET_DIR,...(i>=0?[args[i+1]]:[]),args.includes('--release')?'release':'debug',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH '+name);console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));`);
-  f.command('lipo','process.exit(0);');
+  const f=fixture(t);sidecarCargo(f);
   const result=f.run('prepare-mcp.mjs',['--debug']);assert.equal(result.status,0,result.stderr);
+  const args=JSON.parse(readFileSync(path.join(f.root,'cargo-calls.jsonl'),'utf8').trim());
+  assert(!args.includes('--target'));assert(!args.includes('--release'));
   for(const name of ['memivy-mcp','memivy-embedding','memivy-speech']) {
     assert.equal(readFileSync(path.join(f.target,'debug',name),'utf8'),'FRESH '+name);
   }
@@ -101,8 +118,15 @@ test('a successful Cargo exit without an executable cannot reuse a stale MCP', {
   const result=f.run('prepare-mcp.mjs');assert.notEqual(result.status,0);
   assert(!existsSync(path.join(f.root,'src-tauri/binaries/memivy-mcp-aarch64-apple-darwin')));
 });
-test('a missing embedding artifact cannot pass sidecar staging', {skip:!supported},async t=>{
- const f=fixture(t);
- await f.command('cargo',`const fs=require('fs'),p=require('path'),name=process.argv[process.argv.indexOf('-p')+1];if(name==='memivy-embedding'){console.log(JSON.stringify({reason:'build-finished',success:true}));}else{const executable=p.join(process.env.CARGO_TARGET_DIR,'release',name);fs.mkdirSync(p.dirname(executable),{recursive:true});fs.writeFileSync(executable,'FRESH');console.log(JSON.stringify({reason:'compiler-artifact',target:{name,kind:['bin']},executable}));}`);
- await f.command('lipo','process.exit(0);');assert.notEqual(f.run('prepare-mcp.mjs').status,0);assert(!existsSync(path.join(f.root,'src-tauri/binaries/memivy-embedding-aarch64-apple-darwin')));
-});
+for (const fault of [{missing:'memivy-embedding'}, {wrongArch:'memivy-speech'}]) {
+  test(`invalid batch preserves staged sidecars: ${JSON.stringify(fault)}`, {skip:!supported}, t=>{
+    const f=fixture(t);sidecarCargo(f,fault);
+    for(const name of ['memivy-mcp','memivy-embedding','memivy-speech']) {
+      f.put(`src-tauri/binaries/${name}-aarch64-apple-darwin`,'PREVIOUS '+name);
+    }
+    const result=f.run('prepare-mcp.mjs');assert.notEqual(result.status,0);
+    for(const name of ['memivy-mcp','memivy-embedding','memivy-speech']) {
+      assert.equal(readFileSync(path.join(f.root,`src-tauri/binaries/${name}-aarch64-apple-darwin`),'utf8'),'PREVIOUS '+name);
+    }
+  });
+}
