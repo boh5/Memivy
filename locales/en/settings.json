@@ -233,6 +233,7 @@
   },
   "updates": {
     "title": "App updates",
+    "releaseNotes": "What's new",
     "currentVersion": "Current version: {{version}}",
     "disabled": "Updates are available in the installed release app.",
     "available": "Version {{version}} is available.",
