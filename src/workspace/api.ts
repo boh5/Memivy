@@ -25,7 +25,6 @@ export type Origin = {
   conversation_id?: string;
   message_id?: string;
 };
-export type CaptureResult = { memory_id: string; version_id: string; capture_id: string; created_at: number };
 export type Raw = {
   id: string;
   text: string;

@@ -68,9 +68,6 @@ impl MemoryStore {
         let home = std::env::var_os("HOME").ok_or(DataError::Invalid)?;
         Ok(std::path::PathBuf::from(home).join("Library/Application Support/com.memivy.app"))
     }
-    pub fn open_environment() -> Result<Self> {
-        Self::open(Self::environment_root()?)
-    }
     fn mcp_lock(&self, exclusive: bool) -> Result<File> {
         super::access::root_lock(&self.root, exclusive)
     }

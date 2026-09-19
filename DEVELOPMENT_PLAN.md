@@ -1310,3 +1310,12 @@ No UI QA, native build or app launch was performed for this review. Verification
 - Core checks now stream byte-preserving output while retaining their log files, print stage durations, stop on mandatory failures, and kill the owned subprocess group on timeout. Failure logs and the run summary are uploaded for 14 days. Optional credential-bearing model probes remain file-only before the existing credential scan.
 - Local `cargo test --workspace --all-targets --offline` completed: 304 passed, 0 failed, 3 intentionally ignored. This does not establish the cause of the remote timeout. Diagnostic wrapper probes cover live output, exact log bytes, private output, nonzero exit, descendant cleanup, closed stdout, and fail-fast summary persistence.
 - Remote rerun and the v0.1.3 release remain pending; no timeout was extended and no checks were removed.
+
+## 删除冗余实现与回归检查（2026-09-19）
+
+- 按用户明确要求，删除导致 CI 卡住的 `core_faults` 假 HTTP 服务、八场景组合测试及其专用 fixture，不新增替代模拟服务。保留直接验证原文、重试、事务回滚以及模型协议边界的现有测试。远端日志已定位到该组合测试，未声称已拿到阻塞线程的堆栈。
+- 检查共享核心、MCP、Tauri host、设置界面和发布/CI。删除六个无调用的旧接口、重复数据库错误转换和不可达的版本比较；备份命令复用现有主窗口检查。删除从未赋值或消费的 `save_ms`、前端 `CaptureResult` 类型及草稿通知 `saved` 字段。
+- CI 不再自动生成无人验收的视觉数据与空白清单，也不再为所有源码/产物逐项计算指纹；只编译当前检查实际使用的工具，手动模型检查也不再编译无关 MCP 工具。保留实时日志、超时与失败退出。
+- 设置页离开模型/数据页面后停止父级模型状态轮询，避免与常规设置内的语音轮询重复；更新状态初次读取失败会显示错误和重试按钮。用户确认 MCP 保持默认开启，修正 AGENTS、发布说明及恢复接口注释。
+- 两个独立子 agent 分别审查核心和 host/UI/发布链路，并交叉复核修改；确认的问题已处理，最终无阻塞项。回归 `research/core-tests/20260919T113604Z-d4d39f95` 全部通过：Rust 303 通过、3 按原设置忽略；UI 266 通过；格式、Clippy、前端构建、启动器、进程故障恢复、存储和真实 stdio MCP 检查通过。Rust 阶段耗时 197.11 秒。另有 8 项日志执行器专项检查通过；完整备份恢复脚本通过。
+- 生产模式身份检查 6 项通过。原生设置页验收尚未完成：退出现有 Memivy Dev 的操作被自动审批拒绝，等待用户决定是否允许正常退出后用隔离测试库启动。没有更改初始数据库 schema、用户数据、正式安装或发布标签；远端 CI 结果与本地检查分别确认。

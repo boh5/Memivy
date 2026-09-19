@@ -55,8 +55,8 @@ test('completion updates a reopened input when the sent draft is still current',
   const seen=[];const unsubscribe=f.queue.subscribe(sent.key,s=>seen.push(s));await f.queue.read(sent.key);
   const empty={...sent,request_id:'empty',body:''};
   assert.equal(await f.queue.consume(sent.key,sent.request_id,empty),true);
-  assert.deepEqual(seen.at(-1),{draft:empty,saved:true,error:null});
-  assert.deepEqual(f.disk.get(sent.key).context,sent.context);unsubscribe();
+  assert.deepEqual(seen.at(-1),{draft:empty,error:null});
+  assert.deepEqual(f.disk.get(sent.key),empty);unsubscribe();
 });
 
 test('editing during clear IPC wins both in the input and on disk', async () => {
@@ -85,9 +85,10 @@ test('failed writes keep their latest text and can be retried', async () => {
   f.queue.subscribe(value.key,s=>seen.push(s));
   f.intercept(async name=>{if(name==='draft_write'&&fail)throw 'busy';});
   await assert.rejects(f.queue.write(value),e=>e==='busy');
-  assert.deepEqual(seen.at(-1),{draft:value,saved:false,error:'busy'});
+  assert.deepEqual(seen.at(-1),{draft:value,error:'busy'});
+  assert.equal(f.disk.has(value.key),false);
   fail=false;await f.queue.flush(value.key);
-  assert.deepEqual(f.disk.get(value.key),value);assert.equal(seen.at(-1).saved,true);
+  assert.deepEqual(f.disk.get(value.key),value);assert.deepEqual(seen.at(-1),{draft:value,error:null});
 });
 
 function twoWindows() {

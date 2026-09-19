@@ -118,7 +118,7 @@ impl MemoryStore {
     }
 
     /// Restores into a new empty directory only. Never replaces a running store.
-    /// A restored app therefore starts with no model credentials or MCP enablement.
+    /// Credentials are not restored; MCP uses its default enabled setting.
     pub fn restore_backup(source: impl AsRef<Path>, root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref();
         if !root.is_absolute() || !source.as_ref().is_absolute() {

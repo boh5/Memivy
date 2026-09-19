@@ -86,7 +86,7 @@ Use sample notes and check the following:
 - Type Chinese text, open the quick window with the global shortcut, and continue in the main window.
 - Try voice input with microphone permission allowed and denied. Download the local models, load them, and retry an interrupted download.
 - Ask AI about saved notes. Follow its sources, inspect a memory change, and undo it.
-- Confirm MCP starts disabled. Enable it and use another AI app to save and search a memory.
+- Confirm MCP starts enabled and can be disabled. Use another AI app to save and search a memory while enabled.
 - Back up and restore a library. Replace an existing installation with the new app and check that its notes, drafts, and settings are preserved.
 
 Also test upgrading a release that already contains the updater in the separate

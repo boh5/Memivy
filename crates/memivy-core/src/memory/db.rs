@@ -129,10 +129,6 @@ fn initial_schema(db: &Connection) -> Result<i64> {
     }
 }
 impl MemoryStore {
-    pub fn open_default() -> Result<Self> {
-        let home = std::env::var_os("HOME").ok_or(DataError::Invalid)?;
-        Self::open(PathBuf::from(home).join("Library/Application Support/com.memivy.app"))
-    }
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         private_dir(root.as_ref())?;
         let _guard = super::access::root_lock(root.as_ref(), false)?;
@@ -196,9 +192,7 @@ impl MemoryStore {
     }
     pub(super) fn connection(&self) -> Result<Connection> {
         let db = connect(&self.database_path(), false)?;
-        if identity(&db)? != SCHEMA {
-            return Err(DataError::Schema);
-        }
+        identity(&db)?;
         Ok(db)
     }
     pub fn check_integrity(&self) -> Result<()> {

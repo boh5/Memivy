@@ -111,14 +111,6 @@ fn raw_title(text: &str) -> String {
         .take(45)
         .collect()
 }
-fn search_error(e: rusqlite::Error) -> DataError {
-    if matches!(&e, rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ErrorCode::OperationInterrupted)
-    {
-        DataError::SearchBudget
-    } else {
-        e.into()
-    }
-}
 
 impl MemoryStore {
     pub fn save_library_edit(&self, draft: &WorkspaceDraft) -> Result<Receipt> {
@@ -243,8 +235,7 @@ impl MemoryStore {
         ) SELECT kind,id,version_id,title,body,updated_at FROM items WHERE {} ORDER BY updated_at {chronological},kind,id LIMIT {} OFFSET {}", filters.join(" AND "), limit+1,q.offset);
         type Row = (String, String, Option<String>, String, String, i64);
         let rows: Vec<Row> = tx
-            .prepare(&sql)
-            .map_err(search_error)?
+            .prepare(&sql)?
             .query_map(rusqlite::params_from_iter(values), |r| {
                 Ok((
                     r.get(0)?,
@@ -254,10 +245,8 @@ impl MemoryStore {
                     r.get(4)?,
                     r.get(5)?,
                 ))
-            })
-            .map_err(search_error)?
-            .collect::<rusqlite::Result<_>>()
-            .map_err(search_error)?;
+            })?
+            .collect::<rusqlite::Result<_>>()?;
         let has_more = rows.len() > limit;
         let mut items = vec![];
         for (kind, id, version, title, body, updated_at) in rows.into_iter().take(limit) {

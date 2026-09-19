@@ -48,6 +48,22 @@ test('install request cannot deadlock its own draft flush',async()=>{
 });
 
 import {workspaceFixture} from './helpers/workspace.mjs';
+test('initial updater status errors stay visible and retry restores status and live events',async t=>{
+ const f=workspaceFixture(t,{native:true});let reads=0;
+ const status={phase:'idle',currentVersion:'0.1.2',version:null,notes:null,downloaded:0,total:null,error:null};
+ f.overrides.update_status=async()=>{if(++reads===1)throw 'Status could not be read';return status};
+ const View=f.load('src/workspace/UpdateSettings.tsx').default;
+ const {ErrorNotice}=f.load('src/workspace/components.tsx');
+ const view=f.mount(View,{onClose(){}});await f.settle();
+ assert.equal(f.find(view,n=>n.type===ErrorNotice).props.text,'Status could not be read');
+ f.find(view,n=>n.type==='button'&&f.text(n)==='Retry').props.onClick();await f.settle();
+ assert.equal(reads,2);
+ assert(f.text(view.tree).includes('0.1.2'));
+ assert.equal(f.find(view,n=>n.type===ErrorNotice).props.text,'');
+ assert(!f.calls.some(c=>c.name==='update_check'||c.name==='update_download'||c.name==='update_install'));
+ f.emit('update-status',{...status,phase:'ready',version:'0.1.3'});await f.settle();
+ assert(f.text(view.tree).includes('Restart and install'));
+});
 test('a timed-out flush cannot unfreeze a later installation attempt',async t=>{
  const pending=[];let frozen=false,resumes=0;
  const f=workspaceFixture(t,{native:true,modules:{

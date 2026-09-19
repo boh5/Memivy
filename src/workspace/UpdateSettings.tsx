@@ -13,13 +13,14 @@ export default function UpdateSettings({onClose}:{onClose:()=>void}) {
   const [status,setStatus]=useState<Status|null>(null),[error,setError]=useNotice();
   const acting=useRef(false);
   const [requesting,setRequesting]=useState(false);
+  const [attempt,setAttempt]=useState(0);
   useEffect(()=>{
     if(!native)return;
     let live=true, events=0;
     const stop=listen<Status>('update-status',e=>{events++;if(live)setStatus(e.payload)});
     void stop.then(()=>{const observed=events;return call<Status>('update_status').then(s=>{if(live&&events===observed)setStatus(s)})}).catch(e=>{if(live)setError(errorText(e))});
-    return ()=>{live=false;void stop.then(f=>f())};
-  },[]);
+    return ()=>{live=false;void stop.then(f=>f()).catch(()=>{})};
+  },[attempt]);
   async function act(command:string) {
     if(acting.current)return;
     acting.current=true;setRequesting(true);setError('');
@@ -30,7 +31,11 @@ export default function UpdateSettings({onClose}:{onClose:()=>void}) {
     flushSync(onClose);
     void call('update_install').catch(error=>window.dispatchEvent(new CustomEvent('update-install-error',{detail:error})));
   }
-  if(!status)return null;
+  if(!status)return error?<section className="settings-section">
+    <h3>{t('updates.title')}</h3>
+    <ErrorNotice text={error}/>
+    <button className="outline-button" onClick={()=>{setError('');setAttempt(value=>value+1)}}>{t('actions.retry')}</button>
+  </section>:null;
   const phase=status.phase;
   return <section className="settings-section">
     <h3>{t('updates.title')}</h3>

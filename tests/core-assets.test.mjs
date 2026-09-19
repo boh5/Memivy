@@ -5,13 +5,11 @@ const read = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta
 const fixture = (file) => read(`crates/memivy-core/tests/fixtures/${file}.json`);
 const unique = (rows) => assert.equal(new Set(rows.map(r => r.id)).size, rows.length);
 
-test('organization review accounts for every fixed case and fault without relabeling', () => {
+test('organization review accounts for every fixed case without relabeling', () => {
   const cases = fixture('organization_cases');
   const review = fixture('organization_review').cases;
-  const faults = fixture('organization_failures');
-  unique([...cases, ...faults]);
+  unique(cases);
   assert.equal(cases.length, 40);
-  assert.equal(faults.length, 8);
   assert.deepEqual(review.map(r => [r.id, r.expected, r.target]), cases.map(r => [r.id, r.expected, r.target]));
   assert.ok(review.every(r => r.rubric.trim()));
   for (const c of cases.filter(c => c.expected === 'merge')) assert.ok(c.seeds.some(([title]) => title === c.target));

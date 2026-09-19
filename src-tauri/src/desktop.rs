@@ -89,7 +89,6 @@ struct State {
     previous_pid: Option<i32>,
     opened: Option<Instant>,
     ready_ms: Option<u128>,
-    save_ms: Option<u128>,
     error: Option<String>,
     drag: Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalPosition<f64>)>,
     ready_windows: HashSet<String>,
@@ -114,7 +113,6 @@ pub struct Snapshot {
     pub last_memory: Option<String>,
     pub error: Option<String>,
     pub ready_ms: Option<u128>,
-    pub save_ms: Option<u128>,
     pub receipt: bool,
 }
 impl Desktop {
@@ -176,7 +174,6 @@ impl Desktop {
                 previous_pid: None,
                 opened: None,
                 ready_ms: None,
-                save_ms: None,
                 error,
                 drag: None,
                 ready_windows: HashSet::new(),
@@ -284,7 +281,6 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
         last_memory: p.last_memory.clone(),
         error: s.error.clone(),
         ready_ms: s.ready_ms,
-        save_ms: s.save_ms,
         receipt: s.receipt.is_some(),
     };
     diagnostic("snapshot_ms", started.elapsed().as_millis());

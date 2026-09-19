@@ -503,11 +503,6 @@ impl MemoryStore {
     pub fn capture_by_id(&self, id: &str) -> Result<RawCapture> {
         raw(&self.connection()?, id)
     }
-    pub fn defer_capture(&self, id: &str) -> Result<()> {
-        let db = self.connection()?;
-        if db.execute("UPDATE capture_state SET understanding='deferred' WHERE capture_id=? AND availability='active' AND understanding IN ('pending','deferred')",[id])?==0 { return Err(DataError::Conflict) }
-        Ok(())
-    }
     pub fn apply_capture(&self, r: &ChangeRequest) -> Result<Receipt> {
         let hash = fingerprint(&("apply", r))?;
         let mut db = self.connection()?;

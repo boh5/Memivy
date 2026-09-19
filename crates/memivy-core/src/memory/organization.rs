@@ -47,59 +47,6 @@ fn can_retry_organization(db: &rusqlite::Connection, memory: &str) -> Result<boo
 }
 
 impl MemoryStore {
-    pub fn capture_as_new(&self, request: &str, capture: &str) -> Result<Receipt> {
-        let hash = fingerprint(&("capture_as_new", capture))?;
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(receipt) = replay(&tx, request, &hash)? {
-            return Ok(receipt);
-        }
-        let raw = raw(&tx, capture)?;
-        if raw.understanding == "attached" {
-            return Err(DataError::Conflict);
-        }
-        let receipt = apply(
-            &tx,
-            &ChangeRequest {
-                request_id: request.into(),
-                capture_id: capture.into(),
-                destination: Destination::New,
-                title: raw
-                    .text
-                    .lines()
-                    .find(|s| !s.trim().is_empty())
-                    .unwrap_or("New memory")
-                    .chars()
-                    .take(60)
-                    .collect(),
-                body: raw.text,
-                actor: Actor::User,
-            },
-        )?;
-        save_receipt(&tx, &receipt, &hash)?;
-        tx.execute("UPDATE organization_jobs SET status='done',receipt_id=?2,reason='',reason_code='organization_separate' WHERE capture_id=?1",params![capture,request])?;
-        tx.commit()?;
-        Ok(receipt)
-    }
-    pub fn discussion_targets(&self, sources: &[SourceRef]) -> Result<Vec<(String, String)>> {
-        if sources.len() > 4 {
-            return Err(DataError::Invalid);
-        }
-        let mut targets = vec![];
-        let db = self.connection()?;
-        for source in sources {
-            let found:Option<(String,String)>=match source {
-                SourceRef::Version(id)=>db.query_row("SELECT m.id,v.title FROM memories m JOIN memory_versions origin ON origin.memory_id=m.id JOIN memory_versions v ON v.id=m.current_version_id WHERE origin.id=? AND m.state='active'",[id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?,
-                SourceRef::Capture(id)=>db.query_row("SELECT m.id,v.title FROM memories m JOIN memory_versions v ON v.id=m.current_version_id JOIN version_captures vc ON vc.version_id=v.id WHERE vc.capture_id=? AND m.state='active' ORDER BY m.updated_at DESC LIMIT 1",[id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?,
-            };
-            if let Some(target) = found
-                && !targets.contains(&target)
-            {
-                targets.push(target);
-            }
-        }
-        Ok(targets)
-    }
     pub fn organization_jobs(&self, key: &RecordKey) -> Result<Vec<OrganizationJob>> {
         let mut db = self.connection()?;
         let tx = db.transaction()?;

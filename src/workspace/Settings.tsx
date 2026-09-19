@@ -24,7 +24,8 @@ export default function SettingsPanel({onClose,onRestore,onChanged,initialPage="
  useEffect(()=>{live.current=true;void call<Models>('models_load').then(m=>{if(live.current){setModels(m);if(initialPage in modelNames){const k=initialPage as Kind;setDrafts({[k]:m[k]??{...emptyBinding(),source:'service'}})}}}).catch(e=>{if(live.current)setError(errorText(e))});return()=>{live.current=false;poll.current++}},[]);
  async function refresh(){const n=++poll.current;const results=await Promise.allSettled([call<EmbeddingStatus>('embedding_status'),call<VoiceStatus>('voice_status')]);if(!live.current||n!==poll.current)return;const [e,v]=results;if(e.status==='fulfilled')setEmbedding(e.value);if(v.status==='fulfilled')setVoice(v.value);if(e.status==='rejected'||v.status==='rejected')setError(message('settings','status.partialModelReadFailed'));}
  useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),3000);return()=>clearTimeout(timer)},[notice,setNotice]);
- useEffect(()=>{void refresh();const t=setInterval(()=>void refresh(),1500);return()=>clearInterval(t)},[]);
+ const pollsModels=page==='ai'||page==='data'||page in modelNames;
+ useEffect(()=>{if(!pollsModels)return;void refresh();const t=setInterval(()=>void refresh(),1500);return()=>{clearInterval(t);poll.current++}},[pollsModels]);
  function navigate(next:Page){if(locked)return;setPage(next);setError('');setNotice('');if(models&&next in modelNames){const k=next as Kind;setDrafts(old=>({...old,[k]:old[k]??models[k]??{...emptyBinding(),source:'service'}}));}}
  function saved(m:Models){setModels(m);setNotice(message('settings','status.savedLocally'));onChanged();}
  const active=page in modelNames?'ai':page==='desktop'?'general':page;

@@ -189,16 +189,6 @@ impl MemoryStore {
         tx.commit()?;
         Ok(())
     }
-    pub fn conversation_collection(&self, conversation: &str) -> Result<Option<String>> {
-        Ok(self
-            .connection()?
-            .query_row(
-                "SELECT collection_id FROM conversation_collections WHERE conversation_id=?",
-                [conversation],
-                |r| r.get(0),
-            )
-            .optional()?)
-    }
     /// One bounded AI query-planning call. Candidates remain read-only until explicitly added.
     pub async fn suggest_collection(
         &self,

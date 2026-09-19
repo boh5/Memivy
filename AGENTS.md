@@ -80,7 +80,8 @@ frameworks or speculative abstractions.
 - Voice input shares the text draft. Finish transcription before submitting and
   preserve recoverable input on failure. Stopping recording must not send it.
 - MCP uses local stdio and exposes only `memory_capture` and `memory_search`.
-  It starts disabled. Capture requires explicit intent to save; search returns
+  It starts enabled; users can disable it, and invalid configuration disables it.
+  Capture requires explicit intent to save; search returns
   bounded saved-memory results with sources, never unsaved conversations.
 - Test actual model requests, raw tool arguments and storage effects when changing
   prompts or agent behavior. Fix controllable defects; report remaining model

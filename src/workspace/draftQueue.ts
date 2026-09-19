@@ -1,7 +1,7 @@
 import type { Draft } from "./api";
 
 type Call = (name: string, args: Record<string, unknown>) => Promise<unknown>;
-type Snapshot = { draft: Draft | null; saved: boolean; error: unknown };
+type Snapshot = { draft: Draft | null; error: unknown };
 type Entry = {
   base: string | null;
   current: Draft | null;
@@ -39,7 +39,6 @@ export class DraftQueue {
   private notify(entry: Entry) {
     const snapshot = {
       draft: entry.current,
-      saved: !entry.pending,
       error: entry.error,
     };
     entry.listeners.forEach((listener) => listener(snapshot));

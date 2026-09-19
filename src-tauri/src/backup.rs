@@ -1,6 +1,6 @@
 //! Native file selection and restart coordination; database rules stay in core.
 use crate::errors::HostError;
-use crate::workspace::{HostResult, Workspace, blocking};
+use crate::workspace::{HostResult, Workspace, blocking, require_main};
 use memivy_core::memory::{PreparedRestore, RestoreResult};
 use std::{path::PathBuf, sync::atomic::Ordering};
 use tauri::{Emitter, Manager};
@@ -10,13 +10,6 @@ pub(crate) struct RestartRequest {
     pub committing: bool,
 }
 
-fn main_only(window: &tauri::WebviewWindow) -> HostResult<()> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err(HostError::new("main_window_required"))
-    }
-}
 async fn select_file(app: &tauri::AppHandle, save: bool) -> HostResult<Option<PathBuf>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let handle = app.clone();
@@ -80,7 +73,7 @@ pub async fn backup_create(
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<String>> {
     let _update_work = crate::updates::work()?;
-    main_only(&window)?;
+    require_main(&window)?;
     let Some(path) = select_file(&app, true).await? else {
         return Ok(None);
     };
@@ -98,7 +91,7 @@ pub async fn backup_prepare(
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<PreparedRestore>> {
     let _update_work = crate::updates::work()?;
-    main_only(&window)?;
+    require_main(&window)?;
     let Some(path) = select_file(&app, false).await? else {
         return Ok(None);
     };
@@ -112,7 +105,7 @@ pub async fn backup_discard(
     id: String,
 ) -> HostResult<()> {
     let _update_work = crate::updates::work()?;
-    main_only(&window)?;
+    require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.discard_prepared_restore(&id)).await
 }
@@ -123,7 +116,7 @@ pub async fn backup_restore(
     id: String,
 ) -> HostResult<()> {
     let _update_work = crate::updates::work()?;
-    main_only(&window)?;
+    require_main(&window)?;
     {
         let state = app.state::<Workspace>();
         let mut request = state.restore_request.lock().unwrap();
@@ -147,7 +140,7 @@ pub async fn backup_result(
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<RestoreResult>> {
     let _update_work = crate::updates::work()?;
-    main_only(&window)?;
+    require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.last_restore_result()).await
 }

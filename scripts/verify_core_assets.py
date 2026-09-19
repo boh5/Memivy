@@ -5,7 +5,6 @@ manual visual checks or semantic review as passed. No credentials are copied.
 """
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -81,12 +80,7 @@ def main():
         env.pop(key, None)
     env['PATH'] = str(Path.home()/'.cargo/bin') + os.pathsep + env.get('PATH', '')
     report = {'started_utc': datetime.now(timezone.utc).isoformat(), 'platform': platform.platform(),
-              'machine': platform.machine(), 'stages': [], 'visual_native': 'not_run',
-              'human_semantic_review': 'pending', 'model_evaluation': 'not_run', 'status': 'running'}
-    paths = [ROOT/'Cargo.lock', ROOT/'package-lock.json']
-    for directory in ['crates', 'migrations', 'src', 'src-tauri/src', 'tests', 'scripts']:
-        paths.extend(p for p in (ROOT/directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts)
-    report['file_sha256'] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(set(paths))}
+              'machine': platform.machine(), 'stages': [], 'model_evaluation': 'not_run', 'status': 'running'}
     report['git_head'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True, capture_output=True, check=True).stdout.strip()
 
     def save():
@@ -122,7 +116,16 @@ def main():
                 ('frontend-build', ['npm', 'run', 'build']),
             ]:
                 run(name, cmd)
-        run('harness-build', ['cargo', 'build', '-p', 'memivy-core', '--examples', '-p', 'memivy-mcp', '--bins', '--offline', '--message-format=json'])
+        build = ['cargo', 'build', '-p', 'memivy-core', '--offline', '--message-format=json']
+        names = []
+        if not args.models_only:
+            build.extend(['--example', 'memory_probe', '-p', 'memivy-mcp', '--bin', 'memivy-mcp'])
+            names.extend(['memory_probe', 'memivy-mcp'])
+        if config:
+            for name in ['intelligence_probe', 'discussion_probe']:
+                build.extend(['--example', name])
+                names.append(name)
+        run('harness-build', build)
         artifacts = {}
         for line in (out/'harness-build.log').read_text().splitlines():
             try:
@@ -131,19 +134,13 @@ def main():
                 continue
             if row.get('reason') == 'compiler-artifact' and row.get('executable'):
                 artifacts[row['target']['name']] = Path(row['executable'])
-        for name in ['memory_probe', 'memivy-mcp', 'intelligence_probe', 'discussion_probe', 'visual_fixture']:
+        for name in names:
             assert name in artifacts and artifacts[name].is_file(), f'missing current build artifact: {name}'
-        env['MEMIVY_TEST_PROBE'] = str(artifacts['memory_probe'])
-        report['binary_sha256'] = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in artifacts.items()}
         if not args.models_only:
+            env['MEMIVY_TEST_PROBE'] = str(artifacts['memory_probe'])
             for script in ['verify_memory_store', 'verify_organization_recovery', 'verify_core_faults']:
                 run(script, [sys.executable, ROOT/f'scripts/{script}.py'])
             run('verify_mcp', [sys.executable, ROOT/'scripts/verify_mcp.py', '--binary', artifacts['memivy-mcp']])
-            run('visual-seed', [artifacts['visual_fixture'], out/'visual-data'])
-            contract = json.loads((ROOT/'tests/assets/visual_contract.json').read_text())
-            (out/'visual-review.json').write_text(json.dumps([
-                {'case_id': c['id'], 'result': 'not_run', 'screenshot_path': '', 'notes': '', 'reviewer': ''}
-                for c in contract['cases']], ensure_ascii=False, indent=2)+'\n')
         if config:
             for name in ['intelligence_probe', 'discussion_probe']:
                 run(name, [artifacts[name], config, out/name], timeout=3600, required=False, stream=False)
