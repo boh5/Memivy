@@ -1303,3 +1303,10 @@ No UI QA, native build or app launch was performed for this review. Verification
 用户要求先提交更新实现，再移除草稿发布方式并提交，随后发布正式版本。第一提交为 `2909d23`。第二组修改将发布作业改为 `publish`，保留 `verify` 与 `package` 成功依赖、签名/包检查和禁止覆盖已有 release 的规则，通过后直接以 Latest 发布；不再使用 `--draft`。同步发布指南、规则、README、计划以及 0.1.3 的版本元数据和 changelog。
 
 发布版本检查、18 项更新/打包测试及 `git diff --check` 通过；独立子 agent Mill 对本组修改复审，未发现具体问题。真实覆盖安装与系统权限体验仍沿用前述未验证边界；此次按用户指示直接发布。发布标签推送前需确认 GitHub 更新签名 Secret 已配置，不上传私钥到源码或聊天。历史 0.1.1 草稿是旧版本记录，本次移除的是以后发布流程中的草稿环节。
+
+## CI timeout diagnostics (2026-09-19)
+
+- Main CI run `35438152744` failed because the Rust test stage reached the existing 1,200-second limit. Detailed subprocess output was written only to the runner filesystem and was not uploaded, so the specific stalled compiler/test remains unknown.
+- Core checks now stream byte-preserving output while retaining their log files, print stage durations, stop on mandatory failures, and kill the owned subprocess group on timeout. Failure logs and the run summary are uploaded for 14 days. Optional credential-bearing model probes remain file-only before the existing credential scan.
+- Local `cargo test --workspace --all-targets --offline` completed: 304 passed, 0 failed, 3 intentionally ignored. This does not establish the cause of the remote timeout. Diagnostic wrapper probes cover live output, exact log bytes, private output, nonzero exit, descendant cleanup, closed stdout, and fail-fast summary persistence.
+- Remote rerun and the v0.1.3 release remain pending; no timeout was extended and no checks were removed.

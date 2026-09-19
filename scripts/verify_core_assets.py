@@ -10,12 +10,52 @@ import json
 import os
 from pathlib import Path
 import platform
+import selectors
+import signal
 import subprocess
 import sys
 import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def stream_command(command, log, *, cwd, env, timeout=1200, stream=True):
+    """Tee raw output while bounding the lifetime of the owned process group."""
+    deadline = time.monotonic() + timeout
+    process = subprocess.Popen([str(a) for a in command], cwd=cwd, env=env,
+                               stdout=subprocess.PIPE if stream else log, stderr=subprocess.STDOUT,
+                               start_new_session=True)
+    try:
+        if not stream:
+            return process.wait(timeout=max(0, deadline - time.monotonic()))
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _ in selector.select(remaining):
+                    chunk = os.read(key.fileobj.fileno(), 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    log.write(chunk)
+                    log.flush()
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+            return process.wait(timeout=max(0, deadline - time.monotonic()))
+    except BaseException:
+        # Kill descendants even if the group leader has already exited.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        raise
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
 
 
 def main():
@@ -52,20 +92,22 @@ def main():
     def save():
         (out/'summary.json').write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
 
-    def run(name, command, timeout=1200):
+    def run(name, command, timeout=1200, required=True, stream=True):
         start = time.monotonic()
         print(f'RUN {name}', flush=True)
         path = out/f'{name}.log'
-        with path.open('w') as log:
+        with path.open('wb') as log:
             try:
-                result = subprocess.run([str(a) for a in command], cwd=ROOT, env=env,
-                                        stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
-                code = result.returncode
+                code = stream_command(command, log, cwd=ROOT, env=env, timeout=timeout, stream=stream)
             except subprocess.TimeoutExpired:
                 code = 124
-        report['stages'].append({'name': name, 'exit_code': code, 'elapsed_seconds': round(time.monotonic()-start, 2), 'log': path.name})
+                print(f'TIMEOUT {name} after {timeout}s; killed owned process group', flush=True)
+        elapsed = round(time.monotonic()-start, 2)
+        report['stages'].append({'name': name, 'exit_code': code, 'elapsed_seconds': elapsed, 'log': path.name})
         save()
-        print(f'{"PASS" if code == 0 else "FAIL"} {name}', flush=True)
+        print(f'{"PASS" if code == 0 else "FAIL"} {name} ({elapsed:.2f}s)', flush=True)
+        if code != 0 and required:
+            raise RuntimeError(f'mandatory stage {name} failed with exit code {code}; see {path}')
         return code == 0
 
     save()
@@ -80,9 +122,7 @@ def main():
                 ('frontend-build', ['npm', 'run', 'build']),
             ]:
                 run(name, cmd)
-        built = run('harness-build', ['cargo', 'build', '-p', 'memivy-core', '--examples', '-p', 'memivy-mcp', '--bins', '--offline', '--message-format=json'])
-        if not built:
-            raise RuntimeError('harness build failed; process and model checks were not run')
+        run('harness-build', ['cargo', 'build', '-p', 'memivy-core', '--examples', '-p', 'memivy-mcp', '--bins', '--offline', '--message-format=json'])
         artifacts = {}
         for line in (out/'harness-build.log').read_text().splitlines():
             try:
@@ -106,7 +146,7 @@ def main():
                 for c in contract['cases']], ensure_ascii=False, indent=2)+'\n')
         if config:
             for name in ['intelligence_probe', 'discussion_probe']:
-                run(name, [artifacts[name], config, out/name], timeout=3600)
+                run(name, [artifacts[name], config, out/name], timeout=3600, required=False, stream=False)
             report['model_evaluation'] = 'completed' if all(s['exit_code'] == 0 for s in report['stages'] if s['name'] in ['intelligence_probe', 'discussion_probe']) else 'has_failures'
             # Only inspect the key for leak detection; never print or persist it.
             key = json.loads(config.read_text()).get('api_key')

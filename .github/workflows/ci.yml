@@ -43,3 +43,13 @@ jobs:
       - run: python3 scripts/verify_restore.py
       - name: Check production identity with Tauri release mode
         run: cargo test -p memivy --locked --offline --features tauri/custom-protocol storage::tests
+      - name: Upload core regression diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-regression-diagnostics
+          path: |
+            research/core-tests/**/*.log
+            research/core-tests/**/summary.json
+          if-no-files-found: ignore
+          retention-days: 14
