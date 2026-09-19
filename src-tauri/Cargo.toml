@@ -13,8 +13,8 @@ tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
 memivy-core.workspace = true
-cpal = "=0.16.0"
-rubato = "=0.16.2"
+cpal = "=0.18.2"
+rubato = "=5.0.0"
 uuid.workspace = true
 tauri = { version = "=2.11.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"

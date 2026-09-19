@@ -9,11 +9,11 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-dirs = "=6.0.0"
+dirs = "=7.0.0"
 rusqlite = { version = "=0.40.2", features = ["bundled", "backup", "hooks"] }
-sha2 = "0.10"
+sha2 = "0.11"
 sqlite-vec = "=0.1.9"
-pulldown-cmark = { version = "=0.13.0", default-features = false }
+pulldown-cmark = { version = "=0.13.4", default-features = false }
 unicode-normalization = "0.1"
 serde.workspace = true
 serde_json.workspace = true
