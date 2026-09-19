@@ -54,6 +54,12 @@ impl From<ProbeError> for HostError {
     }
 }
 pub const KNOWN_CODES: &[&str] = &[
+    "update_busy",
+    "update_unavailable",
+    "update_check_failed",
+    "update_download_failed",
+    "update_mcp_busy",
+    "update_install_failed",
     "model_test_agent",
     "model_test_agent_unsupported",
     "agent_budget",

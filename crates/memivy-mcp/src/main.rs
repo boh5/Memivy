@@ -137,8 +137,8 @@ impl ServerHandler for Memivy {
 #[tokio::main]
 async fn main() {
     let run = async {
-        let store =
-            MemoryStore::open_environment().map_err(|_| "Cannot open the memory library")?;
+        let (store, _session) =
+            MemoryStore::open_mcp_environment().map_err(|_| "Cannot open the memory library")?;
         let server = Memivy {
             store,
             tool_router: Memivy::tool_router(),

@@ -9,7 +9,8 @@ process.env.PATH = withRustPath().PATH;
 const root = fileURLToPath(new URL('..', import.meta.url));
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('Use an Apple Silicon Mac to build this release.');
 // Ad-hoc distribution package: no submission to Apple or use of a host identity.
-const env = { ...process.env, MACOSX_DEPLOYMENT_TARGET: '26.0', APPLE_SIGNING_IDENTITY: '-' };
+if (!process.env.TAURI_SIGNING_PRIVATE_KEY) throw new Error('Set TAURI_SIGNING_PRIVATE_KEY to the updater signing key or its absolute file path.');
+const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? '', MACOSX_DEPLOYMENT_TARGET: '26.0', APPLE_SIGNING_IDENTITY: '-' };
 for (const key of ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID', 'APPLE_API_KEY', 'APPLE_API_KEY_PATH', 'APPLE_API_ISSUER']) delete env[key];
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', env });

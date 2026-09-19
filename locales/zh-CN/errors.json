@@ -204,5 +204,11 @@
   "agent_model_required": "原话已保存。连接模型后，可以重试。",
   "agent_budget": "本轮处理达到上限。已完成的修改和原话保留，可继续讨论。",
   "shortcut_remove_failed": "未能移除原快捷键，设置保持不变，请重试。",
-  "general_reset_partial": "部分设置未能还原，请检查当前设置后重试。"
+  "general_reset_partial": "部分设置未能还原，请检查当前设置后重试。",
+  "update_busy": "请等待当前任务完成、关闭其他对话框后重试更新，当前工作已保留。",
+  "update_unavailable": "此应用暂不支持更新，或更新尚未准备好。",
+  "update_check_failed": "检查更新失败，请检查网络后重试。",
+  "update_download_failed": "更新下载失败或签名校验未通过，请重新下载。",
+  "update_mcp_busy": "请先断开外部 Memivy MCP 连接，再重试安装更新。",
+  "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。"
 }

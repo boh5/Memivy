@@ -204,5 +204,11 @@
   "agent_model_required": "Your original input is saved. Connect a model, then retry.",
   "agent_budget": "This turn reached its processing limit. Your input and completed changes are preserved; you can continue the discussion.",
   "shortcut_remove_failed": "The previous shortcut could not be removed. Settings are unchanged; try again.",
-  "general_reset_partial": "Some settings could not be restored. Check the current settings and try again."
+  "general_reset_partial": "Some settings could not be restored. Check the current settings and try again.",
+  "update_busy": "Please finish current work, close other dialogs, and retry the update. Your work is preserved.",
+  "update_unavailable": "Updates are unavailable in this app or no update is ready.",
+  "update_check_failed": "Could not check for updates. Check your connection and try again.",
+  "update_download_failed": "The update could not be downloaded or its signature could not be verified. Try downloading again.",
+  "update_mcp_busy": "Disconnect external Memivy MCP clients before installing the update, then retry.",
+  "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually."
 }

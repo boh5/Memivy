@@ -133,11 +133,11 @@ impl MemoryStore {
             return Err(DataError::Invalid);
         }
         let db = Connection::open_with_flags(source.as_ref(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        identity(&db)?;
+        super::migrations::supported_version(&db, SCHEMA)?;
         check(&db)?;
         private_dir(root)?;
-        publish_database(&db, &root.join("memivy.db"))?;
-        let store = Self::open(root)?;
+        publish_upgraded_backup(&db, &root.join("memivy.db"), super::migrations::MIGRATIONS)?;
+        let store = Self::open_application(root)?;
         store.reset_embedding_index()?;
         store.check_integrity()?;
         Ok(store)
@@ -359,11 +359,18 @@ fn backup_source(path: &Path) -> Result<Connection> {
         return Err(DataError::Invalid);
     }
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    if identity(&db)? != SCHEMA {
-        return Err(DataError::Schema);
-    }
+    super::migrations::supported_version(&db, SCHEMA)?;
     check(&db)?;
     Ok(db)
+}
+
+fn publish_upgraded_backup(source: &Connection, target: &Path, scripts: &[&str]) -> Result<()> {
+    let temp = tempfile::tempdir_in(target.parent().ok_or(DataError::Invalid)?)?;
+    let copy = temp.path().join("restore.db");
+    publish_database(source, &copy)?;
+    let mut db = connect(&copy, false)?;
+    super::migrations::upgrade(&mut db, None, scripts)?;
+    publish_database(&db, target)
 }
 fn staged_path(root: &Path, id: &str) -> Result<PathBuf> {
     valid_id(id)?;
@@ -427,7 +434,8 @@ impl MemoryStore {
         let db = backup_source(source)?;
         let id = id();
         let target = staged_path(&self.root, &id)?;
-        publish_database(&db, &target)?;
+        publish_upgraded_backup(&db, &target, super::migrations::MIGRATIONS)?;
+        let db = backup_source(&target)?;
         Ok(PreparedRestore {
             id,
             memories: db.query_row(
@@ -482,7 +490,7 @@ impl MemoryStore {
         private_dir(root)?;
         let _gate = super::access::root_lock(root, true)?;
         Self::finish_pending_restore(root)?;
-        Self::open_unlocked(root)
+        Self::open_unlocked(root, true)
     }
     fn finish_pending_restore(root: &Path) -> Result<()> {
         if !root.join("restore-pending.json").exists() {
@@ -533,8 +541,12 @@ impl MemoryStore {
     fn replace_from_staged(root: &Path, id: &str) -> Result<()> {
         let staged = staged_path(root, id)?;
         drop(backup_source(&staged)?);
+        // A restore may have been prepared by an older app before this upgrade.
+        let mut staged_db = connect(&staged, false)?;
+        super::migrations::upgrade(&mut staged_db, None, super::migrations::MIGRATIONS)?;
+        staged_db.close().map_err(|_| DataError::Busy)?;
         let db = connect(&root.join("memivy.db"), false)?;
-        identity(&db)?;
+        super::migrations::supported_version(&db, SCHEMA)?;
         let recovery = root.join("recovery");
         private_dir(&recovery)?;
         let backup = previous_path(root, id);
@@ -585,6 +597,33 @@ impl MemoryStore {
 #[cfg(test)]
 mod restore_tests {
     use super::*;
+    #[test]
+    fn old_backup_is_upgraded_on_a_private_copy_and_failure_publishes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let backup = dir.path().join("old.db");
+        store.backup(&backup).unwrap();
+        let original = fs::read(&backup).unwrap();
+        let source = backup_source(&backup).unwrap();
+        let target = dir.path().join("upgraded.db");
+        publish_upgraded_backup(
+            &source,
+            &target,
+            &["CREATE TABLE restore_probe(id INTEGER);"],
+        )
+        .unwrap();
+        let upgraded = Connection::open(&target).unwrap();
+        assert_eq!(
+            super::super::migrations::supported_version(&upgraded, 2).unwrap(),
+            2
+        );
+        check(&upgraded).unwrap();
+        let failed = dir.path().join("failed.db");
+        assert!(publish_upgraded_backup(&source, &failed, &["INVALID SQL"]).is_err());
+        assert!(!failed.exists());
+        assert_eq!(fs::read(&backup).unwrap(), original);
+        store.check_integrity().unwrap();
+    }
     #[test]
     fn interrupted_database_replacement_rolls_back_before_opening_the_library() {
         for replaced in [false, true] {

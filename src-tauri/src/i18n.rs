@@ -272,6 +272,8 @@ pub async fn ui_language_set(
     if window.label() != "main" {
         return Err(LanguageError { code: "forbidden" });
     }
+    let _update_work =
+        crate::updates::work().map_err(|error| LanguageError { code: error.code })?;
     let preference = serde_json::from_value::<Preference>(serde_json::Value::String(preference))
         .map_err(|_| LanguageError {
             code: "invalid_language",

@@ -40,7 +40,7 @@ pub(crate) fn require_main(window: &tauri::WebviewWindow) -> HostResult<()> {
 pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> memivy_core::memory::Result<T> + Send + 'static,
 ) -> HostResult<T> {
-    tauri::async_runtime::spawn_blocking(work)
+    crate::updates::spawn_blocking(work)
         .await
         .map_err(|_| HostError::new("operation_failed"))?
         .map_err(HostError::from)
@@ -54,6 +54,7 @@ async fn discussion_open(
     context: Vec<SourceRef>,
     collection_id: Option<String>,
 ) -> HostResult<Conversation> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || {
@@ -85,6 +86,7 @@ async fn discussion_topic(
     state: tauri::State<'_, Workspace>,
     id: String,
 ) -> HostResult<Conversation> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.conversation(&id)).await
@@ -135,7 +137,9 @@ fn launch_discussion(
     let input_id = execution.input_id.clone();
     let attempt_id = execution.attempt_id.clone();
     let answer_language = crate::i18n::language(&app);
+    let update_work = crate::updates::work()?;
     let task = tokio::spawn(async move {
+        let _update_work = update_work;
         let update_app = app.clone();
         let update_execution = execution.clone();
         if let Err(failure) = store
@@ -280,6 +284,7 @@ async fn discussion_submit(
     origin: Option<Origin>,
     quick: Option<bool>,
 ) -> HostResult<Conversation> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let initial = topic_id.is_none();
     let topic_id = topic_id.unwrap_or_else(|| id.clone());
@@ -344,6 +349,7 @@ async fn discussion_retry(
     state: tauri::State<'_, Workspace>,
     input_id: String,
 ) -> HostResult<Conversation> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let mut tasks = state
         .tasks
@@ -373,6 +379,7 @@ async fn discussion_cancel(
     state: tauri::State<'_, Workspace>,
     id: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let mut tasks = state
         .tasks
@@ -399,9 +406,10 @@ async fn discussion_source(
     source: SourceRef,
     message_id: Option<String>,
 ) -> std::result::Result<Evidence, ReadError> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
-    tauri::async_runtime::spawn_blocking(move || match message_id {
+    crate::updates::spawn_blocking(move || match message_id {
         Some(id) => store.discussion_excerpt(&id, &source),
         None => store.resolve_source(&source, 4096),
     })
@@ -419,6 +427,7 @@ async fn discussion_save_text(
     title: String,
     destination: Destination,
 ) -> HostResult<Receipt> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.save_agent_text(&id, &input_id, &text, &title, &destination)).await
@@ -429,6 +438,7 @@ async fn discussion_changes(
     state: tauri::State<'_, Workspace>,
     input_id: String,
 ) -> HostResult<Vec<AgentInputChange>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.agent_input_changes(&input_id)).await
@@ -439,6 +449,7 @@ async fn library_agent_changes(
     state: tauri::State<'_, Workspace>,
     memory_id: String,
 ) -> HostResult<Vec<AgentChangeGroup>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.memory_agent_changes(&memory_id)).await
@@ -450,6 +461,7 @@ async fn discussion_undo(
     input_id: String,
     request_id: String,
 ) -> HostResult<AgentUndoResult> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.undo_agent_input(&request_id, &input_id)).await
@@ -460,6 +472,7 @@ async fn organization_jobs(
     state: tauri::State<'_, Workspace>,
     key: RecordKey,
 ) -> HostResult<Vec<OrganizationJob>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.organization_jobs(&key)).await
@@ -471,6 +484,7 @@ async fn organization_retry(
     state: tauri::State<'_, Workspace>,
     memory_id: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.retry_organization(&memory_id)).await?;
@@ -504,6 +518,9 @@ fn start_organizer(app: tauri::AppHandle) {
             if state.exiting.load(Ordering::Relaxed) {
                 return;
             }
+            let Ok(_update_work) = crate::updates::work() else {
+                continue;
+            };
             if pending_failure.is_some() {
                 if !flush_organization_failure(state.store.clone(), &mut pending_failure).await {
                     delay = (delay * 2).min(5000);
@@ -544,6 +561,9 @@ fn start_organizer(app: tauri::AppHandle) {
                             let app = app.clone();
                             let config = config.clone();
                             tauri::async_runtime::spawn(async move {
+                                let Ok(_update_work) = crate::updates::work() else {
+                                    return;
+                                };
                                 let state = app.state::<Workspace>();
                                 let _guard = state.recommendation_lock.lock().await;
                                 if state.exiting.load(Ordering::Relaxed) {
@@ -586,6 +606,7 @@ async fn navigation_collections(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Vec<Collection>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.collections()).await
@@ -596,6 +617,7 @@ async fn navigation_record(
     state: tauri::State<'_, Workspace>,
     key: RecordKey,
 ) -> HostResult<RecordNavigation> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.record_navigation(&key)).await
@@ -608,6 +630,7 @@ async fn navigation_pin(
     key: RecordKey,
     pinned: bool,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.pin_record(&key, pinned)).await?;
@@ -623,6 +646,7 @@ async fn navigation_collect(
     collection: String,
     included: bool,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.collect_record(&collection, &key, included)).await?;
@@ -639,6 +663,7 @@ async fn navigation_save_collection(
     description: String,
     expected: Option<i64>,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.save_collection(&id, &name, &description, expected)).await?;
@@ -654,6 +679,7 @@ async fn navigation_archive_collection(
     archived: bool,
     expected: i64,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.archive_collection(&id, archived, expected)).await?;
@@ -666,6 +692,7 @@ async fn organization_collections(
     state: tauri::State<'_, Workspace>,
     receipt: String,
 ) -> HostResult<Vec<CollectionRecommendation>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     let receipt_id = receipt.clone();
@@ -689,6 +716,7 @@ async fn organization_states(
     state: tauri::State<'_, Workspace>,
     keys: Vec<RecordKey>,
 ) -> HostResult<Vec<OrganizationState>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.organization_states(&keys)).await
@@ -700,6 +728,7 @@ async fn organization_dismiss(
     state: tauri::State<'_, Workspace>,
     receipt: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.dismiss_organization_collections(&receipt)).await?;
@@ -715,6 +744,7 @@ async fn organization_collect(
     collection: String,
     revision: i64,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.accept_organization_collection(&receipt, &collection, revision)).await?;
@@ -727,6 +757,7 @@ async fn navigation_suggest(
     state: tauri::State<'_, Workspace>,
     collection: String,
 ) -> HostResult<Vec<LibraryRow>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     validate_config(&state.config)?;
     let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
@@ -742,6 +773,7 @@ async fn library_changes(
     state: tauri::State<'_, Workspace>,
     cursor: Option<ChangeCursor>,
 ) -> HostResult<LibraryChanges> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
     blocking(move || store.library_changes(cursor.as_ref())).await
@@ -752,6 +784,7 @@ async fn library_query(
     state: tauri::State<'_, Workspace>,
     query: LibraryQuery,
 ) -> HostResult<LibraryPage> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.library(&query)).await
@@ -761,6 +794,7 @@ async fn activity_summary(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<ActivitySummary> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.activity_summary()).await
@@ -773,6 +807,7 @@ async fn activity_records(
     until: i64,
     offset: usize,
 ) -> HostResult<ActivityRecords> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.activity_records(since, until, offset)).await
@@ -785,9 +820,10 @@ async fn library_detail(
     key: RecordKey,
     archives: Option<bool>,
 ) -> std::result::Result<LibraryDetail, ReadError> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::updates::spawn_blocking(move || {
         store.library_detail_view(&key, archives.unwrap_or(true))
     })
     .await
@@ -799,6 +835,7 @@ async fn library_projects(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Vec<String>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.library_projects()).await
@@ -808,6 +845,7 @@ async fn library_topics(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Vec<Conversation>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.conversations(12)).await
@@ -819,6 +857,7 @@ async fn discussion_messages(
     id: String,
     before: Option<i64>,
 ) -> HostResult<Vec<Message>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.recent_messages(&id, before, 40)).await
@@ -890,6 +929,7 @@ async fn library_capture(
     state: tauri::State<'_, Workspace>,
     request: CaptureRequest,
 ) -> HostResult<CaptureResult> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     if !matches!(&request.origin,Origin::User {app, ..} if app=="Memivy") {
         return Err(HostError::new("capture_origin_invalid"));
@@ -903,6 +943,7 @@ async fn library_edit(
     state: tauri::State<'_, Workspace>,
     draft: WorkspaceDraft,
 ) -> HostResult<Receipt> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || s.save_library_edit(&draft)).await
@@ -943,6 +984,7 @@ async fn library_action(
     state: tauri::State<'_, Workspace>,
     action: Action,
 ) -> HostResult<Option<Receipt>> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || {
@@ -996,6 +1038,7 @@ async fn library_rebuild(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     blocking(move || s.rebuild_search_index()).await
@@ -1008,6 +1051,7 @@ async fn memory_related(
     expected_version: String,
     collection_id: Option<String>,
 ) -> HostResult<Vec<RelatedMemory>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || {
@@ -1027,6 +1071,7 @@ async fn memory_export(
     key: RecordKey,
     expected_version: Option<String>,
 ) -> HostResult<Option<String>> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let s = state.store.clone();
     let selected = key.clone();
@@ -1100,6 +1145,7 @@ fn workspace_settings(
     window: tauri::WebviewWindow,
     state: tauri::State<Workspace>,
 ) -> HostResult<Settings> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let settings = crate::models::load(&state)?;
     if settings.llm.is_some() {
@@ -1111,6 +1157,7 @@ fn workspace_settings(
 }
 #[tauri::command]
 fn workspace_close(window: tauri::WebviewWindow) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "main" {
         return Err(HostError::new("main_window_required"));
     }
@@ -1123,6 +1170,7 @@ async fn embedding_status(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<EmbeddingStatus> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.embedding_status()).await
@@ -1133,6 +1181,7 @@ async fn embedding_control(
     state: tauri::State<'_, Workspace>,
     action: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     blocking(move || store.embedding_control(&action)).await
@@ -1145,6 +1194,9 @@ fn start_embedding(app: tauri::AppHandle) {
             if state.exiting.load(Ordering::SeqCst) {
                 break;
             }
+            let Ok(_update_work) = crate::updates::work() else {
+                continue;
+            };
             // Interactive requests take precedence over starting another batch.
             if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
                 continue;
@@ -1175,7 +1227,15 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         eprintln!("Memivy could not select the library: {error}");
         std::process::exit(1);
     });
-    let result = tauri::Builder::default()
+    let version = context.package_info().version.to_string();
+    let builder = tauri::Builder::default().manage(crate::updates::Updates::new(version));
+    // Development has no release signing configuration and must never replace an app.
+    let builder = if !cfg!(debug_assertions) && context.config().identifier == "com.memivy.app" {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    } else {
+        builder
+    };
+    let result = builder
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -1234,6 +1294,10 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         })
         .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
+            crate::updates::update_status,
+            crate::updates::update_check,
+            crate::updates::update_download,
+            crate::updates::update_install,
             crate::i18n::ui_language_snapshot,
             crate::i18n::ui_language_set,
             crate::voice::voice_status,

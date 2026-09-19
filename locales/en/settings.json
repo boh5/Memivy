@@ -230,5 +230,17 @@
   },
   "general": {
     "restoreDefaults": "Restore default settings"
+  },
+  "updates": {
+    "title": "App updates",
+    "currentVersion": "Current version: {{version}}",
+    "disabled": "Updates are available in the installed release app.",
+    "available": "Version {{version}} is available.",
+    "current": "You are up to date.",
+    "downloading": "Downloading and verifying update…",
+    "checking": "Checking for updates…",
+    "install": "Restart and install",
+    "download": "Download update",
+    "check": "Check for updates"
   }
 }

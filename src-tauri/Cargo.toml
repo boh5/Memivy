@@ -22,6 +22,7 @@ tauri-plugin-single-instance = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tauri-plugin-updater = "=2.11.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
@@ -30,6 +31,7 @@ objc2-foundation = "0.3.2"
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec2130422200f0863b23dfdad02b133a529b07" }
 
 [dev-dependencies]
+tauri = { version = "=2.11.5", features = ["test"] }
 uuid.workspace = true
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 tempfile.workspace = true

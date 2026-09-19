@@ -111,7 +111,7 @@ function load(file) {
   vm.runInNewContext(code,{require:req,module,exports:module.exports,console,...timers,performance,crypto:{randomUUID},window:{
     addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
     removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
-  },navigator:{clipboard},document:{querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
+  },navigator:{clipboard},document:{body:{inert:false},addEventListener(){},removeEventListener(){},querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
   return module.exports;
 }
 function mount(component,props={}) {

@@ -30,6 +30,7 @@ pub(crate) fn mcp_settings(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<McpSettings> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let binary = executable();
     let configuration = binary.as_ref().map(|path| {
@@ -52,6 +53,7 @@ pub(crate) async fn mcp_set_enabled(
     state: tauri::State<'_, Workspace>,
     enabled: bool,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     tauri::async_runtime::spawn_blocking(move || store.set_mcp_enabled(enabled))
@@ -134,6 +136,7 @@ pub(crate) async fn mcp_diagnose(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<McpDiagnostic> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let binary = executable().ok_or(HostError::new("mcp_missing"))?;
     let root = state

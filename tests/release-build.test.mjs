@@ -24,7 +24,7 @@ function fixture(t) {
     // Executable fixtures stand in for external build tools, not product logic.
     chmodSync(f,0o755);
   };
-  const env={...process.env,CARGO_TARGET_DIR:target,PATH:path.join(root,'tools')+path.delimiter+process.env.PATH};
+  const env={...process.env,TAURI_SIGNING_PRIVATE_KEY:'synthetic-packaging-test-key',CARGO_TARGET_DIR:target,PATH:path.join(root,'tools')+path.delimiter+process.env.PATH};
   return {root,put,target,command,run(name,args=[]){return spawnSync(process.execPath,[path.join(root,'scripts',name),...args],{cwd:root,env,encoding:'utf8'});}};
 }
 const supported=process.platform==='darwin'&&process.arch==='arm64';

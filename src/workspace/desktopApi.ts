@@ -1,3 +1,4 @@
+import {freezeForUpdate, resumeUpdate} from '../nativeIpc';
 import { message, type UiMessage } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -52,7 +53,32 @@ export function useWindowLifecycle(onError: (error: UiMessage) => void) {
   const errorRef = useRef(onError); errorRef.current = onError;
   useEffect(() => {
     if (!native) return;
+    let composing = false;
+    let updateRequest: number | null = null;
+    const startComposition = () => { composing = true; };
+    const endComposition = () => { composing = false; };
+    const installError = (event: Event) => errorRef.current(errorText((event as CustomEvent).detail));
+    document.addEventListener('compositionstart', startComposition);
+    document.addEventListener('compositionend', endComposition);
+    window.addEventListener('update-install-error', installError);
     const events = [
+      listen<number>('update-resumed', e => { if(updateRequest===e.payload) { updateRequest=null; resumeUpdate(); } }),
+      listen<number>('update-exit-request', e => {
+        updateRequest=e.payload;
+        if (composing || document.querySelector('dialog[open]')) {
+          void call('desktop_exit_ready', {id:e.payload,error:true});
+          return;
+        }
+        void freezeForUpdate().then(()=>flushDrafts())
+          .then(()=>updateRequest===e.payload ? call('desktop_exit_ready', {id:e.payload,error:false}) : undefined)
+          .catch(error=>{
+            if(updateRequest!==e.payload)return;
+            updateRequest=null;
+            resumeUpdate();
+            errorRef.current(errorText(error));
+            void call('desktop_exit_ready',{id:e.payload,error:true});
+          });
+      }),
       listen<string>("draft-changed", e => void refreshDrafts(e.payload).catch(e => errorRef.current(errorText(e)))),
       listen<number>("desktop-exit-request", e => {
         // An unconfirmed conclusion or settings form must remain reviewable.
@@ -66,7 +92,13 @@ export function useWindowLifecycle(onError: (error: UiMessage) => void) {
       }),
     ];
     void Promise.all(events).then(() => call("desktop_ready", { generation: null })).catch(e => errorRef.current(errorText(e)));
-    return () => { events.forEach(x => void x.then(stop => stop())); };
+    return () => {
+      events.forEach(x => void x.then(stop => stop()));
+      document.removeEventListener('compositionstart', startComposition);
+      document.removeEventListener('compositionend', endComposition);
+      window.removeEventListener('update-install-error', installError);
+      resumeUpdate();
+    };
   }, []);
 }
 export function shortcutLabel(shortcut: string) {

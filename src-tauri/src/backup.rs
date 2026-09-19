@@ -79,6 +79,7 @@ pub async fn backup_create(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<String>> {
+    let _update_work = crate::updates::work()?;
     main_only(&window)?;
     let Some(path) = select_file(&app, true).await? else {
         return Ok(None);
@@ -96,6 +97,7 @@ pub async fn backup_prepare(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<PreparedRestore>> {
+    let _update_work = crate::updates::work()?;
     main_only(&window)?;
     let Some(path) = select_file(&app, false).await? else {
         return Ok(None);
@@ -109,6 +111,7 @@ pub async fn backup_discard(
     state: tauri::State<'_, Workspace>,
     id: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     main_only(&window)?;
     let store = state.store.clone();
     blocking(move || store.discard_prepared_restore(&id)).await
@@ -119,6 +122,7 @@ pub async fn backup_restore(
     window: tauri::WebviewWindow,
     id: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     main_only(&window)?;
     {
         let state = app.state::<Workspace>();
@@ -142,6 +146,7 @@ pub async fn backup_result(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
 ) -> HostResult<Option<RestoreResult>> {
+    let _update_work = crate::updates::work()?;
     main_only(&window)?;
     let store = state.store.clone();
     blocking(move || store.last_restore_result()).await

@@ -255,7 +255,18 @@ impl Service {
                     || s.parts.iter().any(|p| p.text.is_none()) && s.error.is_none()
             })
     }
+    pub(crate) fn update_busy(&self) -> bool {
+        self.active()
+            || self.download.load(Ordering::SeqCst)
+            || self
+                .recorder
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished())
+    }
     fn begin(&self, session: Session, stop: Arc<AtomicBool>) -> HostResult<()> {
+        let _update_work = crate::updates::work()?;
         let mut s = self.state.lock().unwrap();
         if !s.prefs.enabled {
             return Err("voice_disabled".into());
@@ -339,6 +350,9 @@ impl Service {
         Ok(())
     }
     fn pump(&self) {
+        let Ok(_update_work) = crate::updates::work() else {
+            return;
+        };
         if !self.state.lock().unwrap().prefs.enabled {
             // Recheck under the locks: a new enable/start may arrive between ticks.
             let mut engine = self.engine.lock().unwrap();
@@ -675,6 +689,7 @@ pub fn setup(app: &tauri::AppHandle) -> HostResult<()> {
 }
 #[tauri::command]
 pub fn voice_status(voice: tauri::State<'_, Voice>) -> HostResult<Status> {
+    let _update_work = crate::updates::work()?;
     voice.0.status()
 }
 #[tauri::command]
@@ -685,6 +700,7 @@ pub fn voice_start(
     prefix: String,
     suffix: String,
 ) -> HostResult<Status> {
+    let _update_work = crate::updates::work()?;
     let valid_target = ["input", "quick_input"].contains(&key.as_str())
         || key
             .strip_prefix("discussion:")
@@ -735,15 +751,18 @@ pub fn voice_start(
 }
 #[tauri::command]
 pub fn voice_stop(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     voice.0.stop_session(&id);
     Ok(())
 }
 #[tauri::command]
 pub fn voice_clear(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     voice.0.clear(&id)
 }
 #[tauri::command]
 pub fn voice_retry(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     let mut s = voice.0.state.lock().unwrap();
     if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
         if v.recording || v.starting || v.processing {
@@ -767,6 +786,7 @@ pub async fn voice_control(
     action: String,
     value: Option<String>,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     crate::workspace::require_main(&window)?;
     let service = voice.0.clone();
     match action.as_str() {
@@ -925,6 +945,9 @@ fn register_shortcut(app: &tauri::AppHandle, text: &str) -> HostResult<()> {
             let shortcut = *shortcut;
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || {
+                let Ok(_update_work) = crate::updates::work() else {
+                    return;
+                };
                 let voice = handle.state::<Voice>();
                 {
                     let mut s = voice.0.state.lock().unwrap();
@@ -1060,6 +1083,11 @@ mod tests {
             assert_eq!(v.base, "existing text");
             assert!(!v.recording);
         }
+        service.state.lock().unwrap().load_requested = false;
+        assert!(
+            service.update_busy(),
+            "An unfinished recorder must block installation even after its watchdog times out"
+        );
         service.clear(&session.id).unwrap();
         assert!(
             service
@@ -1386,6 +1414,7 @@ mod tests {
 
 #[tauri::command]
 pub fn voice_applied(voice: tauri::State<'_, Voice>, id: String) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     let mut s = voice.0.state.lock().unwrap();
     if let Some(v) = s.session.as_mut().filter(|v| v.id == id) {
         if !v.complete() {

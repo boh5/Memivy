@@ -1,4 +1,5 @@
-import { isTauri, invoke } from '@tauri-apps/api/core';
+import {invoke} from '../nativeIpc';
+import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { initializeI18n } from './index';
 import { resolveLanguage, type Language, type LanguagePreference } from './languages';

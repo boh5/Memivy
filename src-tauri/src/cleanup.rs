@@ -21,6 +21,7 @@ pub(crate) async fn cleanup_prepare(
     memory: String,
     expected: String,
 ) -> HostResult<CleanupSnapshot> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     if id.is_empty() || id.len() > 64 || !id.is_ascii() {
         return Err(HostError::new("invalid"));
@@ -49,6 +50,7 @@ pub(crate) async fn cleanup_generate(
     previous: Option<String>,
     instruction: String,
 ) -> HostResult<String> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let config = read_model(&state)?;
     let store = state.store.clone();
@@ -89,6 +91,7 @@ pub(crate) fn cleanup_cancel(
     jobs: tauri::State<CleanupJobs>,
     id: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let mut slot = jobs
         .0
@@ -109,6 +112,7 @@ pub(crate) async fn cleanup_save(
     state: tauri::State<'_, Workspace>,
     request: CleanupSave,
 ) -> HostResult<Receipt> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
     let receipt = blocking(move || store.save_cleanup(&request)).await?;

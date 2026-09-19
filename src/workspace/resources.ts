@@ -1,5 +1,6 @@
+import {invoke} from '../nativeIpc';
 import { QueryClient, isCancelledError } from "@tanstack/react-query";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 

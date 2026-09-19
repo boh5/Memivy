@@ -7,6 +7,9 @@ mod i18n;
 mod mcp;
 mod models;
 mod storage;
+mod updates;
+#[cfg(test)]
+mod updates_tests;
 mod voice;
 mod workspace;
 fn main() {

@@ -53,6 +53,11 @@ pub(super) fn root_lock(root: &Path, exclusive: bool) -> Result<File> {
     lock(&file, exclusive)?;
     Ok(file)
 }
+pub(super) fn session_lock(root: &Path, exclusive: bool) -> Result<File> {
+    let file = open_lock(root, "mcp-sessions.lock")?;
+    lock(&file, exclusive)?;
+    Ok(file)
+}
 pub(super) fn available(root: &Path) -> Result<()> {
     if root.join("restore-pending.json").exists() {
         Err(DataError::Busy)
@@ -113,5 +118,22 @@ mod tests {
         root_lock(dir.path(), false).unwrap();
         drop(reader);
         root_lock(dir.path(), true).unwrap();
+    }
+    #[test]
+    fn idle_mcp_sessions_block_install_and_install_blocks_new_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::super::MemoryStore::open_application(dir.path()).unwrap();
+        let idle = session_lock(dir.path(), false).unwrap();
+        assert!(matches!(store.lock_for_app_update(), Err(DataError::Busy)));
+        drop(idle);
+        let installed = store.lock_for_app_update().unwrap();
+        assert!(matches!(
+            session_lock(dir.path(), false),
+            Err(DataError::Busy)
+        ));
+        assert!(matches!(root_lock(dir.path(), false), Err(DataError::Busy)));
+        drop(installed);
+        session_lock(dir.path(), false).unwrap();
+        store.check_integrity().unwrap();
     }
 }

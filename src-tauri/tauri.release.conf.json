@@ -16,6 +16,15 @@
     },
     "resources": {
       "../LICENSE": "LICENSE"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4MTRCRkNFRkIxREY2RjMKUldUejloMzd6cjhVV0JDekNaWERuZENjenI0RUFwR3lGYkdtanJ5NXh2c3NSeDJJQUxsbVhuc0gK",
+      "endpoints": [
+        "https://github.com/boh5/memivy/releases/latest/download/latest.json"
+      ]
     }
   }
 }

@@ -46,6 +46,21 @@ pub struct McpSearchResult {
 }
 
 impl MemoryStore {
+    /// Keep the returned lock alive for the entire external MCP process session.
+    pub fn open_mcp_environment() -> Result<(Self, File)> {
+        let root = Self::environment_root()?;
+        private_dir(&root)?;
+        let session = super::access::session_lock(&root, false)?;
+        Ok((Self::open(root)?, session))
+    }
+
+    /// Prevent MCP sessions and tool calls until the updater releases these locks.
+    pub fn lock_for_app_update(&self) -> Result<(File, File)> {
+        let sessions = super::access::session_lock(&self.root, true)?;
+        let requests = super::access::root_lock(&self.root, true)?;
+        super::access::available(&self.root)?;
+        Ok((sessions, requests))
+    }
     pub fn environment_root() -> Result<std::path::PathBuf> {
         if let Some(path) = std::env::var_os("MEMIVY_DATA_DIR") {
             return Ok(path.into());

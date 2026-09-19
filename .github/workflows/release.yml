@@ -49,6 +49,13 @@ jobs:
           node scripts/check-release.mjs "$RELEASE_TAG"
           git merge-base --is-ancestor HEAD origin/main
       - run: npm run build:release
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Verify updater archive against the shipped public key
+        env:
+          MEMIVY_TEST_UPDATE_ARCHIVE: ${{ github.workspace }}/target/aarch64-apple-darwin/release/bundle/macos/Memivy.app.tar.gz
+        run: cargo test --locked --offline -p memivy built_release_archive_matches_the_shipped_public_key -- --ignored
       - name: Build MCP verification probe
         run: cargo build --locked --offline --release --target aarch64-apple-darwin -p memivy-core --example memory_probe
       - name: Check packaged MCP
@@ -74,6 +81,7 @@ jobs:
           writeFileSync('release-assets/release-notes.md', section.trim() + '\n');
           NODE
           printf '\nSource commit: %s\n' "$(git rev-parse HEAD)" >> release-assets/release-notes.md
+          node scripts/prepare-update.mjs target/aarch64-apple-darwin/release/bundle/macos release-assets "${RELEASE_TAG#v}" release-assets/release-notes.md
           cd release-assets
           shasum -a 256 -c *.sha256
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -101,4 +109,4 @@ jobs:
             echo 'Release already exists; inspect it manually instead of replacing assets.' >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*.sha256 --verify-tag --draft --title "Memivy $RELEASE_TAG" --notes-file release-assets/release-notes.md
+          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*.sha256 release-assets/*.app.tar.gz release-assets/*.sig release-assets/latest.json --verify-tag --draft --title "Memivy $RELEASE_TAG" --notes-file release-assets/release-notes.md

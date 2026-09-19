@@ -81,6 +81,7 @@ pub(crate) fn models_load(
     window: tauri::WebviewWindow,
     state: tauri::State<Workspace>,
 ) -> HostResult<View> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     load(&state).map(view)
 }
@@ -115,6 +116,7 @@ pub(crate) async fn models_test(
     kind: String,
     mut binding: Binding,
 ) -> HostResult<TestResult> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let r = load(&state)?;
     if r.revision != revision {
@@ -142,7 +144,7 @@ pub(crate) async fn models_test(
             .to_string()
         }
         "embedding" => {
-            let dimension = tauri::async_runtime::spawn_blocking(move || {
+            let dimension = crate::updates::spawn_blocking(move || {
                 let v = memivy_core::models::embed(
                     &m,
                     "Memivy connection test: a personal note.",
@@ -160,7 +162,7 @@ pub(crate) async fn models_test(
             }
         }
         "voice" => {
-            tauri::async_runtime::spawn_blocking(move || {
+            crate::updates::spawn_blocking(move || {
                 memivy_core::models::transcribe(&m, &vec![0.; 16000])
             })
             .await
@@ -219,6 +221,7 @@ pub(crate) async fn models_apply(
     token: Option<String>,
     confirmed: bool,
 ) -> HostResult<View> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let mut r = load(&state)?;
     if r.revision != revision {
@@ -265,7 +268,7 @@ pub(crate) async fn models_apply(
                 }
                 r.embedding = b;
                 let store = state.store.clone();
-                let result = tauri::async_runtime::spawn_blocking(move || {
+                let result = crate::updates::spawn_blocking(move || {
                     store.apply_embedding_model(&mut r, &revision)?;
                     Ok::<_, String>(r)
                 })
@@ -309,6 +312,7 @@ pub(crate) fn models_organize(
     revision: String,
     enabled: bool,
 ) -> HostResult<View> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let mut r = load(&state)?;
     r.auto_organize = enabled;
@@ -323,6 +327,7 @@ pub(crate) async fn models_clear(
     state: tauri::State<'_, Workspace>,
     kind: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require_main(&window)?;
     if kind == "voice" {
         return crate::voice::clear_model(window.app_handle()).await;
@@ -331,7 +336,7 @@ pub(crate) async fn models_clear(
         return Err(HostError::new("invalid"));
     }
     let store = state.store.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::updates::spawn_blocking(move || {
         let root = store.database_path().parent().unwrap().to_owned();
         let _writer = memivy_core::embedding::lock(&root, "embedding-writer.lock")?;
         if ModelSettings::read(&root)?.embedding.source == Source::Local {

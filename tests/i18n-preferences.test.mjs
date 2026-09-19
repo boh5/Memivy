@@ -14,7 +14,7 @@ function fixture({ native = true, failListen = false } = {}) {
   vm.runInNewContext(code, {
     module, exports: module.exports, navigator: { languages: ['fr', 'zh-CN'] },
     require(name) {
-      if (name === '@tauri-apps/api/core') return {
+      if (name === '../nativeIpc' || name === '@tauri-apps/api/core') return {
         isTauri: () => native,
         invoke: (name, args) => { order.push(name); return new Promise((resolve, reject) => pending.push({ name, args, resolve, reject })); },
       };

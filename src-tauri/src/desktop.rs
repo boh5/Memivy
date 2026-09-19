@@ -979,6 +979,7 @@ pub async fn desktop_update(
     window: tauri::WebviewWindow,
     patch: Patch,
 ) -> HostResult<Snapshot> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     on_main(&app, move |h| {
         change(&h, patch)?;
@@ -988,6 +989,7 @@ pub async fn desktop_update(
 }
 #[tauri::command]
 pub async fn desktop_open(app: tauri::AppHandle, window: tauri::WebviewWindow) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     let at_cursor = window.label() == "main";
     on_main(&app, move |h| open(&h, at_cursor)).await
@@ -1000,6 +1002,7 @@ pub async fn desktop_dismiss(
     reason: String,
     requested_at: Option<u128>,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     on_main(&app, move |h| {
         let (active, pinned, handing_off) = {
@@ -1047,6 +1050,7 @@ pub async fn desktop_composer_resize(
     generation: u64,
     height: f64,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "capture" || !height.is_finite() {
         return Err("window_size_invalid".into());
     }
@@ -1165,6 +1169,7 @@ pub async fn desktop_expand(
     record: Option<RecordKey>,
     settings: bool,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     require(&window)?;
     on_main(&app, move |h| {
         if !h
@@ -1204,6 +1209,7 @@ pub async fn desktop_handoff_ready(
     generation: u64,
     failed: Option<bool>,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "main" {
         return Err("main_window_required".into());
     }
@@ -1227,6 +1233,7 @@ pub async fn desktop_drag(
     window: tauri::WebviewWindow,
     phase: String,
 ) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "capture" {
         return Err("capture_window_required".into());
     }
@@ -1276,6 +1283,7 @@ pub async fn desktop_drag(
 }
 #[tauri::command]
 pub async fn desktop_login_status(window: tauri::WebviewWindow) -> HostResult<String> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "main" {
         return Err("main_window_required".into());
     }
@@ -1291,6 +1299,7 @@ pub async fn desktop_login(
     window: tauri::WebviewWindow,
     enabled: Option<bool>,
 ) -> HostResult<String> {
+    let _update_work = crate::updates::work()?;
     if window.label() != "main" {
         return Err("main_window_required".into());
     }
@@ -1339,7 +1348,20 @@ fn set_login_enabled(app: &tauri::AppHandle, enabled: bool, initial: bool) -> Ho
     Ok(status)
 }
 
+pub(crate) fn ready_for_update(app: &tauri::AppHandle) -> bool {
+    let d = app.state::<Desktop>();
+    let s = d.inner.lock().unwrap();
+    s.quit.is_none()
+        && app
+            .webview_windows()
+            .keys()
+            .all(|label| s.ready_windows.contains(label))
+}
 pub fn request_quit(app: &tauri::AppHandle) {
+    if crate::updates::installing(app) {
+        termination::reply(false);
+        return;
+    }
     let (id, windows) = {
         let d = app.state::<Desktop>();
         let mut s = d.inner.lock().unwrap();
@@ -1352,12 +1374,18 @@ pub fn request_quit(app: &tauri::AppHandle) {
         s.quit = Some((id, windows.clone()));
         (id, windows)
     };
+    crate::updates::quit_requested(app, id);
     if windows.is_empty() {
         finish_quit(app);
         return;
     }
     for label in windows {
-        let _ = app.emit_to(&label, "desktop-exit-request", id);
+        let event = if crate::updates::preparing() {
+            "update-exit-request"
+        } else {
+            "desktop-exit-request"
+        };
+        let _ = app.emit_to(&label, event, id);
     }
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -1375,6 +1403,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
             if let Some(waiting) = waiting {
                 termination::reply(false);
                 crate::backup::cancel_restart(&app);
+                crate::updates::cancel_restart(&app);
                 set_error(&app, "quit_draft_unconfirmed".into());
                 if waiting.contains("capture") {
                     open(&app, true)?;
@@ -1389,7 +1418,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
 }
 
 fn finish_quit(app: &tauri::AppHandle) {
-    if crate::backup::finish_restart(app) {
+    if crate::updates::finish_restart(app) || crate::backup::finish_restart(app) {
         termination::reply(false);
         return;
     }
@@ -1797,6 +1826,7 @@ pub async fn desktop_exit_ready(
         if error {
             termination::reply(false);
             crate::backup::cancel_restart(&h);
+            crate::updates::cancel_restart(&h);
             set_error(&h, "quit_dialog_active".into());
             if window.label() == "capture" {
                 open(&h, true)?;

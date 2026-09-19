@@ -12,6 +12,7 @@ function fixture(t, invoke) {
   const code=ts.transpileModule(fs.readFileSync('src/workspace/resources.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   vm.runInNewContext(code,{module,exports:module.exports,console,require:name=>{
     if(name==='@tanstack/react-query')return {...query,QueryClient:Client};
+    if(name==='../nativeIpc')return {invoke};
     if(name==='@tauri-apps/api/core')return {invoke,isTauri:()=>true};
     if(name==='@tauri-apps/api/event')return {listen:async()=>()=>{}};
     if(name==='react')return react;

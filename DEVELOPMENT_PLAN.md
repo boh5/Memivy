@@ -1273,3 +1273,27 @@ No UI QA, native build or app launch was performed for this review. Verification
 - Add a short-lived cross-process admission lock before the existing data gate. An exclusive waiter closes admission while existing requests drain; ordinary requests retain shared concurrency. Keep the existing bounded lock timeout and Busy behavior for genuinely long-held locks. OS-owned locks release on errors and process exit; no persistent pending-writer marker or database migration is introduced. Older clients remain mutually excluded by the original gate but do not participate in the new admission policy.
 - Add regression coverage for pending-writer admission and timeout cleanup. Preserve every restore durability/integrity assertion, expose probe stderr on failure, bound probe execution, and stop the owned MCP process/writer on failed checks.
 - Validation: full core-assets regression passed (formatting, launcher tests, workspace/all-target Clippy and Rust tests, UI tests, frontend build, process recovery, MCP and synthetic data). Freshly built MCP/probe passed 12 consecutive live concurrent-restore runs; all acknowledged writes were retained in the pre-restore backup and both databases passed integrity checks. i18n and independent read-only review passed. No production library or installed application was changed. Evidence: research/core-tests/20260917T125259Z-1ef6bdf5/.
+
+## 基础应用内更新（2026-09-19）
+
+用户确认实施 `docs/goals/in-app-update-plan.md`。基础代码已完成，正式包覆盖安装与系统权限体验仍待隔离环境验收；本次没有发布版本、修改 GitHub Secrets 或替换日常安装。
+
+- 设置加入中英文版本显示、手动检查、更新说明、下载进度与单独确认安装。Rust 使用官方 `tauri-plugin-updater 2.11.0` 保存更新状态及已验证字节；下载失败或签名错误不进入安装。没有后台轮询、额外服务、增量更新或更新框架。开发身份禁用更新，并且不初始化缺少正式签名配置的更新插件。
+- 安装协调放在 `updates.rs`；复用现有双窗口退出确认。轻量任务计数覆盖命令、实际阻塞任务、讨论及标题生成、整理、推荐、嵌入和语音泵；忙时延后，避免复杂的任务接管。窗口停止编辑并保存草稿后才安装。退出令牌同时用于取消恢复，过期事件或 Promise 不能解冻下一次安装。录音超时后尚未结束的线程也阻止更新。恢复备份与更新互斥。
+- MCP 新增进程会话锁；更新持有会话与原有请求排他锁，直到进程退出。锁定后再检查旧版 MCP 进程。旧版进程枚举不是原子生命周期锁；原有请求锁仍防止它在安装期间访问资料库。不会强行结束外部 MCP。
+- 数据库继续使用正式 schema 1，未修改 `001_initial.sql`。核心新增顺序迁移、迁移前一致性备份、事务回滚及版本拒绝；旧备份在私有副本迁移后接入原有恢复流程。MCP 不能执行启动迁移。未来只需追加 SQL 迁移及该迁移对应的验证。
+- 同次构建产生 DMG 与官方 `.app.tar.gz` / `.sig`，CI 同一草稿附带 `latest.json`；下载地址固定到版本标签。签名私钥已生成于仓库外 `~/.config/memivy-release/updater.key`（0600），公钥进入 release 配置，无密码；构建显式使用空密码避免无终端时交互提示。配置 GitHub Secret 和发布验收步骤已写入 `docs/RELEASING.md`。本地仍使用 0.1.2 做构建检查，真正发布时按现有流程提高版本号，不能覆盖已发布标签。
+
+### 已执行的验证与边界
+
+- 完整 workspace Rust 测试通过（304 项）；包括迁移跳版本、备份失败、后续 SQL 失败、外键失败、事务中途杀进程后的恢复、旧客户端拒绝与 MCP 会话排他。后续生命周期修复后重新执行宿主测试，56 项通过。
+- 官方插件 MockRuntime + 本地 HTTP 测试调用真正的 Tauri signer 生成一次性密钥，验证正常下载、篡改拒绝、重试、无新版、坏清单及连接失败。另显式执行 `built_release_archive_matches_the_shipped_public_key`，确认实际约 21 MB 的 release 更新包能够通过仓库配置的公钥验证。实际包公钥验证也已加入发布 CI、位于上传之前。这些测试未调用安装器，也未冒充正式升级验收。
+- 前端构建、双语资源检查、UI 回归（264 项）、Rust 格式与 Clippy、发布脚本测试通过。UI 回归覆盖下载和安装分离、退出排空、旧取消事件/迟到失败不干扰重试，以及初始快照不能覆盖较新的下载完成事件。
+- `npm run test:core-assets` 的数据、故障恢复、MCP、合成数据及其余回归检查通过；首次运行因沙箱禁止 `ps` / 文件监听失败，授权环境重跑解决；重跑唯一剩余的测试服务器 Clippy 问题已修复并单独重新通过全 workspace Clippy。`python3 scripts/verify_restore.py` 通过：活跃 MCP 写入保留，恢复期间新连接及既有请求阻塞，恢复后可继续使用且完整性为 ok。
+- `npm run build:release` 成功，DMG 和已签名更新包已生成；签名、音频 entitlement 检查及真实产物清单生成通过。独立只读审查发现的命令遗漏、重试令牌、MCP 检查顺序及录音线程问题均修复并复审关闭。
+- 原生使用 `npm run qa:app`、稳定 Memivy Dev 身份和专用 `/private/tmp/memivy-updater-native-qa` 合成资料库，在本机 macOS 27.0 检查中英文更新入口及布局、开发版禁用更新、普通退出保存中文草稿。退出后只读检查确认为该合成库，草稿原文和 SQLite 完整性正常。测试会话已正常退出，释放共享锁；未触碰日常应用、生产库、持续开发库或共享模型。
+- 尚未验证：带更新器的真实旧版 → 新版安装与重启、只读安装/DMG 运行的真实安装错误、Gatekeeper 和麦克风权限在覆盖安装后的表现。需独立 macOS 测试账号或明确协调的安装环境；构建与签名测试不证明这些体验。GitHub `TAURI_SIGNING_PRIVATE_KEY` 仍需配置后才能让远端发布构建通过。
+
+### 完成后的独立复审（2026-09-19）
+
+按用户追加要求，新建独立子 agent Zeno，重新审查最终未提交实现：更新状态与任务准入、双窗口退出和草稿、前端 IPC、数据库迁移/恢复/MCP 锁、签名及发布流程，同时核对本地官方 updater 的安装与重启实现。此次未发现可行动的正确性缺陷，无需追加代码修改；`git diff --check` 通过。此为独立静态复审，没有新增原生运行或实际安装验证，不改变上文尚未验收的边界。

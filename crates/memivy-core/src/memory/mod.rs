@@ -16,6 +16,7 @@ mod discussion;
 mod embedding;
 mod library;
 mod mcp;
+mod migrations;
 mod navigation;
 mod organization;
 mod protocol;

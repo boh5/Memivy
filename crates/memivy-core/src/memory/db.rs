@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(super) const SCHEMA: i64 = 1;
+pub(super) const SCHEMA: i64 = super::migrations::CURRENT;
 pub(super) const APPLICATION_ID: i64 = 0x4d454d59; // MEMY
 #[derive(Clone, Debug)]
 pub struct MemoryStore {
@@ -120,7 +120,9 @@ fn initial_schema(db: &Connection) -> Result<i64> {
     )?;
     let app: i64 = db.pragma_query_value(None, "application_id", |r| r.get(0))?;
     let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if (app == 0 && version == 0 && tables == 0) || (app == APPLICATION_ID && version == SCHEMA) {
+    if (app == 0 && version == 0 && tables == 0)
+        || (app == APPLICATION_ID && (1..=SCHEMA).contains(&version))
+    {
         Ok(version)
     } else {
         Err(DataError::Schema)
@@ -135,9 +137,9 @@ impl MemoryStore {
         private_dir(root.as_ref())?;
         let _guard = super::access::root_lock(root.as_ref(), false)?;
         super::access::available(root.as_ref())?;
-        Self::open_unlocked(root.as_ref())
+        Self::open_unlocked(root.as_ref(), false)
     }
-    pub(super) fn open_unlocked(root: &Path) -> Result<Self> {
+    pub(super) fn open_unlocked(root: &Path, migrate: bool) -> Result<Self> {
         let store = Self {
             root: fs::canonicalize(root)?,
         };
@@ -149,7 +151,13 @@ impl MemoryStore {
             snapshot.commit()?;
             version
         };
-        if initial == SCHEMA {
+        if initial > 0 {
+            if initial < SCHEMA {
+                if !migrate {
+                    return Err(DataError::Schema);
+                }
+                super::migrations::upgrade(&mut db, Some(root), super::migrations::MIGRATIONS)?;
+            }
             if !db
                 .prepare("SELECT 1 FROM sqlite_master WHERE name='record_fts' AND type='table'")?
                 .exists([])?
@@ -166,6 +174,7 @@ impl MemoryStore {
                 "../../../../migrations/memory/001_initial.sql"
             ))?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
+            super::migrations::apply(&tx, 1, super::migrations::MIGRATIONS)?;
         }
         if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
             return Err(DataError::Integrity);
