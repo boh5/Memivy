@@ -11,7 +11,7 @@ default-run = "memivy-mcp"
 
 [dependencies]
 memivy-core.workspace = true
-rmcp = { version = "=3.2.0", features = ["server", "transport-io"] }
+rmcp = { version = "=3.4.0", features = ["server", "transport-io"] }
 schemars = "1"
 serde.workspace = true
 serde_json.workspace = true
