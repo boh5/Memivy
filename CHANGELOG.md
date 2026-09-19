@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Version-only release for verifying in-app updates from 0.1.3.
+- Update through Settings → App updates; application features and database schema are unchanged.
+
 ## 0.1.3
 
 - Check for updates in Settings, download a signed update, and confirm installation and restart.
