@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- Check for updates in Settings, download a signed update, and confirm installation and restart.
+- Preserve drafts before installation and defer updates while background work, recording, or MCP connections are active.
+- Add migration backups and transactional database upgrades for future schema changes; this release keeps schema 1.
+
+Users on 0.1.2 or earlier must install this version manually once to enable future in-app updates. Apple Silicon and macOS 26 or later only; ad-hoc signed and not notarized.
+
 ## 0.1.2
 
 First public release.

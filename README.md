@@ -136,7 +136,7 @@ To restore, click **Choose backup**, review its contents, and confirm. Memivy ba
 3. Download the new DMG and replace Memivy in Applications with the new version.
 4. Reopen Memivy, check that your memories and drafts are there, then reconnect your other AI apps.
 
-Updates are currently installed manually. Keep your backup from before the update; an older version may not open a library updated by a newer version.
+From 0.1.3, use **Settings → General → App updates** to check, download, and confirm installation. Versions 0.1.2 and earlier need one manual installation first. The steps above remain available as a manual fallback. Keep your backup from before the update; an older version may not open a library updated by a newer version.
 
 </details>
 

@@ -1,4 +1,4 @@
-name: Release draft
+name: Release
 on:
   push:
     tags: ['v*']
@@ -90,14 +90,14 @@ jobs:
           path: release-assets/
           if-no-files-found: error
           retention-days: 14
-  draft:
+  publish:
     needs: [verify, package]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
     steps:
-      - name: Download this run's artifact and create draft
+      - name: Download verified artifacts and publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -109,4 +109,4 @@ jobs:
             echo 'Release already exists; inspect it manually instead of replacing assets.' >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*.sha256 release-assets/*.app.tar.gz release-assets/*.sig release-assets/latest.json --verify-tag --draft --title "Memivy $RELEASE_TAG" --notes-file release-assets/release-notes.md
+          gh release create "$RELEASE_TAG" release-assets/*.dmg release-assets/*.sha256 release-assets/*.app.tar.gz release-assets/*.sig release-assets/latest.json --verify-tag --latest --title "Memivy $RELEASE_TAG" --notes-file release-assets/release-notes.md

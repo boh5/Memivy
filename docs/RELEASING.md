@@ -1,7 +1,8 @@
 # Releasing Memivy
 
-Pushing a version tag starts the release workflow. It builds a DMG, a signed updater archive and a version manifest, then creates a
-GitHub Release draft. Test the downloaded app before publishing the draft.
+Pushing a version tag starts the release workflow. It builds a DMG, a signed updater archive and a version manifest, then creates
+a stable GitHub Release directly after verification succeeds. Test local artifacts
+before pushing the release tag.
 
 Packages target Apple Silicon and macOS 26+. They are ad-hoc signed, without Apple
 notarization. Building them does not require an Apple Developer account.
@@ -11,7 +12,7 @@ notarization. Building them does not require an Apple Developer account.
 Before the first release:
 
 - Enable GitHub Actions and private vulnerability reporting in `boh5/memivy`.
-- Use read-only workflow permissions by default. The draft job requests the write access it needs.
+- Use read-only workflow permissions by default. The publish job requests the write access it needs.
 - Protect `main` with the CI check, using its name from a completed run, and restrict release tags to maintainers.
 
 ## Updater signing setup (once)
@@ -71,25 +72,12 @@ shipped public key before uploading assets.
 Review dependency vulnerabilities and check for accidentally included secrets.
 Commit the release changes, merge them into `main`, and wait for CI to pass.
 
-## 2. Create the draft
+## 2. Validate before publishing
 
-Create an annotated tag named `v<version>` on the checked commit on `main`, then
-push that tag. This starts the **Release draft** workflow.
-
-The workflow verifies the source and builds the app in parallel. Both jobs must
-pass before the DMG, checksum, updater archive, signature, `latest.json`, changelog
-entry, and source commit appear in the draft.
-
-A failed build or upload can be rerun against the same tag if no source change is
-needed. If a fix changes the source, prepare and tag a new version instead.
-The workflow stops when a release already exists for the tag; inspect that draft
-before retrying, since it will not be overwritten.
-
-## 3. Test the downloaded app
-
-Download the draft DMG through a browser and follow [Install Memivy (Chinese)](../README.zh-CN.md#安装),
-including checksum verification. Use another supported Mac or a separate macOS
-test account without development tools or cached models.
+Test the locally built DMG and updater artifacts before pushing a tag. Follow
+[Install Memivy (Chinese)](../README.zh-CN.md#安装), including checksum verification.
+Use another supported Mac or a separate macOS test account without development
+tools or cached models.
 
 Use sample notes and check the following:
 
@@ -103,9 +91,9 @@ Use sample notes and check the following:
 
 Also test upgrading a release that already contains the updater in the separate
 test account. Use settings → App updates: check, download, then restart and install.
-A draft is not visible through the public latest endpoint; test draft artifacts
-with a controlled test feed and a test-only build configuration, never by changing
-the production latest release or replacing your daily installation. Verify:
+Use a controlled test feed and a test-only build configuration for unpublished
+artifacts, never by changing the production latest release or replacing your
+daily installation. Verify:
 
 - Both windows' drafts, notes, settings and cached models survive.
 - Active recording, transcription, background work and external MCP sessions defer installation.
@@ -115,13 +103,21 @@ the production latest release or replacing your daily installation. Verify:
   recorded separately after update and after another launch. Ad-hoc signing does
   not guarantee permission continuity; updater signatures do not change that.
 
-Record results and any failures in `DEVELOPMENT_PLAN.md`. Publish after these
-checks pass.
+Record results, failures and any unverified scenarios in `DEVELOPMENT_PLAN.md`.
 
-## 4. Publish
+## 3. Publish
 
-Publish the tested draft with **Pre-release** unchecked and **Latest** selected.
-Download the public DMG and verify its checksum again.
+Create an annotated `v<version>` tag on the checked commit on `main` and push
+`main` and the tag. The **Release** workflow runs verification and packaging;
+only after both succeed does it publish the DMG, checksum, updater archive,
+signature and `latest.json` as a stable release marked **Latest**. No draft or
+manual publication step is used.
+
+A tag push authorizes public release. Download the public DMG and verify its
+checksum, then check that the public update manifest refers to the same version.
+The workflow refuses to overwrite an existing release. Rerun a failed job only
+when no source change is needed and the release has not been created; otherwise
+prepare a new version. Do not replace published assets in place.
 
 Keep published tags and binaries unchanged. If a fix is needed, release a new
 version. Users check and confirm updates in settings; there is no automatic
