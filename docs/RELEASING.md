@@ -12,7 +12,7 @@ notarization. Building them does not require an Apple Developer account.
 Before the first release:
 
 - Enable GitHub Actions and private vulnerability reporting in `boh5/memivy`.
-- Use read-only workflow permissions by default. The publish job requests the write access it needs.
+- Use read-only workflow permissions by default. The dispatch and publish jobs request the write access they need; no additional secret is required.
 - Protect `main` with the CI check, using its name from a completed run, and restrict release tags to maintainers.
 
 ## Updater signing setup (once)
@@ -66,8 +66,15 @@ build writes the DMG and its `.sha256` file to `target/release/bundle/dmg/`.
 Tauri also writes `Memivy.app.tar.gz` and `Memivy.app.tar.gz.sig` beside the built
 app under the Cargo target's `aarch64-apple-darwin/release/bundle/macos/` directory.
 CI uses `scripts/prepare-update.mjs` to copy those artifacts and generate
-`latest.json` with a fixed URL for that version. Both packages contain the same app. CI also verifies the actual archive with the official updater and the
-shipped public key before uploading assets.
+`latest.json` with a fixed URL for that version. Both packages contain the same app.
+Before uploading, CI uses Minisign to verify the actual archive against the shipped
+public key, without rebuilding the application in test mode. The ordinary Rust
+suite continues to test downloads, tampering and retries through Tauri's updater.
+To check a local archive, install Minisign (`brew install minisign`) and run:
+
+```sh
+node scripts/verify-update.mjs target/aarch64-apple-darwin/release/bundle/macos/Memivy.app.tar.gz
+```
 
 Review dependency vulnerabilities and check for accidentally included secrets.
 Commit the release changes, merge them into `main`, and wait for CI to pass.
@@ -108,7 +115,12 @@ Record results, failures and any unverified scenarios in `DEVELOPMENT_PLAN.md`.
 ## 3. Publish
 
 Create an annotated `v<version>` tag on the checked commit on `main` and push
-`main` and the tag. The **Release** workflow runs verification and packaging;
+`main` and the tag. A short **Queue release** run starts the **Release** workflow
+on `main`, passing the tag and its exact commit SHA. This keeps the build cache
+reusable across versions; both verification and packaging check out that SHA,
+and packaging checks that the tag matches and the commit belongs to `main`.
+The first run or a toolchain/dependency change can still require a cold build.
+Verification and packaging run in parallel;
 only after both succeed does it publish the DMG, checksum, updater archive,
 signature and `latest.json` as a stable release marked **Latest**. No draft or
 manual publication step is used.

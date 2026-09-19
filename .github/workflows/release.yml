@@ -1,16 +1,46 @@
 name: Release
+run-name: ${{ github.event_name == 'push' && 'Queue release' || 'Release' }} ${{ inputs.tag || github.ref_name }}
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+      source-sha:
+        description: Full commit SHA of the version tag
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 jobs:
+  dispatch:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      # Run on main so successive tags can reuse the release dependency cache.
+      - name: Queue release on main for the exact tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: gh workflow run release.yml --ref main -f tag="$RELEASE_TAG" -f source-sha="$RELEASE_SHA"
   verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/ci.yml
+    with:
+      source-sha: ${{ inputs.source-sha }}
   package:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 90
     env:
@@ -19,8 +49,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source-sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify tagged source is on main
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.source-sha }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RELEASE_SHA"
+          git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -42,20 +83,20 @@ jobs:
           cache-bin: false
       - run: npm ci
       - run: cargo fetch --locked
-      - name: Verify tag and source
+      - name: Verify release metadata
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          node scripts/check-release.mjs "$RELEASE_TAG"
-          git merge-base --is-ancestor HEAD origin/main
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/check-release.mjs "$RELEASE_TAG"
       - run: npm run build:release
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify updater archive against the shipped public key
         env:
-          MEMIVY_TEST_UPDATE_ARCHIVE: ${{ github.workspace }}/target/aarch64-apple-darwin/release/bundle/macos/Memivy.app.tar.gz
-        run: cargo test --locked --offline -p memivy built_release_archive_matches_the_shipped_public_key -- --ignored
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          command -v minisign >/dev/null || brew install minisign
+          node scripts/verify-update.mjs target/aarch64-apple-darwin/release/bundle/macos/Memivy.app.tar.gz
       - name: Build MCP verification probe
         run: cargo build --locked --offline --release --target aarch64-apple-darwin -p memivy-core --example memory_probe
       - name: Check packaged MCP
@@ -66,7 +107,7 @@ jobs:
         run: python3 scripts/verify_app_startup.py --app target/aarch64-apple-darwin/release/bundle/macos/Memivy.app
       - name: Prepare assets
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           mkdir release-assets
           cp target/release/bundle/dmg/*.dmg target/release/bundle/dmg/*.sha256 release-assets/
@@ -102,7 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           gh run download "$RUN_ID" --name release-assets --dir release-assets
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
