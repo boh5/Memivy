@@ -2,9 +2,10 @@ use super::{db::*, *};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 pub(super) const RECEIPT_COLUMNS: &str =
-    "request_id,action,capture_id,memory_id,before_version,after_version,status";
+    "request_id,action,capture_id,memory_id,before_version,after_version,status,reason";
 pub(super) fn read_receipt(r: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
     Ok(Receipt {
+        reason: r.get(7)?,
         request_id: r.get(0)?,
         action: r.get(1)?,
         capture_id: r.get(2)?,
@@ -36,7 +37,7 @@ pub(super) fn replay(db: &Connection, request: &str, hash: &[u8]) -> Result<Opti
     Ok(None)
 }
 pub(super) fn save_receipt(db: &Connection, receipt: &Receipt, hash: &[u8]) -> Result<()> {
-    db.execute("INSERT INTO receipts(request_id,fingerprint,action,capture_id,memory_id,before_version,after_version,status,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![receipt.request_id,hash,receipt.action,receipt.capture_id,receipt.memory_id,receipt.before_version,receipt.after_version,receipt.status,now()?])?;
+    db.execute("INSERT INTO receipts(request_id,fingerprint,action,capture_id,memory_id,before_version,after_version,status,created_at,reason) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![receipt.request_id,hash,receipt.action,receipt.capture_id,receipt.memory_id,receipt.before_version,receipt.after_version,receipt.status,now()?,receipt.reason])?;
     if receipt.status == "applied" && receipt.action != "undo" {
         save_changes(
             db,
@@ -52,6 +53,8 @@ pub(super) fn save_receipt(db: &Connection, receipt: &Receipt, hash: &[u8]) -> R
                 }
                 .into(),
                 after_state: "active".into(),
+                navigation_before: None,
+                navigation_after: None,
             }],
         )?;
     }
@@ -99,13 +102,12 @@ pub(super) fn validate_origin(origin: &Origin) -> Result<()> {
     Ok(())
 }
 pub(super) fn raw(db: &Connection, id: &str) -> Result<RawCapture> {
-    let (id,text,source,created_at,understanding):(String,String,String,i64,String)=db.query_row("SELECT c.id,c.text,c.source,c.created_at,s.understanding FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE c.id=? AND s.availability='active' AND c.text IS NOT NULL",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+    let (id,text,source,created_at):(String,String,String,i64)=db.query_row("SELECT c.id,c.text,c.source,c.created_at FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE c.id=? AND s.availability='active' AND c.text IS NOT NULL",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
     Ok(RawCapture {
         id,
         text,
         origin: serde_json::from_str(&source).map_err(|_| DataError::Integrity)?,
         created_at,
-        understanding,
     })
 }
 pub(super) fn insert_capture(
@@ -225,74 +227,69 @@ pub(super) fn write_version(db: &Connection, v: &Version) -> Result<()> {
         "UPDATE memories SET current_version_id=?2,updated_at=?3 WHERE id=?1",
         params![v.memory_id, v.id, v.created_at],
     )?;
-    db.execute("UPDATE capture_state SET understanding='attached' WHERE capture_id IN (SELECT capture_id FROM version_captures WHERE version_id=?) AND understanding!='attached'",[&v.id])?;
     Ok(())
 }
-pub(super) fn apply(db: &Connection, r: &ChangeRequest) -> Result<Receipt> {
-    valid_id(&r.capture_id)?;
-    if !db
-        .prepare("SELECT 1 FROM captures WHERE id=?")?
-        .exists([&r.capture_id])?
-    {
-        return Err(DataError::Unavailable);
-    }
-    valid_text(&r.title, 200)?;
-    valid_text(&r.body, 128 * 1024)?;
-    let (memory_id, previous) = match &r.destination {
-        Destination::New => {
-            let memory_id = id();
-            db.execute(
-                "INSERT INTO memories(id,created_at,updated_at) VALUES(?1,?2,?2)",
-                params![memory_id, now()?],
-            )?;
-            (memory_id, None)
-        }
-        Destination::Existing {
-            memory_id,
-            expected_version,
-        } => (
-            memory_id.clone(),
-            Some(head(db, memory_id, expected_version)?),
-        ),
-    };
-    let mut sources = previous
-        .as_ref()
-        .map(|v| v.capture_ids.clone())
-        .unwrap_or_default();
-    if !sources.contains(&r.capture_id) {
-        sources.push(r.capture_id.clone());
-    }
-    let v = Version {
-        id: id(),
-        memory_id: memory_id.clone(),
-        parent_id: previous.as_ref().map(|v| v.id.clone()),
-        title: r.title.clone(),
-        body: r.body.clone(),
-        actor: r.actor.as_str().into(),
-        reason: if previous.is_some() {
-            "append"
-        } else {
-            "create"
-        }
-        .into(),
-        created_at: now()?,
-        capture_ids: sources,
-    };
-    write_version(db, &v)?;
-    Ok(Receipt {
-        request_id: r.request_id.clone(),
-        action: v.reason.clone(),
-        capture_id: Some(r.capture_id.clone()),
-        memory_id: Some(memory_id),
-        before_version: v.parent_id.clone(),
-        after_version: Some(v.id),
-        status: "applied".into(),
+pub(super) fn navigation_snapshot(db: &Connection, memory: &str) -> Result<NavigationSnapshot> {
+    let collections = db.prepare("SELECT collection_id FROM collection_entries WHERE kind='memory' AND record_id=? ORDER BY collection_id")?
+        .query_map([memory], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let pinned = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM record_pins WHERE kind='memory' AND record_id=?)",
+        [memory],
+        |r| r.get(0),
+    )?;
+    Ok(NavigationSnapshot {
+        collections,
+        pinned: Some(pinned),
     })
 }
-fn changes(db: &Connection, request: &str) -> Result<Vec<ReceiptChange>> {
-    Ok(db.prepare("SELECT memory_id,before_version,after_version,before_state,after_state FROM receipt_changes WHERE request_id=? ORDER BY memory_id")?
-        .query_map([request], |r| Ok(ReceiptChange { memory_id:r.get(0)?, before_version:r.get(1)?, after_version:r.get(2)?, before_state:r.get(3)?, after_state:r.get(4)? }))?
-        .collect::<rusqlite::Result<_>>()?)
+pub(super) fn navigation_matches(
+    db: &Connection,
+    memory: &str,
+    expected: &NavigationSnapshot,
+) -> Result<bool> {
+    let current = navigation_snapshot(db, memory)?;
+    Ok(current.collections == expected.collections
+        && expected
+            .pinned
+            .is_none_or(|pin| current.pinned == Some(pin)))
+}
+pub(super) fn restore_navigation(
+    db: &Connection,
+    memory: &str,
+    value: &NavigationSnapshot,
+) -> Result<()> {
+    db.execute(
+        "DELETE FROM collection_entries WHERE kind='memory' AND record_id=?",
+        [memory],
+    )?;
+    for collection in &value.collections {
+        db.execute(
+            "INSERT INTO collection_entries(collection_id,kind,record_id) VALUES(?1,'memory',?2)",
+            params![collection, memory],
+        )?;
+    }
+    if let Some(pinned) = value.pinned {
+        db.execute(
+            "DELETE FROM record_pins WHERE kind='memory' AND record_id=?",
+            [memory],
+        )?;
+        if pinned {
+            db.execute(
+                "INSERT INTO record_pins(kind,record_id,created_at) VALUES('memory',?1,?2)",
+                params![memory, now()?],
+            )?;
+        }
+    }
+    Ok(())
+}
+pub(super) fn changes(db: &Connection, request: &str) -> Result<Vec<ReceiptChange>> {
+    db.prepare("SELECT memory_id,before_version,after_version,before_state,after_state,navigation_before,navigation_after FROM receipt_changes WHERE request_id=? ORDER BY memory_id")?
+        .query_map([request], |r| Ok((ReceiptChange { memory_id:r.get(0)?, before_version:r.get(1)?, after_version:r.get(2)?, before_state:r.get(3)?, after_state:r.get(4)?, navigation_before:None, navigation_after:None }, r.get::<_, Option<String>>(5)?,r.get::<_, Option<String>>(6)?)))?
+        .map(|row| { let (mut change, before, after) = row?;
+            change.navigation_before = before.as_deref().map(decode).transpose()?;
+            change.navigation_after = after.as_deref().map(decode).transpose()?;
+            Ok(change)
+        }).collect()
 }
 pub(super) fn save_changes(
     db: &Connection,
@@ -300,48 +297,44 @@ pub(super) fn save_changes(
     changes: &[ReceiptChange],
 ) -> Result<()> {
     for c in changes {
-        db.execute("INSERT INTO receipt_changes(request_id,memory_id,before_version,after_version,before_state,after_state) VALUES(?1,?2,?3,?4,?5,?6)",
-            params![request,c.memory_id,c.before_version,c.after_version,c.before_state,c.after_state])?;
+        let after = c
+            .navigation_after
+            .clone()
+            .unwrap_or(navigation_snapshot(db, &c.memory_id)?);
+        let before = c.navigation_before.clone().unwrap_or_else(|| {
+            if c.before_state == "undone" {
+                NavigationSnapshot {
+                    collections: vec![],
+                    pinned: Some(false),
+                }
+            } else {
+                after.clone()
+            }
+        });
+        db.execute("INSERT INTO receipt_changes(request_id,memory_id,before_version,after_version,before_state,after_state,navigation_before,navigation_after) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![request,c.memory_id,c.before_version,c.after_version,c.before_state,c.after_state,encode(&before)?,encode(&after)?])?;
     }
     Ok(())
 }
 /// Every affected head is checked before any compensation is committed.
-fn undo_inner(
-    db: &Connection,
-    original: &Receipt,
-    only_assignment: bool,
-) -> Result<Vec<ReceiptChange>> {
-    let effects = changes(db, &original.request_id)?;
-    // An undo of a two-memory correction identifies the restored assignment.
-    // A later correction removes just that assignment, never redoes the old
-    // target change. Ordinary undo receipts are not generic redo operations.
-    let restored_assignment = only_assignment
-        && original.action == "undo"
-        && effects.len() == 2
-        && effects.iter().any(|effect| {
-            Some(&effect.memory_id) == original.memory_id.as_ref() && effect.after_state == "active"
-        });
+fn undo_inner(db: &Connection, original: &Receipt) -> Result<Vec<ReceiptChange>> {
     if original.status != "applied"
-        || !(restored_assignment
-            || matches!(
-                original.action.as_str(),
-                "create"
-                    | "append"
-                    | "edit"
-                    | "restore"
-                    | "conclusion"
-                    | "correct"
-                    | "organize"
-                    | "merge"
-                    | "capture"
-            ))
+        || !matches!(
+            original.action.as_str(),
+            "create"
+                | "append"
+                | "edit"
+                | "restore"
+                | "conclusion"
+                | "correct"
+                | "organize"
+                | "merge"
+                | "capture"
+        )
     {
         return Err(DataError::Conflict);
     }
-    let effects: Vec<_> = effects
-        .into_iter()
-        .filter(|effect| !only_assignment || Some(&effect.memory_id) == original.memory_id.as_ref())
-        .collect();
+    let effects = changes(db, &original.request_id)?;
     if effects.is_empty() {
         return Err(DataError::Integrity);
     }
@@ -361,7 +354,9 @@ fn undo_inner(
         {
             return Err(DataError::Conflict);
         }
-        if original.action == "merge" && effect.after_state == "merged" && db.query_row("SELECT EXISTS(SELECT 1 FROM record_pins WHERE kind='memory' AND record_id=?1) OR EXISTS(SELECT 1 FROM collection_entries WHERE kind='memory' AND record_id=?1)",[&effect.memory_id],|r|r.get::<_,bool>(0))? {
+        if let Some(expected) = &effect.navigation_after
+            && !navigation_matches(db, &effect.memory_id, expected)?
+        {
             return Err(DataError::Conflict);
         }
         let after = if effect.before_state == "undone" {
@@ -390,7 +385,12 @@ fn undo_inner(
             write_version(db, &v)?;
             v.id
         };
+        if let Some(before) = &effect.navigation_before {
+            restore_navigation(db, &effect.memory_id, before)?;
+        }
         inverses.push(ReceiptChange {
+            navigation_before: effect.navigation_after,
+            navigation_after: effect.navigation_before,
             memory_id: effect.memory_id,
             before_version: Some(current),
             after_version: after,
@@ -403,6 +403,11 @@ fn undo_inner(
         [&original.request_id],
     )?;
     Ok(inverses)
+}
+/// Hidden merge sources remain citeable only while an effective merge leads to
+/// an active memory. Trash and purged owners never become a historical backdoor.
+pub(super) fn memory_reference_visible(db: &Connection, memory: &str) -> Result<bool> {
+    Ok(db.query_row("WITH RECURSIVE owners(id) AS (SELECT ?1 UNION SELECT r.memory_id FROM owners o JOIN memories m ON m.id=o.id AND m.state='merged' JOIN receipt_changes c ON c.memory_id=m.id AND c.after_state='merged' AND c.after_version=m.current_version_id JOIN receipts r ON r.request_id=c.request_id AND r.action='merge' AND r.status='applied') SELECT EXISTS(SELECT 1 FROM owners o JOIN memories m ON m.id=o.id WHERE m.state='active')", [memory], |r| r.get(0))?)
 }
 pub(super) fn resolve(db: &Connection, source: &SourceRef, max_chars: usize) -> Result<Evidence> {
     resolve_excerpt(db, source, max_chars, &[], None)
@@ -419,10 +424,18 @@ pub(super) fn resolve_excerpt(
             let c = raw(db, id)?;
             ("Original capture".into(), c.text, c.created_at, true)
         }
-        SourceRef::Version(id) => db.query_row(
-            "SELECT v.title,v.body,v.created_at,v.id=m.current_version_id FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE v.id=? AND m.state='active' AND v.body IS NOT NULL",
-            [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?,r.get(3)?))
-        )?,
+        SourceRef::Version(id) => {
+            let v = version(db, id)?;
+            if !memory_reference_visible(db, &v.memory_id)? {
+                return Err(DataError::Unavailable);
+            }
+            let current: bool = db.query_row(
+                "SELECT state='active' AND current_version_id=?2 FROM memories WHERE id=?1",
+                params![v.memory_id, id],
+                |r| r.get(0),
+            )?;
+            (v.title, v.body, v.created_at, current)
+        }
     };
     let max_chars = max_chars.clamp(1, 12_000);
     let total = text.chars().count();
@@ -443,7 +456,7 @@ pub(super) fn resolve_excerpt(
     })
 }
 impl MemoryStore {
-    /// Current body, input archive, receipt and organization task commit together.
+    /// Current body, original input and receipt commit together.
     pub fn capture(&self, r: &CaptureRequest) -> Result<CaptureResult> {
         if matches!(
             r.origin,
@@ -469,21 +482,11 @@ impl MemoryStore {
             });
         }
         let c = insert_capture(&tx, &r.request_id, &r.text, &r.origin)?;
-        // Old capture request IDs still replay without promoting an archive twice.
-        let linked: Option<(String,String)> = tx.query_row("SELECT m.id,m.current_version_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN memories m ON m.id=v.memory_id WHERE vc.capture_id=? ORDER BY v.created_at,v.rowid LIMIT 1",[&c.id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((memory_id, version_id)) = linked {
-            tx.commit()?;
-            return Ok(CaptureResult {
-                memory_id,
-                version_id,
-                capture_id: c.id,
-                created_at: c.created_at,
-            });
-        }
         let saved = create_captured_memory(&tx, &c)?;
         save_receipt(
             &tx,
             &Receipt {
+                reason: None,
                 request_id: r.request_id.clone(),
                 action: "capture".into(),
                 capture_id: Some(c.id.clone()),
@@ -494,26 +497,11 @@ impl MemoryStore {
             },
             &hash,
         )?;
-        if crate::models::ModelSettings::read(&self.root).is_ok_and(|r| r.auto_organize) {
-            tx.execute("INSERT INTO organization_jobs(memory_id,input_version_id,capture_id,attempt_id,status,created_at) VALUES(?1,?2,?3,?4,'pending',?5)",params![saved.memory_id,saved.version_id,c.id,id(),c.created_at])?;
-        }
         tx.commit()?;
         Ok(saved)
     }
     pub fn capture_by_id(&self, id: &str) -> Result<RawCapture> {
         raw(&self.connection()?, id)
-    }
-    pub fn apply_capture(&self, r: &ChangeRequest) -> Result<Receipt> {
-        let hash = fingerprint(&("apply", r))?;
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(old) = replay(&tx, &r.request_id, &hash)? {
-            return Ok(old);
-        }
-        let receipt = apply(&tx, r)?;
-        save_receipt(&tx, &receipt, &hash)?;
-        tx.commit()?;
-        Ok(receipt)
     }
     pub fn edit_memory(&self, r: &EditRequest) -> Result<Receipt> {
         let hash = fingerprint(&("edit", r))?;
@@ -532,6 +520,7 @@ impl MemoryStore {
         v.created_at = now()?;
         write_version(&tx, &v)?;
         let receipt = Receipt {
+            reason: None,
             request_id: r.request_id.clone(),
             action: "edit".into(),
             capture_id: None,
@@ -619,6 +608,7 @@ impl MemoryStore {
         v.created_at = now()?;
         write_version(&tx, &v)?;
         let receipt = Receipt {
+            reason: None,
             request_id: request.into(),
             action: "restore".into(),
             capture_id: None,
@@ -650,7 +640,7 @@ impl MemoryStore {
             [original_request],
             read_receipt,
         )?;
-        let inverse = undo_inner(&tx, &original, false)?;
+        let inverse = undo_inner(&tx, &original)?;
         // Undoing a correction moves the capture back to its former memory.
         // Point the receipt there, with its new head and removal baseline, so
         // the user can correct that assignment again without stale receipts.
@@ -669,6 +659,7 @@ impl MemoryStore {
             })
             .ok_or(DataError::Integrity)?;
         let receipt = Receipt {
+            reason: None,
             request_id: request.into(),
             action: "undo".into(),
             capture_id: original.capture_id,
@@ -679,51 +670,38 @@ impl MemoryStore {
         };
         save_receipt(&tx, &receipt, &hash)?;
         save_changes(&tx, &receipt.request_id, &inverse)?;
+        let input: Option<String> = tx.query_row(
+            "SELECT logical_input_id FROM receipts WHERE request_id=?",
+            [original_request],
+            |r| r.get(0),
+        )?;
+        if let Some(input) = input {
+            // Match grouped undo: invalidate compacted decisions and fence late writes.
+            tx.execute("UPDATE conversations SET summary='',summary_through_seq=0 WHERE id IN (SELECT conversation_id FROM turns WHERE id=?1 UNION SELECT json_extract(c.source,'$.conversation_id') FROM receipts r JOIN captures c ON c.id=r.capture_id WHERE r.logical_input_id=?1)",[&input])?;
+            tx.execute("UPDATE messages SET status='cancelled',error_code='changes_undone' WHERE turn_id=? AND role='assistant' AND status='processing'",[&input])?;
+            tx.execute(
+                "UPDATE turns SET active_attempt=NULL,progress=NULL WHERE id=?",
+                [&input],
+            )?;
+        }
         tx.commit()?;
         Ok(receipt)
     }
-    /// Correct a mistaken assignment atomically. Both target versions are checked.
-    pub fn correct_assignment(&self, original_request: &str, r: &ChangeRequest) -> Result<Receipt> {
-        if r.actor != Actor::User {
-            return Err(DataError::Invalid);
-        }
-        let hash = fingerprint(&("correct", original_request, r))?;
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(old) = replay(&tx, &r.request_id, &hash)? {
-            return Ok(old);
-        }
-        let original = tx.query_row(
-            &format!("SELECT {RECEIPT_COLUMNS} FROM receipts WHERE request_id=?"),
-            [original_request],
-            read_receipt,
-        )?;
-        if original.capture_id.as_deref() != Some(&r.capture_id) {
-            return Err(DataError::Invalid);
-        }
-        if let Destination::Existing { memory_id, .. } = &r.destination
-            && original.memory_id.as_ref() == Some(memory_id)
-        {
-            return Err(DataError::Invalid);
-        }
-        let inverse = if original.status == "applied" {
-            undo_inner(&tx, &original, true)?
-        } else if original.status == "needs_review" {
-            vec![]
-        } else {
-            return Err(DataError::Conflict);
-        };
-        let mut receipt = apply(&tx, r)?;
-        receipt.action = "correct".into();
-        tx.execute(
-            "UPDATE receipts SET status='undone' WHERE request_id=?",
-            [original_request],
-        )?;
-        save_receipt(&tx, &receipt, &hash)?;
-        save_changes(&tx, &receipt.request_id, &inverse)?;
-        tx.execute("UPDATE organization_jobs SET receipt_id=?2,status='done',reason='',reason_code='organization_corrected' WHERE capture_id=?1",params![r.capture_id,receipt.request_id])?;
-        tx.commit()?;
-        Ok(receipt)
+    pub fn memory_receipts(&self, key: &RecordKey) -> Result<Vec<MemoryReceipt>> {
+        key.validate()?;
+        let db = self.connection()?;
+        let sql = format!(
+            "SELECT {RECEIPT_COLUMNS},logical_input_id FROM receipts WHERE action NOT IN ('capture','undo') AND request_id IN (SELECT c.request_id FROM receipt_changes c JOIN memories m ON m.id=c.memory_id WHERE m.id=? AND m.state IN ('active','merged')) ORDER BY rowid DESC LIMIT 20"
+        );
+        Ok(db
+            .prepare(&sql)?
+            .query_map([&key.id], |row| {
+                Ok(MemoryReceipt {
+                    receipt: read_receipt(row)?,
+                    logical_input_id: row.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
     }
     pub fn receipt_changes(&self, request: &str) -> Result<Vec<ReceiptChange>> {
         changes(&self.connection()?, request)
@@ -774,9 +752,9 @@ impl MemoryStore {
             "UPDATE memories SET state='trashed',updated_at=?2 WHERE id=?1",
             params![memory, now()?],
         )?;
-        // All historical sources exclusive to this memory enter trash with it.
+        // Include historical sources of every effective hidden merge source.
         // Shared sources and independently trashed sources retain their own state.
-        tx.execute("UPDATE capture_state SET availability='trashed',trash_owner=?1 WHERE availability='active' AND capture_id IN (SELECT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=?1) AND NOT EXISTS(SELECT 1 FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN memories m ON m.id=v.memory_id WHERE vc.capture_id=capture_state.capture_id AND m.state='active')",[memory])?;
+        trash_memory_sources(&tx, memory, &memory_and_merged_sources(&tx, memory)?)?;
         tx.commit()?;
         Ok(())
     }
@@ -798,29 +776,11 @@ impl MemoryStore {
             params![memory, now()?],
         )?;
         // A shared source may have entered trash with a different memory later.
-        tx.execute("UPDATE capture_state SET availability='active',trash_owner=NULL WHERE availability='trashed' AND trash_owner IS NOT NULL AND capture_id IN (SELECT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id=?)",[memory])?;
+        let family = encode(&memory_and_merged_sources(&tx, memory)?)?;
+        tx.execute("UPDATE capture_state SET availability='active',trash_owner=NULL WHERE availability='trashed' AND trash_owner IS NOT NULL AND capture_id IN (SELECT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE v.memory_id IN (SELECT value FROM json_each(?)))",[family])?;
         tx.commit()?;
         Ok(())
     }
-    pub fn trash_capture(&self, capture: &str) -> Result<()> {
-        let db = self.connection()?;
-        if db.execute("UPDATE capture_state SET availability='trashed',trash_owner=NULL WHERE capture_id=? AND availability!='purged'",[capture])?==0 { return Err(DataError::Unavailable) }
-        Ok(())
-    }
-    pub fn restore_capture(&self, capture: &str) -> Result<()> {
-        let db = self.connection()?;
-        if db.execute("UPDATE capture_state SET availability='active',trash_owner=NULL WHERE capture_id=? AND availability!='purged'",[capture])?==0 { return Err(DataError::Unavailable) }
-        Ok(())
-    }
-    pub fn purge_capture(&self, capture: &str) -> Result<()> {
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        erase_capture(&tx, capture)?;
-        tx.commit()?;
-        Ok(())
-    }
-    /// Explicit erasure accepts trash and withdrawn memories addressable by a
-    /// receipt. Purging a withdrawn snapshot leaves retained raw input intact.
     pub fn purge_memory(&self, memory: &str) -> Result<()> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -831,27 +791,25 @@ impl MemoryStore {
         if state == "purged" {
             return Ok(());
         }
-        if !matches!(state.as_str(), "trashed" | "undone") {
+        if state != "trashed" {
             return Err(DataError::Conflict);
         }
+        let family = memory_and_merged_sources(&tx, memory)?;
+        // Only erase sources owned by this trash operation; other sources may be shared.
         let sources:Vec<String>=tx.prepare("SELECT capture_id FROM capture_state WHERE availability='trashed' AND trash_owner=?")?.query_map([memory],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         for source in sources {
-            let other:Option<String>=tx.query_row("SELECT m.id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN memories m ON m.id=v.memory_id WHERE vc.capture_id=?1 AND m.id!=?2 AND m.state IN ('active','trashed') ORDER BY m.id LIMIT 1",params![source,memory],|r|r.get(0)).optional()?;
-            if let Some(other) = other {
+            if let Some((other, state)) = other_capture_owner(&tx, &source, memory, true)? {
                 tx.execute(
-                    "UPDATE capture_state SET trash_owner=?2 WHERE capture_id=?1",
-                    params![source, other],
+                    "UPDATE capture_state SET availability=?2,trash_owner=?3 WHERE capture_id=?1",
+                    params![source, state, (state == "trashed").then_some(other)],
                 )?;
             } else {
                 erase_capture(&tx, &source)?;
             }
         }
-        let merged: Vec<String> = tx.prepare("SELECT c.memory_id FROM receipts r JOIN receipt_changes c ON c.request_id=r.request_id JOIN memories m ON m.id=c.memory_id WHERE r.memory_id=? AND r.action='merge' AND r.status='applied' AND c.after_state='merged' AND m.state='merged' AND m.current_version_id=c.after_version")?
-            .query_map([memory],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        for input in merged {
+        for input in family {
             erase_memory(&tx, &input)?;
         }
-        erase_memory(&tx, memory)?;
         tx.commit()?;
         Ok(())
     }
@@ -859,11 +817,34 @@ impl MemoryStore {
         resolve(&self.connection()?, source, max_chars)
     }
 }
+fn memory_and_merged_sources(db: &Connection, memory: &str) -> Result<Vec<String>> {
+    Ok(db.prepare("WITH RECURSIVE merged(id) AS (SELECT ?1 UNION SELECT c.memory_id FROM merged parent JOIN receipts r ON r.memory_id=parent.id AND r.action='merge' AND r.status='applied' JOIN receipt_changes c ON c.request_id=r.request_id AND c.after_state='merged' JOIN memories m ON m.id=c.memory_id AND m.state='merged' AND m.current_version_id=c.after_version) SELECT id FROM merged")?
+        .query_map([memory], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+}
+
+fn trash_memory_sources(db: &Connection, memory: &str, family: &[String]) -> Result<()> {
+    let sources: Vec<String> = db.prepare("SELECT DISTINCT vc.capture_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id JOIN capture_state s ON s.capture_id=vc.capture_id WHERE v.memory_id IN (SELECT value FROM json_each(?)) AND s.availability='active'")?
+        .query_map([encode(&family)?], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    for source in sources {
+        if other_capture_owner(db, &source, memory, false)?.is_none() {
+            db.execute("UPDATE capture_state SET availability='trashed',trash_owner=?2 WHERE capture_id=?1", params![source,memory])?;
+        }
+    }
+    Ok(())
+}
+
+// A historical source can be shared through another hidden merge source. Transfer
+// trash ownership to its surviving visible owner, never to the hidden intermediary.
+fn other_capture_owner(
+    db: &Connection,
+    capture: &str,
+    excluded: &str,
+    include_trash: bool,
+) -> Result<Option<(String, String)>> {
+    Ok(db.query_row("WITH RECURSIVE owners(id) AS (SELECT v.memory_id FROM version_captures vc JOIN memory_versions v ON v.id=vc.version_id WHERE vc.capture_id=?1 UNION SELECT r.memory_id FROM owners o JOIN memories m ON m.id=o.id AND m.state='merged' JOIN receipt_changes c ON c.memory_id=m.id AND c.after_state='merged' AND c.after_version=m.current_version_id JOIN receipts r ON r.request_id=c.request_id AND r.action='merge' AND r.status='applied') SELECT m.id,m.state FROM owners o JOIN memories m ON m.id=o.id WHERE m.id!=?2 AND (m.state='active' OR (?3 AND m.state='trashed')) ORDER BY m.state='active' DESC,m.id LIMIT 1", params![capture,excluded,include_trash], |r| Ok((r.get(0)?,r.get(1)?))).optional()?)
+}
+
 fn erase_capture(db: &Connection, capture: &str) -> Result<()> {
-    db.execute(
-        "DELETE FROM workspace_drafts WHERE key=?",
-        [format!("capture:{capture}")],
-    )?;
     let state: String = db.query_row(
         "SELECT availability FROM capture_state WHERE capture_id=?",
         [capture],
@@ -892,6 +873,10 @@ fn erase_capture(db: &Connection, capture: &str) -> Result<()> {
     Ok(())
 }
 fn erase_memory(db: &Connection, memory: &str) -> Result<()> {
+    db.execute(
+        "UPDATE receipts SET reason=NULL WHERE reason IS NOT NULL AND (memory_id=?1 OR request_id IN (SELECT request_id FROM receipt_changes WHERE memory_id=?1))",
+        [memory],
+    )?;
     db.execute(
         "DELETE FROM workspace_drafts WHERE key=?",
         [format!("memory:{memory}")],

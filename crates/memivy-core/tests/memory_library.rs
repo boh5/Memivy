@@ -1,5 +1,8 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use rusqlite::{Connection, params};
+use serde_json::json;
 use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
@@ -239,18 +242,21 @@ fn drafts_are_private_to_editing_and_survive_restart() {
             .items
             .is_empty()
     );
-    let export = d.path().join("export");
-    s.export_markdown(&export).unwrap();
-    for entry in std::fs::read_dir(export).unwrap() {
-        let entry = entry.unwrap();
-        if entry.path().is_file() {
-            assert!(
-                !std::fs::read_to_string(entry.path())
-                    .unwrap()
-                    .contains("draft_secret_NOT_MEMORY")
-            );
-        }
-    }
+    let export = d.path().join("export.md");
+    s.export_record_markdown(
+        &RecordKey {
+            kind: "memory".into(),
+            id: raw.memory_id.clone(),
+        },
+        &raw.version_id,
+        &export,
+    )
+    .unwrap();
+    assert!(
+        !std::fs::read_to_string(export)
+            .unwrap()
+            .contains("draft_secret_NOT_MEMORY")
+    );
     s.trash_memory(&raw.memory_id, &raw.version_id).unwrap();
     s.purge_memory(&raw.memory_id).unwrap();
     assert!(s.workspace_draft(&draft.key).unwrap().is_none());
@@ -286,13 +292,6 @@ fn trash_groups_exclusive_originals_and_never_returns_them_in_normal_search() {
     s.restore_memory(&key(&r).id).unwrap();
     assert!(query(&s, "回收站专属标记").items.is_empty());
     assert_eq!(query(&s, "回收正文").items.len(), 1);
-    s.trash_capture(&raw.capture_id).unwrap();
-    assert!(
-        s.library_detail(&key(&r)).unwrap().sources[0]
-            .capture
-            .is_none()
-    );
-    assert!(query(&s, "回收站专属标记").items.is_empty());
     s.trash_memory(&key(&r).id, r.after_version.as_ref().unwrap())
         .unwrap();
     let deleted_source = s
@@ -342,23 +341,56 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
     let conversation = id();
     s.create_conversation(&conversation, "unsaved_chat_marker")
         .unwrap();
-    s.save_conversation_draft(&conversation, "unsaved_chat_marker")
-        .unwrap();
     let a = capture(&s, "原始来源 A", "agent", Some("工程"));
     let r = organize(&s, &a, "示例记忆", "当前记忆");
     let b = capture(&s, "原始来源 B", "user", Some("生活"));
-    s.apply_capture(&ChangeRequest {
-        request_id: id(),
-        capture_id: b.capture_id,
+    let run = s
+        .begin_agent_input(
+            &id(),
+            &id(),
+            &conversation,
+            "Update the memory with this source",
+            &[],
+            None,
+        )
+        .unwrap();
+    let args = MemoryWriteArgs {
         destination: Destination::Existing {
             memory_id: key(&r).id.clone(),
             expected_version: r.after_version.unwrap(),
         },
         title: "示例记忆".into(),
-        body: "当前记忆".into(),
-        actor: Actor::Ai,
-    })
-    .unwrap();
+        parts: vec![MemoryWritePart {
+            text: "当前记忆".into(),
+            sources: vec![MemorySourceQuote {
+                source_id: b.capture_id,
+                quote: "原始来源 B".into(),
+            }],
+        }],
+    };
+    let call = id();
+    let protocol = vec![json!(Message::Assistant {
+        id: None,
+        content: vec![AssistantContent::ToolCall(ToolCall::from_wire(
+            &call,
+            ToolFunction::new("write_memory".into(), json!(args))
+        ))]
+    })];
+    s.checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
+        .unwrap();
+    let op = s
+        .stage_agent_operation(
+            &run.input_id,
+            &run.attempt_id,
+            &call,
+            "write_memory",
+            &json!(args),
+        )
+        .unwrap();
+    s.apply_agent_memory(&run.input_id, &run.attempt_id, &op.operation_id, &args)
+        .unwrap();
+    s.finish_agent_input(&run.input_id, &run.attempt_id, &[])
+        .unwrap();
     assert!(query(&s, "unsaved_chat_marker").items.is_empty());
     for p in ["工程", "生活"] {
         assert_eq!(
@@ -407,12 +439,21 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
     let chat = id();
     s.create_conversation(&chat, "conversation_private")
         .unwrap();
-    s.save_conversation_draft(&chat, "conversation_draft_private")
-        .unwrap();
+    s.save_workspace_draft(&WorkspaceDraft {
+        destination: None,
+        context: vec![],
+        key: format!("discussion:{chat}"),
+        request_id: id(),
+        title: String::new(),
+        body: "conversation_draft_private".into(),
+        expected_version: None,
+        origin: None,
+    })
+    .unwrap();
     let folder = d.path().join("article-export");
     std::fs::create_dir(&folder).unwrap();
     let file = folder.join("一篇.md");
-    s.export_record_markdown(&selected, current.after_version.as_deref(), &file)
+    s.export_record_markdown(&selected, current.after_version.as_deref().unwrap(), &file)
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -425,11 +466,11 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
     );
     // No archive/manifest is created, and an approved overwrite stays one file.
     std::fs::write(&file, "previous export").unwrap();
-    s.export_record_markdown(&selected, current.after_version.as_deref(), &file)
+    s.export_record_markdown(&selected, current.after_version.as_deref().unwrap(), &file)
         .unwrap();
     let before = std::fs::read(&file).unwrap();
     assert_eq!(
-        s.export_record_markdown(&selected, first.after_version.as_deref(), &file)
+        s.export_record_markdown(&selected, first.after_version.as_deref().unwrap(), &file)
             .unwrap_err(),
         DataError::Conflict
     );
@@ -437,40 +478,9 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
     s.trash_memory(&selected.id, current.after_version.as_ref().unwrap())
         .unwrap();
     assert_eq!(
-        s.export_record_markdown(&selected, current.after_version.as_deref(), &file)
+        s.export_record_markdown(&selected, current.after_version.as_deref().unwrap(), &file)
             .unwrap_err(),
         DataError::Unavailable
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);
-}
-
-#[test]
-fn single_raw_export_preserves_text_without_exporting_other_records() {
-    let (d, s) = setup();
-    let raw = capture(
-        &s,
-        "原始记录\n\n 中文、https://example.com/a_b%20\n ",
-        "user",
-        None,
-    );
-    capture(&s, "无关记录", "user", None);
-    let selected = RecordKey {
-        kind: "capture".into(),
-        id: raw.capture_id.clone(),
-    };
-    let file = d.path().join("原话.md");
-    s.export_record_markdown(&selected, None, &file).unwrap();
-    assert_eq!(
-        std::fs::read_to_string(&file).unwrap(),
-        format!(
-            "# 原始记录\n\n{}\n",
-            s.capture_by_id(&raw.capture_id).unwrap().text
-        )
-    );
-    assert_eq!(
-        s.export_record_markdown(&selected, None, d.path().join("memivy.db"))
-            .unwrap_err(),
-        DataError::Invalid
-    );
-    s.check_integrity().unwrap();
 }

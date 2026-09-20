@@ -185,7 +185,10 @@ fn whole_restore_preserves_latest_library_and_private_configuration() {
             .any(|s| s == b"synthetic-secret-preserve")
     );
     let olddir = tempfile::tempdir().unwrap();
-    let previous = MemoryStore::restore_backup(&previous, olddir.path()).unwrap();
+    let previous_library = MemoryStore::open(olddir.path()).unwrap();
+    let prepared = previous_library.prepare_restore(&previous).unwrap();
+    previous_library.arm_restore(&prepared.id).unwrap();
+    let previous = MemoryStore::open_application(olddir.path()).unwrap();
     assert_eq!(
         previous
             .library(&LibraryQuery::default())
@@ -292,8 +295,7 @@ fn retrieval_performance_10000_memories() {
             let start = Instant::now();
             let found = s
                 .search(&SearchRequest {
-                    query: queries[0].clone(),
-                    variants: queries[1..].to_vec(),
+                    queries: queries.iter().cloned().map(MemoryQuery::text).collect(),
                     ..Default::default()
                 })
                 .map(|r| r.items)

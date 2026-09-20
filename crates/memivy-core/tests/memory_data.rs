@@ -1,5 +1,8 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use rusqlite::{Connection, params};
+use serde_json::json;
 use std::sync::{Arc, Barrier};
 use uuid::Uuid;
 
@@ -104,13 +107,12 @@ fn raw_and_versions_are_immutable_exact_and_request_scoped() {
         .is_err()
     );
     let r = store
-        .apply_capture(&ChangeRequest {
+        .edit_memory(&EditRequest {
             request_id: id(),
-            capture_id: c.id.clone(),
-            destination: Destination::New,
+            memory_id: saved.memory_id,
+            expected_version: saved.version_id,
             title: "版本一".into(),
             body: "当前理解".into(),
-            actor: Actor::Ai,
         })
         .unwrap();
     assert!(
@@ -136,21 +138,14 @@ fn editing_restoring_and_undo_preserve_versions_and_refuse_stale_writes() {
         store.undo(&id(), &r.request_id).unwrap_err(),
         DataError::Conflict
     );
-    let stale = ChangeRequest {
+    let stale = EditRequest {
         request_id: id(),
-        capture_id: c.id.clone(),
-        destination: Destination::Existing {
-            memory_id: memory.clone(),
-            expected_version: r.after_version.clone().unwrap(),
-        },
-        title: "迟到的 AI".into(),
+        memory_id: memory.clone(),
+        expected_version: r.after_version.clone().unwrap(),
+        title: "Stale edit".into(),
         body: "不得覆盖".into(),
-        actor: Actor::Ai,
     };
-    assert_eq!(
-        store.apply_capture(&stale).unwrap_err(),
-        DataError::Conflict
-    );
+    assert_eq!(store.edit_memory(&stale).unwrap_err(), DataError::Conflict);
     assert_eq!(store.memory(memory).unwrap().current.body, "新的理解");
     let undo_id = id();
     let undone = store.undo(&undo_id, &edited.request_id).unwrap();
@@ -168,90 +163,6 @@ fn editing_restoring_and_undo_preserve_versions_and_refuse_stale_writes() {
     assert_eq!(store.memory(memory).unwrap().current.body, "新的理解");
     assert_eq!(store.history(memory).unwrap().len(), 4);
     assert_ne!(restored.after_version, edited.after_version);
-}
-
-#[test]
-fn undo_new_memory_keeps_raw_and_correction_is_atomic() {
-    let (_dir, store) = setup();
-    let (c, r) = new_memory(&store, "应归到其他地方");
-    let (_, target) = new_memory(&store, "目标原文");
-    let correction = ChangeRequest {
-        request_id: id(),
-        capture_id: c.id.clone(),
-        destination: Destination::Existing {
-            memory_id: target.memory_id.clone().unwrap(),
-            expected_version: id(),
-        },
-        title: "更正".into(),
-        body: "新归属".into(),
-        actor: Actor::User,
-    };
-    assert_eq!(
-        store
-            .correct_assignment(&r.request_id, &correction)
-            .unwrap_err(),
-        DataError::Conflict
-    );
-    assert!(
-        store.memory(r.memory_id.as_ref().unwrap()).is_ok(),
-        "failed correction must not undo the source"
-    );
-    let correction = ChangeRequest {
-        destination: Destination::Existing {
-            memory_id: target.memory_id.clone().unwrap(),
-            expected_version: target.after_version.clone().unwrap(),
-        },
-        ..correction
-    };
-    let corrected = store
-        .correct_assignment(&r.request_id, &correction)
-        .unwrap();
-    assert_eq!(
-        corrected,
-        store
-            .correct_assignment(&r.request_id, &correction)
-            .unwrap()
-    );
-    assert!(store.memory(r.memory_id.as_ref().unwrap()).is_err());
-    assert_eq!(store.capture_by_id(&c.id).unwrap().text, "应归到其他地方");
-    let current = store
-        .memory(target.memory_id.as_ref().unwrap())
-        .unwrap()
-        .current;
-    assert_eq!(current.capture_ids.len(), 2);
-    store.undo(&id(), &corrected.request_id).unwrap();
-    assert_eq!(
-        store.capture_by_id(&c.id).unwrap().understanding,
-        "attached"
-    );
-    assert_eq!(
-        store
-            .memory(r.memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .body,
-        "应归到其他地方"
-    );
-    assert_eq!(
-        store.receipt_changes(&corrected.request_id).unwrap().len(),
-        2
-    );
-    assert_eq!(
-        store
-            .memory(target.memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .body,
-        "目标原文"
-    );
-    assert!(
-        store
-            .search(&SearchRequest::text("应归到其他地方", 20))
-            .unwrap()
-            .items
-            .iter()
-            .any(|e| matches!(e.evidence.source, SourceRef::Version(_)))
-    );
 }
 
 #[test]
@@ -281,78 +192,6 @@ fn trash_hides_history_and_exclusive_raw_but_can_restore_everything() {
     store.restore_memory(memory).unwrap();
     assert_eq!(store.capture_by_id(&c.id).unwrap().text, "独占原话");
     assert_eq!(store.memory(memory).unwrap().current.body, "当前正文");
-}
-
-#[test]
-fn successive_corrections_do_not_restore_old_mistakes_and_undo_checks_both_memories() {
-    let (_dir, store) = setup();
-    let (capture, a) = new_memory(&store, "最初误归属");
-    let (_, b) = new_memory(&store, "B 的原正文");
-    let (_, c) = new_memory(&store, "C 的原正文");
-    let move_to = |receipt: &Receipt, target: &Receipt| {
-        store
-            .correct_assignment(
-                &receipt.request_id,
-                &ChangeRequest {
-                    request_id: id(),
-                    capture_id: capture.id.clone(),
-                    destination: Destination::Existing {
-                        memory_id: target.memory_id.clone().unwrap(),
-                        expected_version: target.after_version.clone().unwrap(),
-                    },
-                    title: "纠正归属".into(),
-                    body: "纠正后的当前正文".into(),
-                    actor: Actor::User,
-                },
-            )
-            .unwrap()
-    };
-    let first = move_to(&a, &b);
-    let second = move_to(&first, &c);
-    assert!(store.memory(a.memory_id.as_ref().unwrap()).is_err());
-    assert_eq!(
-        store
-            .memory(b.memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .body,
-        "B 的原正文"
-    );
-    let b_head = store
-        .memory(b.memory_id.as_ref().unwrap())
-        .unwrap()
-        .current
-        .id;
-    store
-        .edit_memory(&EditRequest {
-            request_id: id(),
-            memory_id: b.memory_id.clone().unwrap(),
-            expected_version: b_head,
-            title: "B 后来又编辑了".into(),
-            body: "后续编辑必须保留".into(),
-        })
-        .unwrap();
-    assert_eq!(
-        store.undo(&id(), &second.request_id).unwrap_err(),
-        DataError::Conflict
-    );
-    assert_eq!(
-        store
-            .memory(c.memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .id,
-        second.after_version.unwrap()
-    );
-    assert_eq!(
-        store
-            .memory(b.memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .body,
-        "后续编辑必须保留"
-    );
-    store.check_integrity().unwrap();
 }
 
 #[test]
@@ -461,15 +300,58 @@ fn keyword_search_handles_chinese_short_literal_and_combined_version_sources() {
 fn shared_sources_survive_purging_another_memory_and_its_history() {
     let (_dir, store) = setup();
     let (c, a) = new_memory(&store, "共享来源");
+    let conversation = id();
+    store
+        .create_conversation(&conversation, "Shared source")
+        .unwrap();
+    let run = store
+        .begin_agent_input(
+            &id(),
+            &id(),
+            &conversation,
+            "Save another memory from this source",
+            &[],
+            None,
+        )
+        .unwrap();
+    let args = MemoryWriteArgs {
+        destination: Destination::New,
+        title: "Shared source".into(),
+        parts: vec![MemoryWritePart {
+            text: c.text.clone(),
+            sources: vec![MemorySourceQuote {
+                source_id: c.id.clone(),
+                quote: c.text.clone(),
+            }],
+        }],
+    };
+    let call = id();
+    let protocol = vec![json!(Message::Assistant {
+        id: None,
+        content: vec![AssistantContent::ToolCall(ToolCall::from_wire(
+            &call,
+            ToolFunction::new("write_memory".into(), json!(args))
+        ))]
+    })];
+    store
+        .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
+        .unwrap();
+    let op = store
+        .stage_agent_operation(
+            &run.input_id,
+            &run.attempt_id,
+            &call,
+            "write_memory",
+            &json!(args),
+        )
+        .unwrap();
     let b = store
-        .apply_capture(&ChangeRequest {
-            request_id: id(),
-            capture_id: c.id.clone(),
-            destination: Destination::New,
-            title: "另一条记忆".into(),
-            body: "第二条".into(),
-            actor: Actor::User,
-        })
+        .apply_agent_memory(&run.input_id, &run.attempt_id, &op.operation_id, &args)
+        .unwrap()
+        .receipt
+        .unwrap();
+    store
+        .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
     store
         .trash_memory(
@@ -487,18 +369,6 @@ fn shared_sources_survive_purging_another_memory_and_its_history() {
     store.purge_memory(b.memory_id.as_ref().unwrap()).unwrap();
     store.restore_memory(a.memory_id.as_ref().unwrap()).unwrap();
     assert_eq!(store.capture_by_id(&c.id).unwrap().text, "共享来源");
-    store.trash_capture(&c.id).unwrap();
-    store
-        .trash_memory(
-            a.memory_id.as_ref().unwrap(),
-            a.after_version.as_ref().unwrap(),
-        )
-        .unwrap();
-    store.restore_memory(a.memory_id.as_ref().unwrap()).unwrap();
-    assert!(
-        store.capture_by_id(&c.id).is_err(),
-        "restoring a memory must not restore independently deleted raw input"
-    );
 }
 
 #[test]
@@ -512,7 +382,6 @@ fn purging_erases_original_content_and_retries_never_resurrect_it() {
     store.purge_memory(memory).unwrap();
     store.purge_memory(memory).unwrap();
     assert!(store.restore_memory(memory).is_err());
-    assert!(store.restore_capture(&c.id).is_err());
     let db = Connection::open(store.database_path()).unwrap();
     assert_eq!(
         db.query_row("SELECT text FROM captures WHERE id=?", [&c.id], |r| r
@@ -537,298 +406,6 @@ fn purging_erases_original_content_and_retries_never_resurrect_it() {
             .is_empty()
     );
     store.check_integrity().unwrap();
-}
-
-#[test]
-fn purging_raw_cleans_undone_versions_without_erasing_other_memories() {
-    let (dir, store) = setup();
-    let sentinel = "ERASE_UNDONE_VERSION_AND_INDEX_20260906";
-    let (c, abandoned) = new_memory(&store, sentinel);
-    let mut shared = Vec::new();
-    for body in ["有效的共享记忆", "回收站的共享记忆"] {
-        shared.push(
-            store
-                .apply_capture(&ChangeRequest {
-                    request_id: id(),
-                    capture_id: c.id.clone(),
-                    destination: Destination::New,
-                    title: "共享来源".into(),
-                    body: body.into(),
-                    actor: Actor::User,
-                })
-                .unwrap(),
-        );
-    }
-    store
-        .trash_memory(
-            shared[1].memory_id.as_ref().unwrap(),
-            shared[1].after_version.as_ref().unwrap(),
-        )
-        .unwrap();
-    store.undo(&id(), &abandoned.request_id).unwrap();
-    // Undo itself must retain the raw input and version for provenance.
-    assert_eq!(store.capture_by_id(&c.id).unwrap().text, sentinel);
-    let db = Connection::open(store.database_path()).unwrap();
-    let hidden = abandoned.after_version.as_ref().unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT body FROM memory_versions WHERE id=?",
-            [hidden],
-            |r| r.get::<_, String>(0)
-        )
-        .unwrap(),
-        sentinel
-    );
-    store.trash_capture(&c.id).unwrap();
-    // Failure halfway through cascading erasure must roll back the raw too.
-    db.execute_batch("CREATE TRIGGER reject_erasure BEFORE UPDATE ON memory_versions BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
-    assert_eq!(store.purge_capture(&c.id).unwrap_err(), DataError::Database);
-    assert_eq!(
-        db.query_row("SELECT text FROM captures WHERE id=?", [&c.id], |r| r
-            .get::<_, String>(0))
-            .unwrap(),
-        sentinel
-    );
-    db.execute_batch("DROP TRIGGER reject_erasure").unwrap();
-    store.purge_capture(&c.id).unwrap();
-    store.purge_capture(&c.id).unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT body FROM memory_versions WHERE id=?",
-            [hidden],
-            |r| r.get::<_, Option<String>>(0)
-        )
-        .unwrap(),
-        None
-    );
-    assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM record_fts WHERE source_id=?",
-            [hidden],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0
-    );
-    assert_eq!(
-        store
-            .memory(shared[0].memory_id.as_ref().unwrap())
-            .unwrap()
-            .current
-            .body,
-        "有效的共享记忆"
-    );
-    assert_eq!(
-        store
-            .history(shared[1].memory_id.as_ref().unwrap())
-            .unwrap()[0]
-            .body,
-        "回收站的共享记忆"
-    );
-    assert!(store.restore_capture(&c.id).is_err());
-    assert!(
-        store
-            .restore_memory(abandoned.memory_id.as_ref().unwrap())
-            .is_err()
-    );
-    let backup = dir.path().join("after-purge.sqlite3");
-    store.backup(&backup).unwrap();
-    assert!(!String::from_utf8_lossy(&std::fs::read(backup).unwrap()).contains(sentinel));
-    store.check_integrity().unwrap();
-}
-
-#[test]
-fn purging_a_corrected_memory_also_erases_its_abandoned_assignment() {
-    let (dir, store) = setup();
-    let sentinel = "ERASE_ABANDONED_ASSIGNMENT_20260906";
-    let (c, original) = new_memory(&store, sentinel);
-    let corrected = store
-        .correct_assignment(
-            &original.request_id,
-            &ChangeRequest {
-                request_id: id(),
-                capture_id: c.id.clone(),
-                destination: Destination::New,
-                title: "正确归属".into(),
-                body: sentinel.into(),
-                actor: Actor::User,
-            },
-        )
-        .unwrap();
-    store
-        .trash_memory(
-            corrected.memory_id.as_ref().unwrap(),
-            corrected.after_version.as_ref().unwrap(),
-        )
-        .unwrap();
-    store
-        .purge_memory(corrected.memory_id.as_ref().unwrap())
-        .unwrap();
-    let backup = dir.path().join("after-purge.sqlite3");
-    store.backup(&backup).unwrap();
-    assert!(!String::from_utf8_lossy(&std::fs::read(backup).unwrap()).contains(sentinel));
-    assert!(store.undo(&id(), &corrected.request_id).is_err());
-    assert!(store.restore_capture(&c.id).is_err());
-    store.check_integrity().unwrap();
-}
-
-#[test]
-fn withdrawn_memories_can_be_explicitly_purged_without_losing_retained_raw() {
-    for purge_raw_first in [false, true] {
-        let (_dir, store) = setup();
-        let (capture, created) = new_memory(&store, "保留原话，清除撤销的版本");
-        let memory = created.memory_id.as_ref().unwrap();
-        assert_eq!(store.purge_memory(memory).unwrap_err(), DataError::Conflict);
-        if purge_raw_first {
-            store.trash_capture(&capture.id).unwrap();
-            store.purge_capture(&capture.id).unwrap();
-        }
-        store.undo(&id(), &created.request_id).unwrap();
-        store.purge_memory(memory).unwrap();
-        store.purge_memory(memory).unwrap();
-        let db = Connection::open(store.database_path()).unwrap();
-        assert_eq!(
-            db.query_row(
-                "SELECT count(*) FROM memory_versions WHERE memory_id=? AND body IS NOT NULL",
-                [memory],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            0
-        );
-        if purge_raw_first {
-            assert!(store.capture_by_id(&capture.id).is_err());
-        } else {
-            let raw = store.capture_by_id(&capture.id).unwrap();
-            assert_eq!(raw.text, capture.text);
-            assert!(
-                store
-                    .library(&LibraryQuery::default())
-                    .unwrap()
-                    .items
-                    .is_empty()
-            );
-        }
-        store.check_integrity().unwrap();
-    }
-}
-
-#[test]
-fn undoing_corrections_restores_an_actionable_assignment_receipt() {
-    for existing_source in [false, true] {
-        for existing_target in [false, true] {
-            let (_dir, store) = setup();
-            let (capture, initial) = new_memory(&store, "待纠正的原话");
-            let mut assignment = if existing_source {
-                let (_, target) = new_memory(&store, "来源记忆的原正文");
-                store
-                    .correct_assignment(
-                        &initial.request_id,
-                        &ChangeRequest {
-                            request_id: id(),
-                            capture_id: capture.id.clone(),
-                            destination: Destination::Existing {
-                                memory_id: target.memory_id.unwrap(),
-                                expected_version: target.after_version.unwrap(),
-                            },
-                            title: "来源记忆".into(),
-                            body: "来源记忆加原话".into(),
-                            actor: Actor::User,
-                        },
-                    )
-                    .unwrap()
-            } else {
-                initial
-            };
-            let source = assignment.memory_id.clone().unwrap();
-            let source_body = store.memory(&source).unwrap().current.body;
-            let mut edited_targets: Vec<String> = Vec::new();
-            for _ in 0..3 {
-                let target = existing_target.then(|| new_memory(&store, "目标的原正文").1);
-                let request = ChangeRequest {
-                    request_id: id(),
-                    capture_id: capture.id.clone(),
-                    destination: target.as_ref().map_or(Destination::New, |t| {
-                        Destination::Existing {
-                            memory_id: t.memory_id.clone().unwrap(),
-                            expected_version: t.after_version.clone().unwrap(),
-                        }
-                    }),
-                    title: "纠正".into(),
-                    body: "目标加原话".into(),
-                    actor: Actor::User,
-                };
-                let moved = store
-                    .correct_assignment(&assignment.request_id, &request)
-                    .unwrap();
-                let undo_request = id();
-                let restored = store.undo(&undo_request, &moved.request_id).unwrap();
-                assert_eq!(
-                    restored,
-                    store.undo(&undo_request, &moved.request_id).unwrap()
-                );
-                assert_eq!(restored.memory_id.as_ref(), Some(&source));
-                assert_eq!(
-                    restored.after_version.as_ref(),
-                    Some(&store.memory(&source).unwrap().current.id)
-                );
-                assert_eq!(store.memory(&source).unwrap().current.body, source_body);
-                for target in &edited_targets {
-                    assert_eq!(store.memory(target).unwrap().current.body, "保留目标新内容");
-                }
-                // Later edits on the departed target must not block another
-                // correction of the restored source or get undone by it.
-                if let Some(target) = target {
-                    let current = store
-                        .memory(target.memory_id.as_ref().unwrap())
-                        .unwrap()
-                        .current;
-                    store
-                        .edit_memory(&EditRequest {
-                            request_id: id(),
-                            memory_id: current.memory_id.clone(),
-                            expected_version: current.id,
-                            title: "目标后来编辑".into(),
-                            body: "保留目标新内容".into(),
-                        })
-                        .unwrap();
-                    edited_targets.push(current.memory_id);
-                }
-                assignment = restored;
-            }
-            let previous_head = store.memory(&source).unwrap().current.id;
-            store
-                .edit_memory(&EditRequest {
-                    request_id: id(),
-                    memory_id: source.clone(),
-                    expected_version: previous_head,
-                    title: "来源后来编辑".into(),
-                    body: "不覆盖来源新内容".into(),
-                })
-                .unwrap();
-            assert_eq!(
-                store
-                    .correct_assignment(
-                        &assignment.request_id,
-                        &ChangeRequest {
-                            request_id: id(),
-                            capture_id: capture.id,
-                            destination: Destination::New,
-                            title: "迟到纠正".into(),
-                            body: "不能覆盖".into(),
-                            actor: Actor::User,
-                        }
-                    )
-                    .unwrap_err(),
-                DataError::Conflict
-            );
-            assert_eq!(
-                store.memory(&source).unwrap().current.body,
-                "不覆盖来源新内容"
-            );
-            store.check_integrity().unwrap();
-        }
-    }
 }
 
 #[test]
@@ -868,7 +445,16 @@ fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() 
     let (_dir, store) = setup();
     let (conversation, turn) = finished_turn(&store, &[]);
     store
-        .save_conversation_draft(&conversation, "尚未确定的草稿")
+        .save_workspace_draft(&WorkspaceDraft {
+            key: format!("discussion:{conversation}"),
+            request_id: id(),
+            title: String::new(),
+            body: "尚未确定的草稿".into(),
+            expected_version: None,
+            origin: None,
+            context: vec![],
+            destination: None,
+        })
         .unwrap();
     assert!(
         store
@@ -892,7 +478,6 @@ fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() 
     assert!(
         matches!(raw.origin,Origin::Conversation{message_role,confirmed_by,..} if message_role=="assistant" && confirmed_by=="user")
     );
-    store.delete_conversation(&conversation).unwrap();
     assert_eq!(
         store
             .save_agent_text(
@@ -905,7 +490,6 @@ fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() 
             .unwrap(),
         r
     );
-    assert!(store.conversation(&conversation).is_err());
     assert_eq!(
         store
             .memory(r.memory_id.as_ref().unwrap())
@@ -1218,7 +802,7 @@ fn database_reopens_and_rejects_unrelated_and_future_schemas() {
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        1
+        2
     );
     let application_id: i64 = db
         .pragma_query_value(None, "application_id", |r| r.get(0))
@@ -1297,7 +881,10 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
     );
     assert!(!String::from_utf8_lossy(&std::fs::read(&backup).unwrap()).contains(sentinel));
     let restore = dir.path().join("restored");
-    let restored = MemoryStore::restore_backup(&backup, &restore).unwrap();
+    let target = MemoryStore::open(&restore).unwrap();
+    let prepared = target.prepare_restore(&backup).unwrap();
+    target.arm_restore(&prepared.id).unwrap();
+    let restored = MemoryStore::open_application(&restore).unwrap();
     assert!(!restored.model_config_path().exists());
     assert!(!restore.join("mcp.json").exists());
     assert_eq!(
@@ -1327,77 +914,8 @@ fn backups_restore_versions_conversations_trash_and_exclude_credentials() {
         2
     );
     assert_eq!(restored.capture_by_id(&c.id).unwrap().text, "完整备份");
-    assert_eq!(
-        MemoryStore::restore_backup(&backup, &restore).unwrap_err(),
-        DataError::DestinationExists
-    );
     let invalid = dir.path().join("invalid.sqlite3");
     std::fs::write(&invalid, "not a database").unwrap();
-    assert!(MemoryStore::restore_backup(&invalid, dir.path().join("bad-restore")).is_err());
-    assert!(!dir.path().join("bad-restore/memivy.db").exists());
+    assert!(restored.prepare_restore(&invalid).is_err());
     restored.check_integrity().unwrap();
-}
-
-#[test]
-fn markdown_export_preserves_content_versions_roles_and_unavailable_citations() {
-    let (dir, store) = setup();
-    let (c, r) = new_memory(&store, "  原文\n```\n含反引号与空白🙂  ");
-    let (_, turn) = finished_turn(
-        &store,
-        &[SourceRef::Version(r.after_version.clone().unwrap())],
-    );
-    let edited = edit(&store, &r, "编辑的正文");
-    let request = id();
-    store
-        .save_agent_text(
-            &request,
-            &turn.id,
-            SAVED_TEXT,
-            SAVED_TITLE,
-            &Destination::New,
-        )
-        .unwrap();
-    let sentinel = "SECRET_CONFIG_DO_NOT_EXPORT";
-    std::fs::write(store.model_config_path(), sentinel).unwrap();
-    let export = dir.path().join("export");
-    store.export_markdown(&export).unwrap();
-    let captures = std::fs::read_to_string(export.join("captures.md")).unwrap();
-    assert!(captures.contains(&c.text));
-    assert!(captures.contains("confirmed_by"));
-    assert!(captures.contains(SAVED_TEXT));
-    let memories = std::fs::read_to_string(export.join("memories.md")).unwrap();
-    assert!(memories.contains(r.after_version.as_ref().unwrap()));
-    assert!(memories.contains(edited.after_version.as_ref().unwrap()));
-    let chats = std::fs::read_to_string(export.join("conversations.md")).unwrap();
-    assert!(chats.contains("not durable memories"));
-    assert!(chats.contains("Role: assistant"));
-    for entry in std::fs::read_dir(&export).unwrap() {
-        assert!(
-            !std::fs::read_to_string(entry.unwrap().path())
-                .unwrap()
-                .contains(sentinel)
-        );
-    }
-    assert_eq!(
-        store.export_markdown(&export).unwrap_err(),
-        DataError::DestinationExists
-    );
-    store
-        .trash_memory(
-            r.memory_id.as_ref().unwrap(),
-            edited.after_version.as_ref().unwrap(),
-        )
-        .unwrap();
-    let export = dir.path().join("deleted-source-export");
-    store.export_markdown(&export).unwrap();
-    assert!(
-        std::fs::read_to_string(export.join("conversations.md"))
-            .unwrap()
-            .contains("Source deleted or unavailable")
-    );
-    assert!(
-        !std::fs::read_to_string(export.join("captures.md"))
-            .unwrap()
-            .contains(&c.text)
-    );
 }

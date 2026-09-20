@@ -32,10 +32,11 @@ pub(super) fn active_collection(db: &Connection, id: &str) -> Result<()> {
 }
 fn active_record(db: &Connection, key: &RecordKey) -> Result<()> {
     key.validate()?;
-    if key.kind != "memory" {
-        return Err(DataError::Invalid);
-    }
-    let exists: bool = db.query_row("SELECT CASE WHEN ?1='memory' THEN EXISTS(SELECT 1 FROM memories WHERE id=?2 AND state='active') ELSE EXISTS(SELECT 1 FROM capture_state WHERE capture_id=?2 AND availability='active') END",params![key.kind,key.id],|r|r.get(0))?;
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM memories WHERE id=? AND state='active')",
+        [&key.id],
+        |r| r.get(0),
+    )?;
     if !exists {
         return Err(DataError::Unavailable);
     }
@@ -231,8 +232,7 @@ impl MemoryStore {
         let collection = collection.to_owned();
         tokio::task::spawn_blocking(move || {
             let result = store.search(&SearchRequest {
-                query: plan.queries[0].clone(),
-                variants: plan.queries[1..].to_vec(),
+                queries: plan.queries.into_iter().map(MemoryQuery::text).collect(),
                 scope: SearchScope {
                     exclude_collection_id: Some(collection),
                     ..Default::default()

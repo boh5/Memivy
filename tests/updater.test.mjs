@@ -35,11 +35,11 @@ test('update preparation drains pending calls, blocks new edits, permits durable
  const edit=ipc.invoke('library_edit');let drained=false;
  const frozen=ipc.freezeForUpdate().then(()=>{drained=true});await Promise.resolve();
  assert.equal(drained,false);assert.equal(ipc.document.body.inert,true);
- await assert.rejects(ipc.invoke('library_capture'),e=>e.code==='update_busy');
+ await assert.rejects(ipc.invoke('discussion_submit'),e=>e.code==='update_busy');
  await ipc.invoke('draft_write');
  finish();await edit;await frozen;assert.equal(drained,true);
- ipc.resumeUpdate();await ipc.invoke('library_capture');assert.equal(ipc.document.body.inert,false);
- assert.deepEqual(calls,['library_edit','draft_write','library_capture']);
+ ipc.resumeUpdate();await ipc.invoke('discussion_submit');assert.equal(ipc.document.body.inert,false);
+ assert.deepEqual(calls,['library_edit','draft_write','discussion_submit']);
 });
 test('install request cannot deadlock its own draft flush',async()=>{
  const ipc=ipcFixture(()=>new Promise(()=>{}));

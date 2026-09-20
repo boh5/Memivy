@@ -18,7 +18,6 @@ mod library;
 mod mcp;
 mod migrations;
 mod navigation;
-mod organization;
 mod protocol;
 mod records;
 mod related;
@@ -28,7 +27,7 @@ mod transfer;
 mod types;
 
 pub use activity::*;
-pub use agent::{MemorySourceQuote, MemoryWriteArgs, MemoryWritePart};
+pub use agent::{MemoryMergeArgs, MemorySourceQuote, MemoryWriteArgs, MemoryWritePart};
 pub use agent_mutations::*;
 pub use agent_state::*;
 pub use cleanup::*;
@@ -39,7 +38,6 @@ pub use embedding::EmbeddingStatus;
 pub use library::*;
 pub use mcp::*;
 pub use navigation::*;
-pub use organization::*;
 pub use related::*;
 pub use search::*;
 pub use transfer::*;
@@ -65,7 +63,7 @@ pub enum DataError {
     #[error("Input is invalid or exceeds the length limit")]
     Invalid,
     #[error(
-        "Cite actual user words for each part. Parts without citations must preserve complete existing lines without removing negation or changing content"
+        "Cite exact words from an allowed user message, saved version or original source for each changed part. Uncited parts must preserve complete existing lines without removing negation or changing content"
     )]
     SourceAttribution,
     #[error("Content does not exist, was deleted, or is unavailable")]

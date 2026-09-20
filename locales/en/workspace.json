@@ -143,11 +143,6 @@
     "endDateLabel": "to",
     "endDateAria": "End date",
     "clearAll": "Clear all filters",
-    "recommendations_one": "{{count}} collection suggestion",
-    "recommendations_other": "{{count}} collection suggestions",
-    "pending": "Waiting to be organized",
-    "processing": "Organizing…",
-    "incomplete": "Organization incomplete",
     "emptyFilteredTitle": "No matching memories",
     "emptyTrashTitle": "Trash is empty",
     "emptyCollectionTitle": "This collection has no memories yet",
@@ -155,7 +150,7 @@
     "emptyFilteredText": "Try adjusting the source, project, or date range.",
     "emptyTrashText": "Deleted memories stay here until you explicitly remove them forever.",
     "emptyCollectionText": "Click “Collections” in a memory to add it manually, or try the AI suggestions above.",
-    "emptyLibraryText": "Captured content is available immediately; AI can organize it later.",
+    "emptyLibraryText": "Saved content is ready to search or discuss.",
     "clearFilters": "Clear filters",
     "captureIdea": "Capture an idea",
     "loading": "Reading local memories…",
@@ -169,16 +164,6 @@
     "continue": "Continue thinking with the {{count}} selected memory",
     "continue_one": "Continue thinking with the {{count}} selected memory",
     "continue_other": "Continue thinking with the {{count}} selected memories"
-  },
-  "organization": {
-    "aria": "Collection suggestions",
-    "suggested": "Suggested to add",
-    "heading": "Collection suggestions",
-    "searching": "Looking for a suitable collection…",
-    "why": "Why recommend {{name}}",
-    "ignore": "Ignore these suggestions",
-    "retry": "Retry suggestions",
-    "added": "Added “{{name}}”"
   },
   "app": {
     "restoreBackupWithCopy": "{{message}} Copy: {{path}}",
@@ -320,7 +305,6 @@
     "saveHelp": "⌘S saves a new version",
     "saving": "Saving…",
     "saveVersion": "Save",
-    "saveAsNew": "Save as a new memory",
     "continueLater": "Continue later",
     "discard": "Discard changes",
     "discardTitle": "Discard this editing draft?",
@@ -334,7 +318,6 @@
     "mergedText": "This content was added to another memory. View the destination or undo this organization from the receipt.",
     "memoryAria": "Memory content",
     "trashStatus": "Trash",
-    "originalStatus": "Input archive",
     "newVersion": "New version available; view",
     "restoreMemory": "Restore memory",
     "deleteForever": "Delete forever",
@@ -354,8 +337,6 @@
     "recordedByMe": "Recorded by me",
     "editedByMe": "Edited by me",
     "aiOrganized": "AI cleanup",
-    "originalSaved": "Original text is saved locally",
-    "archiveOnly": "Input archive, for review and recovery only; excluded from search.",
     "reviewedWarning": "The destination memory changed before confirmation. Your review draft is saved locally and has not been written to the destination.",
     "reviewedDetails": "View retained complete review draft",
     "reviewedHelp": "Reopen conclusion review from the original discussion; the input archive is for review only.",
@@ -405,30 +386,18 @@
     "versionUnavailable": "This version is no longer available.",
     "newMemory": "(new memory)",
     "statusUndone": "Organization undone; memory restored.",
-    "statusPending": "Saved; waiting for background organization. It is already available for editing and search.",
-    "statusProcessing": "Saved; organization in progress…",
-    "statusDeferred": "Saved; waiting for review.{{reason}}",
-    "statusFailed": "Memory is preserved.{{reason}}",
-    "statusPaused": "Automatic organization stopped.{{reason}}",
     "statusMerge": "Added to an existing memory.{{reason}}",
-    "statusSeparate": "Current memory organized.{{reason}}",
-    "waiting": "Waiting for organization",
-    "organizing": "Organizing…",
-    "incomplete": "Saved; organization incomplete",
-    "retry": "Retry",
-    "collapseAria": "Collapse organization status",
     "collapse": "Collapse",
     "viewMemory": "View memory",
     "viewChanges": "View changes",
-    "undo": "Undo organization",
-    "reorganize": "Organize again",
-    "expandHistory": "View earlier organization receipts ({{count}})",
+    "undo": "Undo change",
+    "expandHistory": "View earlier changes ({{count}})",
     "collapseHistory": "Collapse earlier receipts",
     "changeTitle": "Memory changes",
     "before": "Before",
     "after": "After",
-    "summaryOrganized": "Memory organized",
-    "summaryMerge": "Memories combined"
+    "summaryMerge": "Memories combined",
+    "summaryUpdated": "Memory updated"
   },
   "saveConclusion": {
     "destinationChanged": "The save destination changed. Your review draft is preserved; review the destination and text again.",
@@ -511,7 +480,8 @@
     "newDiscussion": "New discussion",
     "discussion": "Discussion",
     "discussionHelp": "Connect your memories and keep thinking.",
-    "discussionStart": "Share an idea or ask a question. Relevant memories join the discussion."
+    "discussionStart": "Share an idea or ask a question. Relevant memories join the discussion.",
+    "preparing": "Preparing context…"
   },
   "activity": {
     "title": "Activity",
@@ -546,5 +516,13 @@
     "dayUnit_other": "days",
     "dayTotal_one": "{{count}} day",
     "dayTotal_other": "{{count}} days"
+  },
+  "recommendations": {
+    "aria": "Collection recommendations",
+    "request": "Suggest collections",
+    "working": "Working…",
+    "why": "Why {{name}}?",
+    "dismiss": "Dismiss",
+    "empty": "No collection suggestions to add."
   }
 }

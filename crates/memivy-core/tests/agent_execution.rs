@@ -1,4 +1,6 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -23,7 +25,13 @@ fn begin(store: &MemoryStore, conversation: &str, text: &str) -> AgentExecution 
 fn stage(store: &MemoryStore, run: &AgentExecution, name: &str, args: &Value) -> AgentOperation {
     let call = id();
     let mut protocol = store.agent_execution(&run.input_id).unwrap().protocol;
-    protocol.push(json!({"role":"assistant","content":null,"tool_calls":[{"id":call,"type":"function","function":{"name":name,"arguments":args.to_string()}}]}));
+    protocol.push(json!(Message::Assistant {
+        id: None,
+        content: vec![AssistantContent::ToolCall(ToolCall::from_wire(
+            &call,
+            ToolFunction::new(name.into(), args.clone())
+        ))]
+    }));
     store
         .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
         .unwrap();
@@ -171,7 +179,6 @@ fn commit_without_delivery_replays_result_and_receipt_in_new_attempt() {
     assert_eq!(count(&store, "SELECT count(*) FROM memory_versions"), 1);
     assert_eq!(count(&store, "SELECT count(*) FROM receipts"), 1);
     assert_eq!(count(&store, "SELECT count(*) FROM captures"), 1);
-    assert_eq!(count(&store, "SELECT count(*) FROM organization_jobs"), 0);
 }
 
 #[test]
@@ -240,7 +247,7 @@ fn cancellation_and_restart_preserve_visible_text_but_retry_resumes_checkpoint()
     store
         .append_agent_text(&run.input_id, &run.attempt_id, "先查相关记忆。🙂")
         .unwrap();
-    let protocol = vec![json!({"role":"assistant","content":"先查相关记忆。🙂"})];
+    let protocol = vec![json!(Message::assistant("先查相关记忆。🙂"))];
     store
         .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
         .unwrap();
@@ -293,7 +300,7 @@ fn cancellation_and_restart_preserve_visible_text_but_retry_resumes_checkpoint()
 }
 
 #[test]
-fn source_archive_and_atomic_undo_outlive_deleted_conversation() {
+fn source_archive_preserves_provenance_and_atomic_undo() {
     let (_root, store, conversation) = setup();
     let origin = Origin::User {
         app: "Editor".into(),
@@ -324,27 +331,6 @@ fn source_archive_and_atomic_undo_outlive_deleted_conversation() {
         store.library_detail_view(&key, true).unwrap().sources[0].conversation_available,
         Some(true)
     );
-    let unrelated = captured(&store, "不相关的独立记忆");
-    let cursor = store.library_changes(None).unwrap().cursor;
-    store.delete_conversation(&conversation).unwrap();
-    let changes = store.library_changes(Some(&cursor)).unwrap();
-    assert!(!changes.reset);
-    assert!(
-        changes
-            .changes
-            .iter()
-            .any(|c| c.domain == "memory" && c.entity == format!("memory:{memory}"))
-    );
-    assert!(
-        !changes
-            .changes
-            .iter()
-            .any(|c| c.domain == "memory" && c.entity == format!("memory:{}", unrelated.memory_id))
-    );
-    assert_eq!(
-        store.library_detail_view(&key, true).unwrap().sources[0].conversation_available,
-        Some(false)
-    );
     let source = store
         .capture_by_id(receipt.capture_id.as_ref().unwrap())
         .unwrap();
@@ -354,7 +340,6 @@ fn source_archive_and_atomic_undo_outlive_deleted_conversation() {
     );
     assert_eq!(store.memory(&memory).unwrap().current.actor, "ai");
     assert_eq!(store.agent_input_receipts(&run.input_id).unwrap().len(), 1);
-    assert_eq!(count(&store, "SELECT count(*) FROM agent_operations"), 0);
     let undone = store.undo_agent_input(&id(), &run.input_id).unwrap();
     assert!(undone.conflicts.is_empty());
     assert!(undone.receipt.is_some());
@@ -411,7 +396,7 @@ fn grouped_undo_restores_all_memories_memberships_and_multiple_updates_to_one_me
             })
             .unwrap()
             .collections,
-        vec![collection]
+        Vec::<String>::new()
     );
     let request = id();
     let undone = store.undo_agent_input(&request, &run.input_id).unwrap();
@@ -673,7 +658,7 @@ fn source_ids_cannot_inject_another_conversation_or_ai_text() {
 }
 
 #[test]
-fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_deletion() {
+fn item_sources_archive_early_conditions_and_tentative_ideas() {
     let (_root, store, conversation) = setup();
     let conditions = begin(
         &store,
@@ -736,7 +721,6 @@ fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_
     store
         .finish_agent_input(&current.input_id, &current.attempt_id, &[])
         .unwrap();
-    store.delete_conversation(&conversation).unwrap();
     let version = store.memory(&memory).unwrap().current;
     assert!(version.body.contains("预算已更正为3800元"));
     assert!(version.body.contains("尚未执行或决定"));
@@ -751,7 +735,6 @@ fn item_sources_archive_early_conditions_and_tentative_ideas_after_conversation_
     expected.sort();
     assert_eq!(sources, expected);
     assert_eq!(count(&store, "SELECT count(*) FROM memories"), 1);
-    assert_eq!(count(&store, "SELECT count(*) FROM organization_jobs"), 0);
     assert!(
         store
             .undo_agent_input(&id(), &current.input_id)
@@ -918,7 +901,7 @@ fn current_head_and_keyword_index_change_in_the_write_transaction() {
 }
 
 #[test]
-fn explicit_save_reuses_receipts_and_can_undo_membership_after_conversation_deletion() {
+fn explicit_save_reuses_receipts_and_can_undo_membership() {
     let (_root, store, _) = setup();
     let collection = id();
     store
@@ -965,8 +948,6 @@ fn explicit_save_reuses_receipts_and_can_undo_membership_after_conversation_dele
             .actor,
         "user"
     );
-    assert_eq!(count(&store, "SELECT count(*) FROM organization_jobs"), 0);
-    store.delete_conversation(&conversation).unwrap();
     assert!(
         store
             .undo_agent_input(&id(), &request)
@@ -1334,9 +1315,10 @@ fn first_checkpoint_reloads_history_if_undo_invalidates_a_prepared_summary() {
         );
 
         store.undo_agent_input(&id(), &earlier.input_id).unwrap();
-        let stale = vec![
-            json!({"role":"user","content":json!({"earlier_summary":snapshot.context.summary,"recent_messages":snapshot.messages}).to_string()}),
-        ];
+        let stale = vec![json!(Message::user(
+            json!({"earlier_summary":snapshot.context.summary,"recent_messages":snapshot.messages})
+                .to_string()
+        ))];
         assert_eq!(
             store
                 .checkpoint_agent_start(
@@ -1360,9 +1342,10 @@ fn first_checkpoint_reloads_history_if_undo_invalidates_a_prepared_summary() {
         assert_eq!(fresh.messages[0]["memory_changes_undone"], true);
         assert_eq!(fresh.messages[0]["receipts"][0]["status"], "undone");
         assert_eq!(fresh.messages[2]["text"], "补充：收入目标仍待验证");
-        let rebuilt = vec![
-            json!({"role":"user","content":json!({"earlier_summary":fresh.context.summary,"recent_messages":fresh.messages}).to_string()}),
-        ];
+        let rebuilt = vec![json!(Message::user(
+            json!({"earlier_summary":fresh.context.summary,"recent_messages":fresh.messages})
+                .to_string()
+        ))];
         store
             .checkpoint_agent_start(
                 &current.input_id,
@@ -1384,7 +1367,7 @@ fn initial_snapshot_cannot_replace_a_committed_prefix_or_cross_attempts() {
     let (_root, store, conversation) = setup();
     let run = begin(&store, &conversation, "分析想法");
     let snapshot = store.agent_history_snapshot(&run.input_id).unwrap();
-    let messages = vec![json!({"role":"user","content":"分析想法"})];
+    let messages = vec![json!(Message::user("分析想法"))];
     store
         .stop_agent_input(&run.input_id, &run.attempt_id, "failed", Some("network"))
         .unwrap();
@@ -1426,7 +1409,7 @@ fn initial_snapshot_cannot_replace_a_committed_prefix_or_cross_attempts() {
 }
 
 #[test]
-fn a_memory_keeps_its_whole_change_group_handle_after_conversation_deletion() {
+fn a_memory_exposes_its_whole_change_group_for_undo() {
     let (_root, store, conversation) = setup();
     let target = captured(&store, "原计划");
     let run = begin(&store, &conversation, "调整计划并添加一个想法");
@@ -1443,7 +1426,6 @@ fn a_memory_keeps_its_whole_change_group_handle_after_conversation_deletion() {
     store
         .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
-    store.delete_conversation(&conversation).unwrap();
     let groups = store.memory_agent_changes(&target.memory_id).unwrap();
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].input_id, run.input_id);

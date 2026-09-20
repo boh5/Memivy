@@ -215,19 +215,6 @@ impl MemoryStore {
     pub fn conversations(&self, limit: usize) -> Result<Vec<Conversation>> {
         Ok(self.connection()?.prepare("SELECT id,title,draft,updated_at,(SELECT collection_id FROM conversation_collections cc WHERE cc.conversation_id=conversations.id) FROM conversations ORDER BY updated_at DESC,id LIMIT ?")?.query_map([limit.clamp(1,100) as i64],|r|Ok(Conversation{id:r.get(0)?,title:r.get(1)?,draft:r.get(2)?,updated_at:r.get(3)?,collection_id:r.get(4)?}))?.collect::<rusqlite::Result<_>>()?)
     }
-    pub fn save_conversation_draft(&self, conversation: &str, text: &str) -> Result<()> {
-        if text.len() > 32 * 1024 {
-            return Err(DataError::Invalid);
-        }
-        if self.connection()?.execute(
-            "UPDATE conversations SET draft=?2,updated_at=?3 WHERE id=?1",
-            params![conversation, text, now()?],
-        )? == 0
-        {
-            return Err(DataError::Unavailable);
-        }
-        Ok(())
-    }
     pub fn turn(&self, id: &str) -> Result<Turn> {
         let mut db = self.connection()?;
         let tx = db.transaction()?;
@@ -260,27 +247,6 @@ impl MemoryStore {
         let mut ids:Vec<String>=db.prepare("SELECT id FROM messages WHERE conversation_id=?1 AND (?2 IS NULL OR seq<?2) ORDER BY seq DESC LIMIT ?3")?.query_map(params![conversation,before_seq,limit.clamp(1,100) as i64],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         ids.reverse();
         ids.iter().map(|id| message(&db, id)).collect()
-    }
-    pub fn delete_conversation(&self, conversation: &str) -> Result<()> {
-        let mut db = self.connection()?;
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "DELETE FROM workspace_drafts WHERE key=?",
-            [format!("discussion:{conversation}")],
-        )?;
-        tx.execute(
-            "DELETE FROM workspace_drafts WHERE key IN (SELECT 'save:'||id FROM messages WHERE conversation_id=?)",
-            [conversation],
-        )?;
-        // Source availability changes only for memories linked to this
-        // conversation; streaming discussion updates must not refresh editors.
-        tx.execute(
-            "INSERT INTO ui_changes(domain,entity) SELECT DISTINCT 'memory','memory:'||v.memory_id FROM captures c JOIN version_captures vc ON vc.capture_id=c.id JOIN memory_versions v ON v.id=vc.version_id WHERE json_extract(c.source,'$.conversation_id')=?1 AND EXISTS(SELECT 1 FROM conversations WHERE id=?1)",
-            [conversation],
-        )?;
-        tx.execute("DELETE FROM conversations WHERE id=?", [conversation])?;
-        tx.commit()?;
-        Ok(())
     }
     pub fn capture_citations(&self, capture: &str) -> Result<Vec<Citation>> {
         let mut connection = self.connection()?;

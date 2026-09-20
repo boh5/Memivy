@@ -17,7 +17,6 @@ pub(crate) struct Workspace {
     pub(crate) config: PathBuf,
     pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
     pub(crate) exiting: AtomicBool,
-    recommendation_lock: tokio::sync::Mutex<()>,
     tasks: Mutex<HashMap<String, (String, tokio::task::AbortHandle)>>,
 }
 pub(crate) fn model_available(state: &Workspace) -> bool {
@@ -467,139 +466,26 @@ async fn discussion_undo(
     blocking(move || store.undo_agent_input(&request_id, &input_id)).await
 }
 #[tauri::command]
-async fn organization_jobs(
+async fn memory_receipts(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     key: RecordKey,
-) -> HostResult<Vec<OrganizationJob>> {
+) -> HostResult<Vec<MemoryReceipt>> {
     let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
-    blocking(move || store.organization_jobs(&key)).await
+    blocking(move || store.memory_receipts(&key)).await
 }
 #[tauri::command]
-async fn organization_retry(
-    app: tauri::AppHandle,
+async fn memory_receipt_changes(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    memory_id: String,
-) -> HostResult<()> {
+    request: String,
+) -> HostResult<Vec<AgentInputChange>> {
     let _update_work = crate::updates::work()?;
     require(&window)?;
     let store = state.store.clone();
-    blocking(move || store.retry_organization(&memory_id)).await?;
-    let _ = app.emit("resources-changed", ());
-    Ok(())
-}
-async fn flush_organization_failure(
-    store: MemoryStore,
-    pending: &mut Option<(String, &'static str)>,
-) -> bool {
-    let Some((attempt, reason)) = pending.clone() else {
-        return true;
-    };
-    if blocking(move || store.fail_organization(&attempt, reason))
-        .await
-        .is_err()
-    {
-        return false;
-    }
-    *pending = None;
-    true
-}
-
-fn start_organizer(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut pending_failure = None;
-        let mut delay = 750;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-            let state = app.state::<Workspace>();
-            if state.exiting.load(Ordering::Relaxed) {
-                return;
-            }
-            let Ok(_update_work) = crate::updates::work() else {
-                continue;
-            };
-            if pending_failure.is_some() {
-                if !flush_organization_failure(state.store.clone(), &mut pending_failure).await {
-                    delay = (delay * 2).min(5000);
-                    continue;
-                }
-                delay = 750;
-                let _ = app.emit("resources-changed", ());
-            }
-            // Interactive answers get priority before starting another background request.
-            if state.tasks.lock().map_or(true, |tasks| !tasks.is_empty()) {
-                continue;
-            }
-            if validate_config(&state.config).is_err() {
-                continue;
-            }
-            let Ok(config) = crate::models::read_llm(&state) else {
-                continue;
-            };
-            let store = state.store.clone();
-            let claimant = store.clone();
-            let Ok(Some(mut task)) = blocking(move || claimant.claim_organization()).await else {
-                continue;
-            };
-            let _ = app.emit("resources-changed", ());
-            let attempt = task.attempt_id.clone();
-            let preparer = store.clone();
-            let prepared = blocking(move || {
-                preparer.prepare_organization(&mut task)?;
-                Ok(task)
-            })
-            .await;
-            let failure = match prepared {
-                Err(_) => Some("invalid"),
-                Ok(task) => match store.run_organization(&config, &task).await {
-                    Ok(Some(receipt)) => {
-                        let _ = app.emit("organization-complete", &receipt);
-                        if receipt.status == "applied" {
-                            let app = app.clone();
-                            let config = config.clone();
-                            tauri::async_runtime::spawn(async move {
-                                let Ok(_update_work) = crate::updates::work() else {
-                                    return;
-                                };
-                                let state = app.state::<Workspace>();
-                                let _guard = state.recommendation_lock.lock().await;
-                                if state.exiting.load(Ordering::Relaxed) {
-                                    return;
-                                }
-                                let _ = state
-                                    .store
-                                    .recommend_organization_collections(
-                                        &config,
-                                        &receipt.request_id,
-                                    )
-                                    .await;
-                                let _ = app.emit("resources-changed", ());
-                            });
-                        }
-                        None
-                    }
-                    Ok(None) => None,
-                    Err(memivy_core::model::ProbeError::Status(429)) => Some("rate_limit"),
-                    Err(memivy_core::model::ProbeError::ToolsUnsupported) => {
-                        Some("tools_unsupported")
-                    }
-                    Err(
-                        memivy_core::model::ProbeError::InvalidResponse
-                        | memivy_core::model::ProbeError::TooLarge,
-                    ) => Some("invalid"),
-                    Err(_) => Some("unavailable"),
-                },
-            };
-            if let Some(reason) = failure {
-                pending_failure = Some((attempt, reason));
-                let _ = flush_organization_failure(store, &mut pending_failure).await;
-            }
-            let _ = app.emit("resources-changed", ());
-        }
-    });
+    blocking(move || store.memory_receipt_changes(&request)).await
 }
 #[tauri::command]
 async fn navigation_collections(
@@ -687,67 +573,39 @@ async fn navigation_archive_collection(
     Ok(())
 }
 #[tauri::command]
-async fn organization_collections(
+async fn collection_recommendations(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    receipt: String,
+    memory_id: String,
+    expected_version: String,
 ) -> HostResult<Vec<CollectionRecommendation>> {
     let _update_work = crate::updates::work()?;
     require_main(&window)?;
-    let store = state.store.clone();
-    let receipt_id = receipt.clone();
-    if let Some(cached) =
-        blocking(move || store.organization_collection_feedback(&receipt_id)).await?
-    {
-        return Ok(cached);
-    }
     validate_config(&state.config)?;
     let config = crate::models::read_llm(&state).map_err(|_| HostError::new("model_required"))?;
-    let _guard = state.recommendation_lock.lock().await;
     state
         .store
-        .recommend_organization_collections(&config, &receipt)
+        .recommend_collections(&config, &memory_id, &expected_version)
         .await
         .map_err(|_| HostError::new("recommendation_failed"))
 }
 #[tauri::command]
-async fn organization_states(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    keys: Vec<RecordKey>,
-) -> HostResult<Vec<OrganizationState>> {
-    let _update_work = crate::updates::work()?;
-    require_main(&window)?;
-    let store = state.store.clone();
-    blocking(move || store.organization_states(&keys)).await
-}
-#[tauri::command]
-async fn organization_dismiss(
+async fn collection_accept_recommendation(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
-    receipt: String,
-) -> HostResult<()> {
-    let _update_work = crate::updates::work()?;
-    require_main(&window)?;
-    let store = state.store.clone();
-    blocking(move || store.dismiss_organization_collections(&receipt)).await?;
-    let _ = app.emit("resources-changed", ());
-    Ok(())
-}
-#[tauri::command]
-async fn organization_collect(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    receipt: String,
+    memory_id: String,
+    expected_version: String,
     collection: String,
     revision: i64,
 ) -> HostResult<()> {
     let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let store = state.store.clone();
-    blocking(move || store.accept_organization_collection(&receipt, &collection, revision)).await?;
+    blocking(move || {
+        store.accept_collection_recommendation(&memory_id, &expected_version, &collection, revision)
+    })
+    .await?;
     let _ = app.emit("resources-changed", ());
     Ok(())
 }
@@ -924,20 +782,6 @@ async fn draft_clear(
     Ok(cleared)
 }
 #[tauri::command]
-async fn library_capture(
-    window: tauri::WebviewWindow,
-    state: tauri::State<'_, Workspace>,
-    request: CaptureRequest,
-) -> HostResult<CaptureResult> {
-    let _update_work = crate::updates::work()?;
-    require(&window)?;
-    if !matches!(&request.origin,Origin::User {app, ..} if app=="Memivy") {
-        return Err(HostError::new("capture_origin_invalid"));
-    }
-    let s = state.store.clone();
-    blocking(move || s.capture(&request)).await
-}
-#[tauri::command]
 async fn library_edit(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
@@ -953,7 +797,7 @@ async fn library_edit(
 enum Action {
     Trash {
         key: RecordKey,
-        expected: Option<String>,
+        expected: String,
     },
     Restore {
         key: RecordKey,
@@ -989,21 +833,14 @@ async fn library_action(
     let s = state.store.clone();
     blocking(move || {
         match action {
-            Action::Trash { key, expected } => match key.kind.as_str() {
-                "memory" => s.trash_memory(&key.id, &expected.ok_or(DataError::Invalid)?)?,
-                "capture" => s.trash_capture(&key.id)?,
-                _ => return Err(DataError::Invalid),
-            },
-            Action::Restore { key } => match key.kind.as_str() {
-                "memory" => s.restore_memory(&key.id)?,
-                "capture" => s.restore_capture(&key.id)?,
-                _ => return Err(DataError::Invalid),
-            },
-            Action::Purge { key } => match key.kind.as_str() {
-                "memory" => s.purge_memory(&key.id)?,
-                "capture" => s.purge_capture(&key.id)?,
-                _ => return Err(DataError::Invalid),
-            },
+            Action::Trash { key, expected } if key.kind == "memory" => {
+                s.trash_memory(&key.id, &expected)?
+            }
+            Action::Restore { key } if key.kind == "memory" => s.restore_memory(&key.id)?,
+            Action::Purge { key } if key.kind == "memory" => s.purge_memory(&key.id)?,
+            Action::Trash { .. } | Action::Restore { .. } | Action::Purge { .. } => {
+                return Err(DataError::Invalid);
+            }
             Action::RestoreArchive {
                 request_id,
                 memory_id,
@@ -1069,7 +906,7 @@ async fn memory_export(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     key: RecordKey,
-    expected_version: Option<String>,
+    expected_version: String,
 ) -> HostResult<Option<String>> {
     let _update_work = crate::updates::work()?;
     require_main(&window)?;
@@ -1123,7 +960,7 @@ async fn memory_export(
     };
     let s = state.store.clone();
     blocking(move || {
-        s.export_record_markdown(&key, expected_version.as_deref(), &target)?;
+        s.export_record_markdown(&key, &expected_version, &target)?;
         Ok(Some(target.to_string_lossy().into_owned()))
     })
     .await
@@ -1250,7 +1087,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             let store = match (|| -> Result<MemoryStore> {
                 let store = MemoryStore::open_application(&root)?;
                 store.recover_interrupted_turns()?;
-                store.recover_organization()?;
                 Ok(store)
             })() {
                 Ok(store) => store,
@@ -1272,12 +1108,10 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 restore_request: Mutex::new(None),
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
-                recommendation_lock: tokio::sync::Mutex::new(()),
             });
             crate::i18n::setup(app.handle());
             crate::desktop::setup(app)?;
             crate::voice::setup(app.handle())?;
-            start_organizer(app.handle().clone());
             start_embedding(app.handle().clone());
             crate::mcp::watch_library(app.handle().clone());
             Ok(())
@@ -1326,10 +1160,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             navigation_save_collection,
             navigation_archive_collection,
             navigation_suggest,
-            organization_collections,
-            organization_collect,
-            organization_states,
-            organization_dismiss,
             discussion_open,
             discussion_topic,
             discussion_messages,
@@ -1340,15 +1170,16 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             discussion_save_text,
             discussion_changes,
             discussion_undo,
-            organization_jobs,
-            organization_retry,
+            memory_receipts,
+            memory_receipt_changes,
+            collection_recommendations,
+            collection_accept_recommendation,
             library_detail,
             library_projects,
             library_topics,
             draft_read,
             draft_write,
             draft_clear,
-            library_capture,
             library_edit,
             library_action,
             library_rebuild,
@@ -1365,7 +1196,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::models::models_load,
             crate::models::models_test,
             crate::models::models_apply,
-            crate::models::models_organize,
             crate::mcp::mcp_settings,
             crate::mcp::mcp_set_enabled,
             crate::mcp::mcp_diagnose,
@@ -1403,48 +1233,6 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             let _ = crate::desktop::show_main(app);
         }
     });
-}
-
-#[cfg(test)]
-mod organization_writeback_tests {
-    use super::*;
-    #[tokio::test]
-    async fn failed_terminal_write_is_retained_until_writer_lock_releases() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = MemoryStore::open(dir.path()).unwrap();
-        let raw = store
-            .capture(&CaptureRequest {
-                request_id: uuid::Uuid::new_v4().to_string(),
-                text: "Synthetic lock conflict".into(),
-                origin: memivy_core::memory::Origin::User {
-                    app: "QA".into(),
-                    project: None,
-                    uri: None,
-                },
-            })
-            .unwrap();
-        let task = store.claim_organization().unwrap().unwrap();
-        let lock = rusqlite::Connection::open(store.database_path()).unwrap();
-        lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-        let mut pending = Some((task.attempt_id.clone(), "storage"));
-        assert!(!flush_organization_failure(store.clone(), &mut pending).await);
-        assert_eq!(pending.as_ref().unwrap().0, task.attempt_id);
-        lock.execute_batch("ROLLBACK").unwrap();
-        assert!(flush_organization_failure(store.clone(), &mut pending).await);
-        assert!(pending.is_none());
-        assert_eq!(
-            store
-                .organization_jobs(&RecordKey {
-                    kind: "memory".into(),
-                    id: raw.memory_id.clone()
-                })
-                .unwrap()[0]
-                .status,
-            "failed"
-        );
-        store.retry_organization(&raw.memory_id).unwrap();
-        assert!(store.claim_organization().unwrap().is_some());
-    }
 }
 
 #[cfg(test)]

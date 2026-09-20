@@ -1,4 +1,6 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use serde_json::{Value, json};
 
 fn checkpoint_calls(value: &Value) -> Vec<memivy_core::model::ToolCall> {
@@ -168,22 +170,19 @@ async fn committed_tool_without_checkpoint_result_resumes_only_after_that_tool()
         &[],
     );
     let args = json!({"destination":{"kind":"new"},"title":"反馈验证","parts":[{"text":"决定验证反馈收集，尚未上线。","sources":[{"source_id":run.user_message_id,"quote":run.input_text}]}]});
-    let reasoning = json!({
-        "reasoning":"Legacy provider reasoning",
-        "reasoning_content":"Legacy canonical reasoning",
-        "reasoning_details":[
-            {"type":"reasoning.text","id":"thinking-7","format":"anthropic-claude-v1","index":3,"text":"Signed thought","signature":"original-signature"},
-            {"type":"reasoning.encrypted","id":"rs_8","format":"openai-responses-v1","index":4,"data":"original-encrypted-data"}
-        ]
-    });
-    let mut protocol = vec![
-        json!({"role":"user","content":run.input_text}),
-        json!({"role":"assistant","content":"先记下这个决定。","tool_calls":[{"id":"committed-call","type":"function","function":{"name":"write_memory","arguments":args.to_string()}}]}),
+    let protocol = vec![
+        json!(Message::user(run.input_text)),
+        json!(Message::Assistant {
+            id: None,
+            content: vec![
+                AssistantContent::text("先记下这个决定。"),
+                AssistantContent::ToolCall(ToolCall::from_wire(
+                    "committed-call",
+                    ToolFunction::new("write_memory".into(), args.clone())
+                ))
+            ]
+        }),
     ];
-    protocol[1]
-        .as_object_mut()
-        .unwrap()
-        .extend(reasoning.as_object().unwrap().clone());
     store
         .append_agent_text(&run.input_id, &run.attempt_id, "先记下这个决定。")
         .unwrap();
@@ -220,10 +219,6 @@ async fn committed_tool_without_checkpoint_result_resumes_only_after_that_tool()
             assert_eq!(messages.len(), 3);
             assert_eq!(messages[1]["tool_calls"][0]["id"], "committed-call");
             assert_eq!(messages[2]["tool_call_id"], "committed-call");
-            for (key, value) in reasoning.as_object().unwrap() {
-                assert_eq!(&messages[1][key], value, "legacy reasoning field {key}");
-            }
-            assert!(!request.to_string().contains("_memivy_openai_reasoning"));
             let result = last_content(request);
             assert_eq!(result["receipt"]["request_id"], receipt_id);
             text("下一步先验证需求。")
@@ -262,10 +257,7 @@ async fn streaming_cancellation_retains_visible_prefix_and_stops_before_tools() 
     let (config, requests, server) = fixture(1, |_, _| Response {
         status: 200,
         parts: vec![
-            delta(
-                json!({"role":"assistant","content":"已显示的前半段。"}),
-                json!(null),
-            ),
+            delta(json!(Message::assistant("已显示的前半段。")), json!(null)),
             delta(json!({"content":"不应追加的后半段。"}), json!(null)),
             delta(json!({}), json!("stop")) + "data: [DONE]\n\n",
         ],
@@ -306,10 +298,7 @@ async fn cancellation_after_first_commit_preserves_receipt_and_stops_pending_wri
     let (config, requests, server) = fixture(1, move |_, _| Response {
         status: 200,
         parts: vec![
-            delta(
-                json!({"role":"assistant","content":displayed_text}),
-                json!(null),
-            ),
+            delta(json!(Message::assistant(displayed_text)), json!(null)),
             delta(
                 json!({"tool_calls":[
                     {"index":0,"id":"first-write","type":"function","function":{
@@ -378,7 +367,6 @@ async fn cancellation_after_first_commit_preserves_receipt_and_stops_pending_wri
     assert_eq!(count(&store, "memories"), 1);
     assert_eq!(count(&store, "captures"), 1);
     assert_eq!(count(&store, "receipts"), 1);
-    assert_eq!(count(&store, "organization_jobs"), 0);
     drop(store);
 
     let reopened = MemoryStore::open(dir.path()).unwrap();
@@ -451,17 +439,26 @@ async fn reading_v1_then_writing_v2_keeps_the_cited_v1_available() {
     let target = raw.memory_id.clone();
     let old_version = raw.version_id.clone();
     let cite_version = old_version.clone();
-    let (config, _, server) = fixture(3, move |index, request| {
+    let arguments = json!({"destination":{"kind":"existing","memory_id":target,"expected_version":old_version},"title":"产品计划","parts":[{"text":"之前计划先做社区。","sources":[{"source_id":old_version,"quote":"旧计划：先做社区。"}]},{"text":"现在决定先做反馈收集，社区暂缓。","sources":[{"source_id":source,"quote":source_quote}]}]});
+    let (config, _, server) = fixture(4, move |index, request| {
         Response::stream(match index {
             0 => {
                 assert!(request.to_string().contains(&old_version));
-                call(
-                    "write-1",
-                    "write_memory",
-                    json!({"destination":{"kind":"existing","memory_id":target,"expected_version":old_version},"title":"产品计划","parts":[{"text":"之前计划先做社区。","sources":[{"source_id":old_version,"quote":"旧计划：先做社区。"}]},{"text":"现在决定先做反馈收集，社区暂缓。","sources":[{"source_id":source,"quote":source_quote}]}]}),
-                )
+                let mut wrong_source = arguments.clone();
+                wrong_source["parts"][1]["sources"][0]["source_id"] = json!(id());
+                call("wrong-source", "write_memory", wrong_source)
             }
-            1 => text(&format!(
+            1 => {
+                let rejected = last_content(request);
+                assert_eq!(rejected["applied"], false);
+                assert_eq!(rejected["source_message_id"], source);
+                assert!(rejected.get("receipt").is_none());
+                let mut corrected = arguments.clone();
+                corrected["parts"][1]["sources"][0]["source_id"] =
+                    rejected["source_message_id"].clone();
+                call("write-1", "write_memory", corrected)
+            }
+            2 => text(&format!(
                 "[旧计划](memivy://source/version/{old_version})是先做社区；现在决定先验证反馈收集。"
             )),
             _ => suggestions(),
@@ -476,6 +473,8 @@ async fn reading_v1_then_writing_v2_keeps_the_cited_v1_available() {
     let current = store.memory(&raw.memory_id).unwrap().current;
     assert_ne!(current.id, raw.version_id);
     assert!(current.body.contains("社区暂缓"));
+    assert_eq!(count(&store, "memories"), 1);
+    assert_eq!(store.agent_input_receipts(&run.input_id).unwrap().len(), 1);
     let citation = store
         .discussion_excerpt(
             &run.assistant_message_id,
@@ -533,13 +532,15 @@ async fn citation_keeps_longer_reread_and_disjoint_tail_without_exposing_unread_
         Response::stream(match index {
             0 => {
                 let context = last_content(request);
-                let evidence = &context["memory_context"]["global"][0]["evidence"];
-                assert_eq!(evidence["start"], 0);
-                assert_eq!(evidence["text"].as_str().unwrap().chars().count(), 900);
+                assert!(
+                    context["memory_context"]["focused"]
+                        .as_array()
+                        .is_some_and(|rows| rows.is_empty())
+                );
                 call(
                     "longer-read",
                     "read_memory",
-                    json!({"memory_id":memory,"view":"current","source_id":null,"start_char":0,"max_chars":3000}),
+                    json!({"memory_id":memory,"view":"current","version_id":null,"offset":0,"start_char":0,"max_chars":3000}),
                 )
             }
             1 => {
@@ -550,7 +551,7 @@ async fn citation_keeps_longer_reread_and_disjoint_tail_without_exposing_unread_
                 call(
                     "far-read",
                     "read_memory",
-                    json!({"memory_id":memory,"view":"current","source_id":null,"start_char":far_start,"max_chars":1000}),
+                    json!({"memory_id":memory,"view":"current","version_id":null,"offset":0,"start_char":far_start,"max_chars":1000}),
                 )
             }
             2 => {
@@ -663,19 +664,19 @@ async fn pending_write_rechecks_the_persisted_request_view(prune: bool) {
         .unwrap();
     let run = begin(&store, &conversation, "补充：需要支持离线。", &[]);
     let current = store.memory(&captured.memory_id).unwrap().current;
-    let mut protocol = vec![json!({"role":"user","content":json!({
-        "source_message_id":run.user_message_id,
-        "current_message":run.input_text,
-        "earlier_context":if prune { "x".repeat(44_000) } else { String::new() },
-    }).to_string()})];
+    let mut protocol = vec![json!(Message::user(
+        json!({
+            "source_message_id":run.user_message_id,
+            "current_message":run.input_text,
+            "earlier_context":if prune { "x".repeat(32_000) } else { String::new() },
+        })
+        .to_string()
+    ))];
     // This is a real checkpoint shape after three paged reads. A later request
     // can release older tool bodies while the durable protocol keeps them.
     for start in [0, 3000, 6000] {
         let call_id = format!("read-{start}");
-        protocol.push(json!({"role":"assistant","content":null,"tool_calls":[{
-            "id":call_id,"type":"function","function":{"name":"read_memory",
-            "arguments":json!({"memory_id":captured.memory_id,"view":"current","source_id":null,"start_char":start,"max_chars":3000}).to_string()}
-        }]}));
+        protocol.push(json!(Message::Assistant { id:None,content:vec![AssistantContent::ToolCall(ToolCall::from_wire(&call_id,ToolFunction::new("read_memory".into(),json!({"memory_id":captured.memory_id,"view":"current","version_id":null,"offset":0,"start_char":start,"max_chars":3000}))))] }));
         let evidence = Evidence {
             source: SourceRef::Version(current.id.clone()),
             title: current.title.clone(),
@@ -686,8 +687,11 @@ async fn pending_write_rechecks_the_persisted_request_view(prune: bool) {
             start,
             additional_spans: vec![],
         };
-        protocol.push(json!({"role":"tool","tool_call_id":call_id,
-            "content":json!({"memory_id":captured.memory_id,"evidence":evidence}).to_string()}));
+        protocol.push(json!(Message::tool_result(
+            call_id,
+            "read_memory",
+            json!({"memory_id":captured.memory_id,"evidence":evidence}).to_string()
+        )));
     }
     store
         .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
@@ -895,48 +899,72 @@ async fn rereading_compacted_conversation_supplies_the_whole_input_undo_handle()
 }
 
 #[tokio::test]
-async fn legacy_control_checkpoint_retries_with_current_prompt_and_preserves_history() {
+async fn saved_capture_quotes_require_reading_the_original_in_the_producing_request() {
     let (_dir, store, conversation) = setup();
-    let run = begin(&store, &conversation, "请继续分析。", &[]);
-    let old = vec![
-        json!({"role":"system","content":"Always call set_turn_options before answering."}),
-        json!({"role":"user","content":run.input_text}),
-        json!({"role":"assistant","content":null,"tool_calls":[{"id":"old-options","type":"function","function":{"name":"set_turn_options","arguments":"{\"reply_kind\":\"acknowledgment_only\",\"maintenance\":\"unchanged\"}"}}]}),
-    ];
-    store
-        .checkpoint_agent(&run.input_id, &run.attempt_id, &old)
+    let saved = store
+        .capture(&CaptureRequest {
+            request_id: id(),
+            text: "Offline support remains an undecided proposal.".into(),
+            origin: Origin::User {
+                app: "QA".into(),
+                project: None,
+                uri: None,
+            },
+        })
         .unwrap();
     store
-        .stop_agent_input(&run.input_id, &run.attempt_id, "failed", Some("network"))
+        .edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: saved.memory_id.clone(),
+            expected_version: saved.version_id,
+            title: "Offline support".into(),
+            body: "Offline support is decided.".into(),
+        })
         .unwrap();
-    let retry = store.retry_agent_input(&run.input_id, &id()).unwrap();
-    let (config, requests, server) = fixture(2, |index, request| {
-        Response::stream(if index == 0 {
-            assert!(
-                !request["messages"][0]
-                    .to_string()
-                    .contains("set_turn_options")
-            );
-            assert!(
-                request["messages"][0]
-                    .to_string()
-                    .contains("Respond naturally")
-            );
-            assert_eq!(last_content(request)["applied"], false);
-            text("可以继续比较成本和时间。")
-        } else {
-            suggestions()
+    let current = store.memory(&saved.memory_id).unwrap().current;
+    let run = begin(
+        &store,
+        &conversation,
+        "Check the original wording and correct the saved decision if needed.",
+        std::slice::from_ref(&saved.memory_id),
+    );
+    let arguments = json!({"destination":{"kind":"existing","memory_id":saved.memory_id,"expected_version":current.id},"title":"Offline support","parts":[{"text":"Offline support remains an undecided proposal.","sources":[{"source_id":saved.capture_id,"quote":"Offline support remains an undecided proposal."}]}]});
+    let (config, _, server) = fixture(5, move |index, request| {
+        Response::stream(match index {
+            0 => call("unread-capture-write", "write_memory", arguments.clone()),
+            1 => {
+                assert_eq!(last_content(request)["applied"], false);
+                assert!(
+                    last_content(request)["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Read each cited original")
+                );
+                call(
+                    "read-original",
+                    "read_memory",
+                    json!({"memory_id":saved.memory_id,"view":"originals","version_id":null,"offset":0,"start_char":0,"max_chars":3000}),
+                )
+            }
+            2 => {
+                assert_eq!(
+                    last_content(request)["originals"][0]["evidence"]["text"],
+                    "Offline support remains an undecided proposal."
+                );
+                call("visible-capture-write", "write_memory", arguments.clone())
+            }
+            3 => {
+                assert_eq!(last_content(request)["receipt"]["status"], "applied");
+                text("Corrected the memory from the original source.")
+            }
+            _ => suggestions(),
         })
     });
     store
-        .run_discussion(&config, &retry.input_id, &retry.attempt_id, "zh-CN", |_| {})
+        .run_discussion(&config, &run.input_id, &run.attempt_id, "en", |_| {})
         .await
         .unwrap();
     server.join().unwrap();
-    let result = store.agent_execution(&run.input_id).unwrap();
-    assert_eq!(result.state, "complete");
-    assert_eq!(result.protocol[0], old[0]);
-    assert_eq!(result.follow_ups.len(), 2);
-    assert_eq!(requests.lock().unwrap().len(), 2);
-    assert_eq!(count(&store, "memories"), 0);
+    assert_eq!(store.agent_input_receipts(&run.input_id).unwrap().len(), 1);
+    assert_eq!(count(&store, "captures"), 1);
 }

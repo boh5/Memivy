@@ -16,7 +16,7 @@ fn request(text: &str) -> CaptureRequest {
 }
 fn query(text: &str) -> McpSearchQuery {
     McpSearchQuery {
-        query: text.into(),
+        queries: vec![MemoryQuery::text(text)],
         ..Default::default()
     }
 }
@@ -48,7 +48,7 @@ fn off_and_corrupt_configuration_fail_closed_with_no_capture() {
     );
 }
 #[test]
-fn retries_preserve_exact_text_source_and_one_pending_job() {
+fn retries_preserve_exact_text_source_and_immediate_searchability() {
     let (_dir, s) = setup();
     s.set_mcp_enabled(true).unwrap();
     let mut req = request("  请记住：原话\n不能改写！  ");
@@ -57,12 +57,6 @@ fn retries_preserve_exact_text_source_and_one_pending_job() {
     assert_eq!(s.capture_by_id(&receipt.capture_id).unwrap().text, req.text);
     req.text.push('！');
     assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::RequestConflict);
-    let key = RecordKey {
-        kind: "memory".into(),
-        id: receipt.memory_id,
-    };
-    let jobs = s.organization_jobs(&key).unwrap();
-    assert_eq!(jobs.len(), 1);
     // With no app or model running, capture/search remain fully usable.
     assert_eq!(s.mcp_search(&query("不能改写")).unwrap().items.len(), 1);
     s.set_mcp_enabled(false).unwrap();
@@ -104,7 +98,6 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     );
     let c = id();
     s.create_conversation(&c, "私有草稿秘密").unwrap();
-    s.save_conversation_draft(&c, "私有草稿秘密").unwrap();
     s.save_workspace_draft(&WorkspaceDraft {
         destination: None,
         key: "input".into(),

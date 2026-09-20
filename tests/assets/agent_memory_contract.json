@@ -10,9 +10,9 @@
     },
     {
       "id": "save-02",
-      "test": "explicit_selected_text_appends_exactly_and_never_schedules_organization",
+      "test": "explicit_selected_text_appends_exactly_and_remains_independently_undoable",
       "file": "crates/memivy-core/tests/memory_intelligence.rs",
-      "check": "Manual saving appends exactly once without another organization job; undo preserves the original text."
+      "check": "Manual saving appends exactly once with its own receipt; undo preserves the original text."
     },
     {
       "id": "save-03",
@@ -31,12 +31,6 @@
       "test": "reading_v1_then_writing_v2_keeps_the_cited_v1_available",
       "file": "crates/memivy-core/tests/agent_workflows.rs",
       "check": "The version read remains separate from the newly written version; citations still open the original evidence."
-    },
-    {
-      "id": "save-06",
-      "test": "source_archive_and_atomic_undo_outlive_deleted_conversation",
-      "file": "crates/memivy-core/tests/agent_execution.rs",
-      "check": "Sources and grouped undo remain available after conversation deletion."
     },
     {
       "id": "save-07",

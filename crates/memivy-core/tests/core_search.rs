@@ -35,7 +35,7 @@ fn fixed_search_corpus_matches_library_and_mcp_before_and_after_rebuild() {
             assert_eq!(actual, expected, "{} rebuild={rebuilding}", case.id);
             let mcp = store
                 .mcp_search(&McpSearchQuery {
-                    query: q.query,
+                    queries: vec![MemoryQuery::text(q.query)],
                     origin: q.origin,
                     project: q.project,
                     since: q.since,
@@ -111,7 +111,7 @@ fn fixed_near_duplicates_rank_title_and_filter_before_bounded_results() {
     assert!(page.next_offset.is_some());
     let page = store
         .mcp_search(&McpSearchQuery {
-            query: "相近结果".into(),
+            queries: vec![MemoryQuery::text("相近结果")],
             limit: Some(8),
             ..Default::default()
         })
@@ -121,7 +121,7 @@ fn fixed_near_duplicates_rank_title_and_filter_before_bounded_results() {
     assert_eq!(page.items[0].record.id, data.records["ranking"]);
     let filtered = store
         .mcp_search(&McpSearchQuery {
-            query: "相近结果".into(),
+            queries: vec![MemoryQuery::text("相近结果")],
             project: Some("唯一项目".into()),
             origin: Some("agent".into()),
             limit: Some(1),

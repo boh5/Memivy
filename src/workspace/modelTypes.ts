@@ -5,7 +5,7 @@ export type Provider = "openai_compatible" | "openai_responses" | "anthropic" | 
 export const providerKeys = {openai_compatible:"capability.providers.openaiCompatible",openai_responses:"capability.providers.openaiResponses",anthropic:"capability.providers.anthropic",gemini:"capability.providers.gemini"} as const;
 export const providerUrls:Record<Provider,string> = {openai_compatible:"https://api.openai.com/v1",openai_responses:"https://api.openai.com/v1",anthropic:"https://api.anthropic.com",gemini:"https://generativelanguage.googleapis.com"};
 export type Binding = {provider:Provider;source:"local"|"service";base_url:string;has_key:boolean;api_key?:string|null;model:string;dimensions:number|null;disable_reasoning:boolean;max_output_tokens:number|null;output_token_parameter:"max_tokens"|"max_completion_tokens"};
-export type Models = {revision:string;llm:Binding|null;embedding:Binding;voice:Binding;auto_organize:boolean};
+export type Models = {revision:string;llm:Binding|null;embedding:Binding;voice:Binding};
 export type EmbeddingStatus = {enabled:boolean;preparing:boolean;paused:boolean;state:string;downloaded:number;bytes:number;processed:number;total:number;failed:number;error:string|null};
 export const emptyBinding = ():Binding => ({provider:"openai_compatible",source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"});
 // Keep these module-level values as translation keys. Resolving them here would

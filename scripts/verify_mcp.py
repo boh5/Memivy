@@ -82,25 +82,25 @@ def check(binary):
         names = sorted(t["name"] for t in client.call("tools/list")["tools"])
         assert names == ["memory_capture", "memory_search"]
         switch(False)
-        for name, payload in [("memory_capture",args),("memory_search",{"query":"synthetic evidence"})]:
+        for name, payload in [("memory_capture",args),("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]})]:
             assert client.tool(name,payload,failed=True)["code"] == "mcp_disabled"
         switch(True)
         receipt = client.tool("memory_capture",args)
         assert client.tool("memory_capture",args)["capture_id"] == receipt["capture_id"]
         assert client.tool("memory_capture",{**args,"text":"Conflicting retry"},failed=True)["code"] == "request_conflict"
-        hit = client.tool("memory_search",{"query":"synthetic evidence"})["items"][0]
+        hit = client.tool("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]})["items"][0]
         assert hit["record"]["id"] == receipt["memory_id"]
         assert hit["origin"]["project"] == "Test project"
-        assert client.call("tools/call", {"name":"memory_search","arguments":{"query":"synthetic evidence","trash":True}})["isError"]
+        assert client.call("tools/call", {"name":"memory_search","arguments":{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}],"trash":True}})["isError"]
         client.call("tools/call", {"name":"memory_delete","arguments":{}},error=True)
-        for payload in [{"query":""},{"query":"synthetic","limit":9},{"query":"synthetic","limit":0}]:
+        for payload in [{"queries":[{"text":"","keywords":[]}]},{"queries":[{"text":"synthetic","keywords":["synthetic"]}],"limit":9},{"queries":[{"text":"synthetic","keywords":["synthetic"]}],"limit":0}]:
             assert client.tool("memory_search",payload,failed=True)["code"] == "invalid_input"
         # Acknowledged transaction survives abrupt MCP process death.
         client.close(kill=True)
         client = Client(binary,data,latest=True)
-        assert client.tool("memory_search",{"query":"synthetic evidence"})["items"][0]["record"]["id"] == receipt["memory_id"]
+        assert client.tool("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]})["items"][0]["record"]["id"] == receipt["memory_id"]
         switch(False)
-        assert client.tool("memory_search",{"query":"synthetic evidence"},failed=True)["code"] == "mcp_disabled"
+        assert client.tool("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]},failed=True)["code"] == "mcp_disabled"
         switch(True)
         # Independent MCP processes and native core write concurrently. Identical
         # retries across processes must still produce a single durable capture.
@@ -120,7 +120,6 @@ def check(binary):
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert db.execute('SELECT COUNT(*) FROM captures WHERE request_id=?',[shared['request_id']]).fetchone()[0] == 1
         assert db.execute('SELECT text FROM captures WHERE request_id=?',[args['request_id']]).fetchone()[0] == args['text']
-        assert db.execute("SELECT count(*) FROM organization_jobs WHERE status='pending'").fetchone()[0] == 6
         client.close()
         # Protocol metadata works while disabled, but no data is returned.
         switch(False)
@@ -132,7 +131,7 @@ def check(binary):
         p = subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(data)},input='x'*(1024*1024+2)+'\n',capture_output=True,text=True,timeout=10)
         assert 'xxxxx' not in p.stderr and not p.stdout
         assert len(p.stderr) < 200
-    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "pending organization without app", "isolated data", "bounded input frames", "clean EOF", "SQLite integrity"]}
+    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "isolated data", "bounded input frames", "clean EOF", "SQLite integrity"]}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

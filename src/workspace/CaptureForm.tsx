@@ -34,7 +34,7 @@ function MemoryPicker({ selected, onSelect, onClose }: { selected: Source[]; onS
     locked.current = true; setBusy(true); setError("");
     try {
       const detail = await call<Detail>("library_detail", { key: row.key });
-      const source: Source = detail.current ? { kind: "version", id: detail.current.id } : { kind: "capture", id: row.key.id };
+      const source: Source = { kind: "version", id: detail.current.id };
       if (!selected.some(s => s.kind === source.kind && s.id === source.id)) onSelect(source);
       onClose();
     } catch (e) { setError(errorText(e)); }

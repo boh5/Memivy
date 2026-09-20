@@ -3,7 +3,7 @@ import { expireQueries, useResourceVersion } from "./resources";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../ui";
-import { call, date, errorText, keyOf, sourceName, native, type Key, type Page, type Query } from "./api";
+import { call, date, errorText, keyOf, sourceName, type Key, type Page, type Query } from "./api";
 import { Empty, ErrorNotice } from "./components";
 import { useNotice } from "../i18n/react";
 
@@ -15,8 +15,6 @@ export default function MemoryList({ trash, active, selected, revision: requeste
   const { t } = useTranslation("workspace");
   const [reload, setReload] = useState(0);
   const revision = useResourceVersion([{domain:"memory"},{domain:"navigation"},{domain:"collection"}]) + requestedRevision + reload;
-  const statusRevision = useResourceVersion([{domain:"organization"}]);
-  const [states, setStates] = useState<Record<string,{status:string;recommendations:number}>>({});
   const [origin, setOrigin] = useState(""), [project, setProject] = useState("");
   const [since, setSince] = useState(""), [until, setUntil] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -73,15 +71,6 @@ export default function MemoryList({ trash, active, selected, revision: requeste
       .finally(() => { if (sequence.current === seq) setLoading(false); });
     return () => { ++sequence.current; };
   }, [signature, revision]);
-  useEffect(() => {
-    if (!native || trash) { setStates({}); return; }
-    let active = true;
-    const keys = result.items.map(r=>r.key);
-    const batches = [];
-    for(let i=0;i<keys.length;i+=100)batches.push(call<Array<{key:Key;status:string;recommendations:number}>>("organization_states",{keys:keys.slice(i,i+100)}));
-    void Promise.all(batches).then(groups => {if(active)setStates(Object.fromEntries(groups.flat().map(s=>[keyOf(s.key),s])));}).catch(()=>{ /* Retain known statuses on a transient read failure. */ });
-    return () => {active=false;};
-  },[result,statusRevision,trash]);
   async function more() {
     if (loading || loadingMore.current || result.next_offset === null) return;
     loadingMore.current = true; setLoading(true);
@@ -116,7 +105,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
         <button
           className="icon-button"
           aria-label={t("list.refresh")}
-          onClick={() => { void expireQueries(["library_query","library_projects","organization_states"]).then(() => { setReload(v => v + 1); onRefresh(); }).catch(e => setListError(errorText(e))); }}
+          onClick={() => { void expireQueries(["library_query","library_projects"]).then(() => { setReload(v => v + 1); onRefresh(); }).catch(e => setListError(errorText(e))); }}
         >
           <Icon name="refresh" />
         </button>
@@ -205,7 +194,6 @@ export default function MemoryList({ trash, active, selected, revision: requeste
             <p>
               {r.snippet}
             </p>
-            {!trash && states[keyOf(r.key)] && <span className="row-organization-state">{states[keyOf(r.key)].recommendations ? t("list.recommendations", { count: states[keyOf(r.key)].recommendations }) : states[keyOf(r.key)].status === "pending" ? t("list.pending") : states[keyOf(r.key)].status === "processing" ? t("list.processing") : ["failed","deferred","paused"].includes(states[keyOf(r.key)].status) ? t("list.incomplete") : ""}</span>}
             <div className="row-meta">
               <span>
                 {sourceName(r.origin)}

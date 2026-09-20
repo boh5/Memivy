@@ -50,19 +50,26 @@ frameworks or speculative abstractions.
 - Save original input locally before AI processing. Preserve originals, version
   history and provenance. AI changes must have visible, reversible receipts.
   Model failure must not block ordinary capture or keyword search.
+- Ordinary captures and reads do not schedule semantic organization. Keep index
+  maintenance separate from memory changes. Repairs and two-memory merges occur
+  only through the current Agent using read evidence, with receipts and undo.
+  Collection recommendations are user-triggered, direct model calls; only explicit
+  user selection adds membership.
 - Conversations and their compression summaries are separate from durable memories.
   Save meaningful user expressions while distinguishing tentative ideas, decisions
   and completed actions. Questions and AI suggestions must not become user facts.
-- Recall relevant global memories before answering and use bounded tools to read
-  further evidence. Selected notes or collections focus a discussion without
+- Let the Agent choose when memory retrieval is needed; do not pre-search every
+  message. Use bounded multi-query search and source reads for relevant evidence. Selected notes or collections focus a discussion without
   hiding relevant global constraints. Cite the actual source versions used.
 - Preserve user drafts, concurrent-edit checks, cancellation and retries. Undo must
-  not overwrite later edits. Deleting a conversation must preserve already saved
-  memories, their source records and grouped undo.
+  not overwrite later edits. Saved memories, source records and grouped undo must
+  remain independent of conversation context.
 - Deleted memories go to Trash and leave normal search and AI recall. Preserve
-  shared sources and independently deleted items. Empty Trash only on user action.
-  Removing a collection must not delete its memories. Collection membership is
-  manual: AI may recommend collections but must not add memories without confirmation.
+  shared sources and separately deleted memories. Empty Trash only on user action.
+  Originals are evidence within a memory, not independent library items with their
+  own edit, trash or restore operations. Removing a collection must not delete its
+  memories. Collection membership is manual: AI may recommend collections but
+  must not add memories without confirmation.
 - The first public database uses schema 1 in `migrations/memory/001_initial.sql`.
   Do not restore development-era migrations or compatibility conversions. After
   release, keep the initial schema unchanged and add migrations from schema 2.

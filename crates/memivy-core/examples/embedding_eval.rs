@@ -155,7 +155,9 @@ async fn main() {
     println!("long_document_index_ms={}", start.elapsed().as_millis());
     let result = store
         .search(&SearchRequest {
-            query: "What is the receipt number in the final section?".into(),
+            queries: vec![MemoryQuery::text(
+                "What is the receipt number in the final section?",
+            )],
             scope: SearchScope {
                 project: Some("long-document".into()),
                 ..Default::default()
@@ -180,7 +182,7 @@ async fn main() {
         .unwrap();
     let result = store
         .search(&SearchRequest {
-            query: "offline drive".into(),
+            queries: vec![MemoryQuery::text("offline drive")],
             scope: SearchScope {
                 project: Some(source.id.clone()),
                 ..Default::default()

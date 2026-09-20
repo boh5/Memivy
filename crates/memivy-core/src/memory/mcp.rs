@@ -13,13 +13,12 @@ pub struct McpCaptureReceipt {
     pub capture_id: String,
     pub request_id: String,
     pub created_at: i64,
-    pub understanding: String,
     pub receipt: &'static str,
 }
 #[derive(Default, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct McpSearchQuery {
-    pub query: String,
+    pub queries: Vec<MemoryQuery>,
     pub limit: Option<usize>,
     pub origin: Option<String>,
     pub project: Option<String>,
@@ -35,9 +34,13 @@ pub struct McpSearchHit {
     pub source: SourceRef,
     pub origin: Option<Origin>,
     pub updated_at: i64,
+    pub matched_queries: Vec<usize>,
+    pub truncated: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct McpSearchResult {
+    pub queries: Vec<QueryStatus>,
+    pub truncated: bool,
     pub mode: String,
     pub degraded_reason: Option<String>,
     pub items: Vec<McpSearchHit>,
@@ -122,19 +125,17 @@ impl MemoryStore {
             capture_id: capture.capture_id,
             request_id: request.request_id.clone(),
             created_at: capture.created_at,
-            understanding: "pending".into(),
-            receipt: "Memory saved and ready to edit or search. Memivy organizes it in the background and archives the original input separately.",
+            receipt: "Memory saved. The original text is preserved and the memory is available to read or search.",
         })
     }
     pub fn mcp_search(&self, query: &McpSearchQuery) -> Result<McpSearchResult> {
         let _guard = self.mcp_guard()?;
-        valid_text(&query.query, 512)?;
         let limit = query.limit.unwrap_or(5);
-        if !(1..=8).contains(&limit) {
+        if !(1..=8).contains(&limit) || query.queries.iter().any(|q| q.keywords.len() > 6) {
             return Err(DataError::Invalid);
         }
         let result = self.search(&SearchRequest {
-            query: query.query.clone(),
+            queries: query.queries.clone(),
             scope: SearchScope {
                 origin: query.origin.clone(),
                 project: query.project.clone(),
@@ -159,9 +160,13 @@ impl MemoryStore {
                 source: hit.evidence.source,
                 origin: hit.origins.into_iter().next(),
                 updated_at: hit.updated_at,
+                matched_queries: hit.matched_queries,
+                truncated: hit.evidence.truncated,
             })
             .collect();
         Ok(McpSearchResult {
+            queries: result.queries,
+            truncated: result.truncated,
             mode: result.mode,
             degraded_reason: result.degraded_reason,
             items,

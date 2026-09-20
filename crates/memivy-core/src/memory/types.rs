@@ -1,21 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Actor {
-    User,
-    Ai,
-}
-impl Actor {
-    pub(super) fn as_str(&self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Ai => "ai",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Origin {
     User {
@@ -63,7 +48,6 @@ pub struct RawCapture {
     pub text: String,
     pub origin: Origin,
     pub created_at: i64,
-    pub understanding: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -73,16 +57,6 @@ pub enum Destination {
         memory_id: String,
         expected_version: String,
     },
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChangeRequest {
-    pub request_id: String,
-    pub capture_id: String,
-    pub destination: Destination,
-    pub title: String,
-    pub body: String,
-    pub actor: Actor,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,6 +87,7 @@ pub struct Version {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
+    pub reason: Option<String>,
     pub request_id: String,
     pub action: String,
     pub capture_id: Option<String>,
@@ -121,6 +96,18 @@ pub struct Receipt {
     pub after_version: Option<String>,
     pub status: String,
 }
+#[derive(Debug, Serialize)]
+pub struct MemoryReceipt {
+    #[serde(flatten)]
+    pub receipt: Receipt,
+    pub logical_input_id: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NavigationSnapshot {
+    pub collections: Vec<String>,
+    /// None means the operation did not record or change the pin.
+    pub pinned: Option<bool>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceiptChange {
     pub memory_id: String,
@@ -128,6 +115,8 @@ pub struct ReceiptChange {
     pub after_version: String,
     pub before_state: String,
     pub after_state: String,
+    pub navigation_before: Option<NavigationSnapshot>,
+    pub navigation_after: Option<NavigationSnapshot>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]

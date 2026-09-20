@@ -27,8 +27,7 @@ export function dependencies(name: string, args: Record<string, unknown> = {}): 
       return [{domain:"discussion",entity:String(args.topicId ?? args.id ?? "*")}];
     case "navigation_collections": return [{domain:"collection"},{domain:"memory"}];
     case "navigation_record": return [{domain:"navigation",entity:record},{domain:"collection"},{domain:"memory",entity:record}];
-    case "organization_jobs": return [{domain:"organization",entity:record},{domain:"memory",entity:record}];
-    case "organization_states": return (args.keys as unknown[] ?? []).flatMap(key => [{domain:"organization",entity:keyOf(key)},{domain:"memory",entity:keyOf(key)}]);
+    case "memory_receipts": return [{domain:"memory",entity:record}];
     case "memory_related": return [{domain:"memory"},{domain:"collection"},{domain:"navigation"}];
     case "workspace_settings": return [{domain:"settings"}];
     default: return undefined;
@@ -133,9 +132,9 @@ export function useResourceBridge(onError: (error: unknown) => void) {
   }, []);
 }
 const mutations = new Set([
-  "library_capture","library_edit","library_action","library_rebuild",
+  "library_edit","library_action","library_rebuild",
   "discussion_open","discussion_submit","discussion_retry","discussion_cancel","discussion_undo","discussion_save_text",
-  "organization_retry","organization_collect","organization_dismiss","cleanup_save",
+  "collection_accept_recommendation","cleanup_save",
   "navigation_pin","navigation_collect","navigation_save_collection","navigation_archive_collection",
 ]);
 export async function resourceCall<T>(name: string, args?: Record<string,unknown>): Promise<T> {

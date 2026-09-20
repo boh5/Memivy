@@ -112,7 +112,6 @@ pub struct ModelSettings {
     pub llm: Option<Binding>,
     pub embedding: Binding,
     pub voice: Binding,
-    pub auto_organize: bool,
 }
 impl Default for ModelSettings {
     fn default() -> Self {
@@ -123,7 +122,6 @@ impl Default for ModelSettings {
             llm: None,
             embedding: Binding::default(),
             voice: Binding::default(),
-            auto_organize: true,
         }
     }
 }

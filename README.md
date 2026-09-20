@@ -14,7 +14,7 @@
 
 **Capture a thought. Pick up the conversation.**
 
-Press a shortcut and speak or type. Memivy captures your ideas and keeps your memories organized. When you want to revisit something, just ask—or pick up where you left off.
+Press a shortcut and speak or type. Memivy captures your ideas and helps refine memories as you use them. When you want to revisit something, just ask—or pick up where you left off.
 
 ## Features
 
