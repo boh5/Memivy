@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import ts from 'typescript';
+import { compileFixture } from './compile.mjs';
 import { randomUUID } from 'node:crypto';
 import { createInstance } from 'i18next';
 import { renderMessage } from '../../src/i18n/messages.ts';
@@ -82,14 +82,14 @@ const cache = new Map();
 function load(file) {
   file=path.resolve(file); if(cache.has(file))return cache.get(file);
   const module={exports:{}};cache.set(file,module.exports);
-  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+  const code=compileFixture(file);
   const req = name => {
-    if (Object.hasOwn(modules, name)) return modules[name];
+    if (Object.hasOwn(modules, name)) return {__esModule:true,...modules[name]};
     if(name==='./resources')return {useResourceVersion:()=>0,useResourceBridge:()=>{},expireQueries:async()=>{}};
-    if(name==='./Select')return {default:'select'}; // Shared control is exercised separately with real React.
+    if(name==='./Select')return {__esModule:true,default:'select'}; // Shared control is exercised separately with real React.
     if(name==='react')return hooks;
     if(name==='react-i18next')return {useTranslation:ns=>({t:translation.getFixedT(null,ns),i18n:translation})};
-    if(name==='../i18n')return {default:translation,translateCatalog:(key,options={})=>translation.exists(key,options)?translation.t(key,options):translation.t('operation_failed',{ns:'errors'})};
+    if(name==='../i18n')return {__esModule:true,default:translation,translateCatalog:(key,options={})=>translation.exists(key,options)?translation.t(key,options):translation.t('operation_failed',{ns:'errors'})};
     if(name==='../i18n/preferences')return {getLanguageSnapshot:()=>({preference:'en',language:'en',revision:0}),subscribeLanguage:()=>()=>{},refreshLanguage:async()=>{},setLanguagePreference:async()=>{}};
     if(name==='../i18n/format')return {formatNumber:(value,maximumFractionDigits=0)=>new Intl.NumberFormat('en',{maximumFractionDigits}).format(value)};
     if(name==='../i18n/react')return {useNotice:(initial='')=>{
@@ -99,8 +99,8 @@ function load(file) {
     if(name==='react-dom')return {createPortal:children=>children};
     if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment:'fragment'};
     if(name==='./api')return api;
-    if(name==='./MarkdownEditor')return {default:'MarkdownEditor'};
-    if(name==='./Markdown')return {default:'Markdown'};
+    if(name==='./MarkdownEditor')return {__esModule:true,default:'MarkdownEditor'};
+    if(name==='./Markdown')return {__esModule:true,default:'Markdown'};
     if(name==='../ui')return {Icon:'Icon'};
     if(name.startsWith('@tauri'))return {listen:(event,fn)=>{if(!nativeEvents.has(event))nativeEvents.set(event,new Set());nativeEvents.get(event).add(fn);return Promise.resolve(()=>nativeEvents.get(event)?.delete(fn));}};
     if(name.endsWith('.css')||name.endsWith('.svg'))return {};
@@ -112,6 +112,7 @@ function load(file) {
     addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
     removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
   },navigator:{clipboard},document:{body:{inert:false},addEventListener(){},removeEventListener(){},querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
+  cache.set(file,module.exports);
   return module.exports;
 }
 function mount(component,props={}) {

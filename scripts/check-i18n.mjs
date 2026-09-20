@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import ts from 'typescript';
+import { parse } from '@babel/parser';
 
 const root = path.resolve(import.meta.dirname, '..');
 const languages = ['en', 'zh-CN'];
@@ -54,14 +54,20 @@ for (const ns of namespaces) {
 }
 // Check application UI literals. Test payloads may intentionally contain Chinese.
 for (const file of fs.readdirSync(path.join(root, 'src/workspace')).filter(file => /\.tsx?$/.test(file))) {
-  const source = ts.createSourceFile(file, fs.readFileSync(path.join(root, 'src/workspace', file), 'utf8'), ts.ScriptTarget.Latest, true);
+  const source = parse(fs.readFileSync(path.join(root, 'src/workspace', file), 'utf8'), {
+    sourceType: 'module', plugins: file.endsWith('.tsx') ? ['typescript', 'jsx'] : ['typescript'], attachComment: false,
+  });
   function visit(node) {
-    if ((ts.isStringLiteralLike(node) || ts.isJsxText(node) || node.kind === ts.SyntaxKind.TemplateHead || node.kind === ts.SyntaxKind.TemplateMiddle || node.kind === ts.SyntaxKind.TemplateTail)
-      && /\p{Script=Han}/u.test(node.text)) {
-      const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-      issues.push(`src/workspace/${file}:${line}: hardcoded UI text ${JSON.stringify(node.text.trim().slice(0, 70))}`);
+    if (!node || typeof node.type !== 'string') return;
+    const text = node.type === 'TemplateElement' ? (node.value.cooked ?? node.value.raw)
+      : ['StringLiteral', 'DirectiveLiteral', 'JSXText'].includes(node.type) ? node.value : '';
+    if (/\p{Script=Han}/u.test(text)) {
+      issues.push(`src/workspace/${file}:${node.loc.start.line}: hardcoded UI text ${JSON.stringify(text.trim().slice(0, 70))}`);
     }
-    ts.forEachChild(node, visit);
+    for (const child of Object.values(node)) {
+      if (Array.isArray(child)) child.forEach(visit);
+      else if (child && typeof child === 'object') visit(child);
+    }
   }
   visit(source);
 }

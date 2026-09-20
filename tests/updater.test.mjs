@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import ts from 'typescript';
+import { compileFixture } from './helpers/compile.mjs';
 import {updateManifest,prepareUpdate} from '../scripts/prepare-update.mjs';
 import path from 'node:path';
 import os from 'node:os';
@@ -25,7 +25,7 @@ test('release assets require an update archive and signature before publishing a
 });
 function ipcFixture(invoke) {
  const module={exports:{}};const document={body:{inert:false}};
- const code=ts.transpileModule(fs.readFileSync('src/nativeIpc.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const code=compileFixture('src/nativeIpc.ts');
  vm.runInNewContext(code,{module,exports:module.exports,document,require:()=>({invoke})});
  return {...module.exports,document};
 }

@@ -1386,3 +1386,11 @@ No UI QA, native build or app launch was performed for this review. Verification
 - 删除 `.github/dependabot.yml`，停止定期版本更新 PR；该配置变更在合入默认分支后生效，依赖版本和产品代码不变。
 - GitHub 仓库的自动安全修复 PR 已关闭，漏洞提醒保持启用；现有 Dependabot PR #3、#4 已关闭。后续依赖更新按需人工处理。
 - 已核对自动安全修复状态为 disabled、漏洞提醒接口返回 204、无打开的 PR，且 `git diff --check` 通过。仅修改维护配置，未新增或运行产品测试。
+
+
+## TypeScript 7 升级（2026-09-20）
+
+- 将 TypeScript 从 5.9.3 升至 7.0.2，更新 lockfile，保留现有 React、Vite 和产品依赖版本；不保留旧 TypeScript 编译器或兼容包。
+- 国际化检查改用依赖树中已有的 `@babel/parser`（显式声明为开发依赖）解析 TS／TSX，继续检查字符串、模板片段和 JSX 文本。UI 测试的四处旧编译器 API 调用改为共用一个小型 esbuild 转译函数；修正测试夹具的模块导出缓存及默认导入标记，保留既有测试场景和断言。
+- 仅增加一个国际化 CLI 集成测试，覆盖有效 TypeScript／中文注释与应拦截的硬编码文本，包括转义字符串、模板和 JSX；没有墓碑测试。
+- `npm ci`、TypeScript 7 类型检查与生产构建、`npm run i18n:check`、完整 UI 265 项及 `git diff --check` 通过，npm 审计为 0 个已知漏洞。初次回归暴露的测试夹具导出／导入问题已修复；文件监听在沙箱受限，最终完整 UI 在授权环境通过。日志位于 `research/typescript7-20260920/`。本轮未改产品运行代码或 Rust，未重跑原生 UI／Rust 回归，未推送或发布。
