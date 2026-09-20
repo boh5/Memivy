@@ -6,7 +6,7 @@ import { call, date, fullDate, sourceName, errorText, type Detail, type Key, typ
 import { Empty, ErrorNotice, Highlight } from "./components";
 import Markdown from "./Markdown";
 import { MemoryChangeHistory } from "./MemoryChanges";
-import OrganizationReceipt from "./OrganizationReceipt";
+import MemoryReceipts from "./MemoryReceipts";
 
 // Archive reads never replace the displayed head or remount its editor.
 export default function MemoryEvidence({ detail, revision, query, busy, onRefresh, onOpenDiscussion, onRestoreArchive, onRestoreVersion }: {
@@ -24,10 +24,10 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
   const [version, setVersion] = useState<Version | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useNotice();
   const [retry, setRetry] = useState(0);
-  const identity = `${record.kind}:${record.id}:${detail.current?.id || "original"}:${revision}:${retry}`;
+  const identity = `${record.kind}:${record.id}:${detail.current.id}:${revision}:${retry}`;
   const archives = result?.detail.key.id === record.id && result.detail.key.kind === record.kind ? result.detail : null;
   const currentArchive = result?.identity === identity && archives?.state === detail.state &&
-    archives?.current?.id === detail.current?.id;
+    archives?.current.id === detail.current.id;
   const expanded = tab !== null;
   useEffect(() => {
     if (!expanded || result?.identity === identity) return;
@@ -57,7 +57,7 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
           {error && <button className="text-button" onClick={() => setRetry(value => value + 1)}>{t("detail.retryEvidence")}</button>}
           {archives && section === "sources" && (
                 <div className="source-list">
-                  {!trashed && record.kind === "memory" && <MemoryChangeHistory memoryId={record.id} onOpenRecord={onRefresh} onRefresh={() => onRefresh(record)} />}
+                  {!trashed && <MemoryChangeHistory memoryId={record.id} onOpenRecord={onRefresh} onRefresh={() => onRefresh(record)} />}
                   {archives.sources.map((s) => (
                     <article key={s.id} className="source-block">
                       <div className="section-heading">
@@ -86,7 +86,7 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
                               {t("detail.attachedSource", { uri: s.capture.origin.uri })}
                             </p>
                           )}
-                          {!trashed && detail.current && <button className="outline-button" disabled={busy || !currentArchive} onClick={() => {
+                          {!trashed && <button className="outline-button" disabled={busy || !currentArchive} onClick={() => {
                             onRestoreArchive({ id: s.id, text: s.capture!.text });
                           }}>{t("detail.restoreArchive")}</button>}
                           <small>
@@ -103,7 +103,7 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
                 </div>
           )}
           {archives && section === "history" && <>
-            {!trashed && <OrganizationReceipt record={record} onOpen={key => onRefresh(key)} onRefresh={() => onRefresh(record)} />}
+            {!trashed && <MemoryReceipts record={record} onOpen={key => onRefresh(key)} onRefresh={() => onRefresh(record)} />}
             {archives.history.length ? (
                   <div className="history-view">
                     <div className="history-list">
@@ -116,7 +116,7 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
                           }}
                         >
                           <span>
-                            {t("detail.historyEntry", { version: archives.history.length - i, actor: v.reason === "cleanup" ? t("detail.historyCleanup") : v.actor === "user" ? t("detail.historyMe") : t("detail.historyAi"), current: v.id === detail.current?.id ? t("detail.currentSuffix") : "" })}
+                            {t("detail.historyEntry", { version: archives.history.length - i, actor: v.reason === "cleanup" ? t("detail.historyCleanup") : v.actor === "user" ? t("detail.historyMe") : t("detail.historyAi"), current: v.id === detail.current.id ? t("detail.currentSuffix") : "" })}
                           </span>
                           <small>{fullDate(v.created_at)}</small>
                         </button>
@@ -126,7 +126,7 @@ export default function MemoryEvidence({ detail, revision, query, busy, onRefres
                       <article className="history-preview">
                         <div className="section-heading">
                           <h3>{version.title}</h3>
-                          {version.id !== detail.current?.id && !trashed && (
+                          {version.id !== detail.current.id && !trashed && (
                             <button
                               className="outline-button"
                               disabled={busy || !currentArchive}

@@ -61,7 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='fresh output directory under research/')
     parser.add_argument('--model-config', type=Path, help='explicit private config outside repository; sends synthetic fixtures only')
-    parser.add_argument('--models-only', action='store_true', help='build and run both model corpora, without repeating offline suite')
+    parser.add_argument('--models-only', action='store_true', help='build and run model acceptance cases, without repeating offline suite')
     args = parser.parse_args()
     if args.models_only and not args.model_config:
         parser.error('--models-only requires --model-config')
@@ -122,7 +122,7 @@ def main():
             build.extend(['--example', 'memory_probe', '-p', 'memivy-mcp', '--bin', 'memivy-mcp'])
             names.extend(['memory_probe', 'memivy-mcp'])
         if config:
-            for name in ['intelligence_probe', 'discussion_probe']:
+            for name in ['discussion_probe']:
                 build.extend(['--example', name])
                 names.append(name)
         run('harness-build', build)
@@ -138,13 +138,13 @@ def main():
             assert name in artifacts and artifacts[name].is_file(), f'missing current build artifact: {name}'
         if not args.models_only:
             env['MEMIVY_TEST_PROBE'] = str(artifacts['memory_probe'])
-            for script in ['verify_memory_store', 'verify_organization_recovery', 'verify_core_faults']:
+            for script in ['verify_memory_store', 'verify_core_faults']:
                 run(script, [sys.executable, ROOT/f'scripts/{script}.py'])
             run('verify_mcp', [sys.executable, ROOT/'scripts/verify_mcp.py', '--binary', artifacts['memivy-mcp']])
         if config:
-            for name in ['intelligence_probe', 'discussion_probe']:
+            for name in ['discussion_probe']:
                 run(name, [artifacts[name], config, out/name], timeout=3600, required=False, stream=False)
-            report['model_evaluation'] = 'completed' if all(s['exit_code'] == 0 for s in report['stages'] if s['name'] in ['intelligence_probe', 'discussion_probe']) else 'has_failures'
+            report['model_evaluation'] = 'completed' if all(s['exit_code'] == 0 for s in report['stages'] if s['name'] in ['discussion_probe']) else 'has_failures'
             # Only inspect the key for leak detection; never print or persist it.
             key = json.loads(config.read_text()).get('api_key')
             if key:

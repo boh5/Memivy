@@ -13,27 +13,6 @@ test('success toast expires, pauses during interaction, and only the latest mess
  f.find(view,n=>n.props.className==='workspace-toast').props.onMouseEnter();time.tick(40);await f.settle();assert(f.text(view.tree).includes("Captured"));
  f.find(view,n=>n.props.className==='workspace-toast').props.onMouseLeave();time.tick(40);await f.settle();assert(!f.text(view.tree).includes("Captured"));f.unmount(view);
 });
-test('success receipts are absent from the reading status but remain actionable in history',async t=>{
- const f=workspaceFixture(t),Receipt=f.load('src/workspace/OrganizationReceipt.tsx').default;
- f.overrides.organization_jobs=async()=>[{capture_id:'raw',attempt_id:'attempt',status:'done',reason:'',receipt:{request_id:'r',memory_id:'a',status:'applied',after_version:'v'}}];
- const props={record:f.keyA,revision:0,onOpen(){},onRefresh(){}};
- const reading=f.mount(Receipt,{...props,presentation:'status'}),history=f.mount(Receipt,props);await f.settle();
- assert(!f.text(reading.tree).includes("Memory created"));assert(!f.text(reading.tree).includes("Undo organization"));assert(f.text(history.tree).includes("Undo organization"));
-});
-test('dismissal failures retain suggestions so an unsaved preference is never claimed',async t=>{
- const f=workspaceFixture(t,{native:true}),Component=f.load('src/workspace/OrganizationCollections.tsx').default;
- f.overrides.organization_collections=async()=>[{collection:{id:'c',name:"Product",revision:1},reason:"Related"}];
- f.overrides.organization_dismiss=async()=>{throw "Could not save dismissed state";};
- const view=f.mount(Component,{receipt:'r',record:f.keyA,revision:0,disabled:false,onRefresh(){}});await f.settle();
- f.find(view,n=>n.type==='button'&&f.text(n)==="Ignore these suggestions").props.onClick();await f.settle();assert(f.text(view.tree).includes("Could not save dismissed state"));assert(f.text(view.tree).includes("＋ Product"));
-});
-test('library status uses a bounded local batch without launching recommendation models',async t=>{
- const f=workspaceFixture(t,{native:true}),List=f.load('src/workspace/MemoryList.tsx').default;
- f.overrides.organization_states=async()=>[{key:f.keyA,status:'done',recommendations:2},{key:f.keyB,status:'processing',recommendations:0}];
- const view=f.mount(List,{trash:false,active:true,selected:null,revision:0,onSelect(){},onCapture(){},onRefresh(){}});await f.settle();
- assert(f.text(view.tree).includes("2 collection suggestions"));assert(f.text(view.tree).includes("Organizing…"));assert.equal(f.calls.filter(c=>c.name==='organization_collections').length,0);
-});
-
 test('keyboard focus keeps a toast alive after the pointer leaves and focus moves inside it',async t=>{
  const time=clock(),f=workspaceFixture(t,{timers:time.timers}),{default:Toast,notify}=f.load('src/workspace/Toast.tsx');const view=f.mount(Toast);await f.settle();
  notify("Reversible action","Undo",()=>{},25);await f.settle();

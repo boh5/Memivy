@@ -57,11 +57,11 @@ test('same-record refresh retains history review and disables stale restoration'
   f.overrides.library_detail = async()=>({...props.detail,history:[historical]});
   toggle('History');await f.settle();
   f.find(view,n=>n.type==='button' && f.text(n).startsWith('v1 ·')).props.onClick();await f.settle();
-  const receipt = f.find(view,n=>n.type?.name==='OrganizationReceipt');
+  const receipt = f.find(view,n=>n.type?.name==='MemoryReceipts');
   let finish;
   f.overrides.library_detail = () => new Promise(resolve=>finish=resolve);
   f.render(view,{...props,revision:1});await f.settle();
-  assert.equal(f.find(view,n=>n.type?.name==='OrganizationReceipt').type,receipt.type);
+  assert.equal(f.find(view,n=>n.type?.name==='MemoryReceipts').type,receipt.type);
   assert(f.nodes(view.tree).some(n=>n.props.text==='Immutable earlier body'));
   assert.equal(f.find(view,n=>n.type==='button' && f.text(n)==='Restore this version').props.disabled,true);
   finish({...props.detail,history:[historical]});await f.settle();

@@ -153,7 +153,7 @@ pub(crate) fn watch_library(app: tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let mut watcher = None;
         while !app.state::<Workspace>().exiting.load(Ordering::Relaxed) {
-            // Independent of model configuration and the organizer's job loop.
+            // Independent of the generative model configuration.
             if watcher.is_none() {
                 watcher = store.change_watcher().ok();
             }

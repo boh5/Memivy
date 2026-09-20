@@ -1,4 +1,6 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use rusqlite::Connection;
 use serde_json::json;
 use std::sync::{Arc, Barrier};
@@ -61,9 +63,13 @@ fn commit_memory(store: &MemoryStore, run: &AgentExecution) -> Receipt {
     };
     let call = id();
     let value = serde_json::to_value(&args).unwrap();
-    let protocol = vec![json!({"role":"assistant","content":null,"tool_calls":[{
-        "id":call,"type":"function","function":{"name":"write_memory","arguments":value.to_string()}
-    }]})];
+    let protocol = vec![json!(Message::Assistant {
+        id: None,
+        content: vec![AssistantContent::ToolCall(ToolCall::from_wire(
+            call.clone(),
+            ToolFunction::new("write_memory".into(), value.clone())
+        ))]
+    })];
     store
         .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
         .unwrap();
@@ -373,30 +379,6 @@ async fn simultaneous_title_responses_allow_exactly_one_save() {
     second_server.join().unwrap();
     assert_eq!(first_requests.lock().unwrap().len(), 1);
     assert_eq!(second_requests.lock().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn late_title_response_cannot_restore_a_deleted_conversation() {
-    let (_dir, store, conversation) = setup();
-    let run = begin(&store, &conversation, "Discuss this plan.");
-    finish(&store, &run);
-    let deleting_store = store.clone();
-    let deleted = conversation.clone();
-    let (config, requests, server) = fixture(1, move |_, _| {
-        deleting_store.delete_conversation(&deleted).unwrap();
-        Response::stream(sse_text("Arrived after deletion"))
-    });
-    assert!(
-        !store
-            .generate_agent_title(&config, &run.input_id, &run.attempt_id)
-            .await
-            .unwrap()
-    );
-    server.join().unwrap();
-    assert!(store.conversation(&conversation).is_err());
-    assert!(store.agent_execution(&run.input_id).is_err());
-    assert!(store.conversations(100).unwrap().is_empty());
-    assert_eq!(requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

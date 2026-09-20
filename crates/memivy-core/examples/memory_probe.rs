@@ -22,10 +22,6 @@ fn run() -> Result<()> {
         );
         return Ok(());
     }
-    if command == "restore" {
-        MemoryStore::restore_backup(args.get(3).ok_or(DataError::Invalid)?, root)?;
-        return Ok(());
-    }
     if command == "hold-migration" {
         // Test harness only: pause the same migration SQL inside an uncommitted
         // SQLite transaction. No pause hook or compatibility flow in the app.
@@ -49,7 +45,7 @@ fn run() -> Result<()> {
                 kind: "memory".into(),
                 id: memory_id.clone(),
             })?;
-            let current = detail.current.ok_or(DataError::Unavailable)?;
+            let current = detail.current;
             let receipt = store.edit_memory(&EditRequest {
                 request_id: Uuid::new_v4().to_string(),
                 memory_id,
@@ -121,35 +117,7 @@ fn run() -> Result<()> {
                 }
             }
         }
-        "hold-organization" | "finish-organization" => {
-            store.recover_organization()?;
-            let task = store.claim_organization()?.ok_or(DataError::Unavailable)?;
-            if command == "hold-organization" {
-                println!("{}", task.attempt_id);
-                std::io::stdout().flush()?;
-                loop {
-                    std::thread::park();
-                }
-            }
-            let r = store.apply_organization(
-                &task,
-                &MemoryWriteArgs {
-                    destination: Destination::New,
-                    title: "Organization after recovery".into(),
-                    parts: vec![MemoryWritePart {
-                        text: task.memory.body.clone(),
-                        sources: vec![MemorySourceQuote {
-                            source_id: task.capture_id.clone(),
-                            quote: task.memory.body.trim().chars().take(512).collect(),
-                        }],
-                    }],
-                },
-            )?;
-            println!(
-                "{}",
-                serde_json::to_string(&r).map_err(|_| DataError::Invalid)?
-            );
-        }
+
         "prepare-restore" => {
             println!(
                 "{}",

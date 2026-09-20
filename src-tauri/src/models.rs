@@ -26,7 +26,6 @@ pub(crate) struct View {
     llm: Option<BindingView>,
     embedding: BindingView,
     voice: BindingView,
-    auto_organize: bool,
 }
 #[derive(Serialize)]
 pub(crate) struct BindingView {
@@ -46,7 +45,6 @@ fn view(r: ModelSettings) -> View {
         llm: r.llm.map(Into::into),
         embedding: r.embedding.into(),
         voice: r.voice.into(),
-        auto_organize: r.auto_organize,
     }
 }
 pub(crate) fn load(state: &Workspace) -> HostResult<ModelSettings> {
@@ -306,22 +304,6 @@ pub(crate) async fn models_apply(
     Ok(view(r))
 }
 #[tauri::command]
-pub(crate) fn models_organize(
-    window: tauri::WebviewWindow,
-    state: tauri::State<Workspace>,
-    revision: String,
-    enabled: bool,
-) -> HostResult<View> {
-    let _update_work = crate::updates::work()?;
-    require_main(&window)?;
-    let mut r = load(&state)?;
-    r.auto_organize = enabled;
-    r.save(state.store.database_path().parent().unwrap(), &revision)?;
-    changed(&window);
-    Ok(view(r))
-}
-
-#[tauri::command]
 pub(crate) async fn models_clear(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
@@ -445,7 +427,7 @@ mod tests {
         let mut previous = ModelSettings::default();
         previous.save(dir.path(), "initial").unwrap();
         let mut candidate = previous.clone();
-        candidate.auto_organize = false;
+        candidate.voice.disable_reasoning = true;
         candidate.save(dir.path(), &previous.revision).unwrap();
         assert_eq!(
             rollback_config(
@@ -458,10 +440,10 @@ mod tests {
             "model_configuration"
         );
         let mut newer = ModelSettings::read(dir.path()).unwrap();
-        assert!(newer.auto_organize);
+        assert!(!newer.voice.disable_reasoning);
         assert_ne!(newer.revision, previous.revision);
         let revision = newer.revision.clone();
-        newer.auto_organize = false;
+        newer.voice.disable_reasoning = true;
         newer.save(dir.path(), &revision).unwrap();
         assert_eq!(
             rollback_config(

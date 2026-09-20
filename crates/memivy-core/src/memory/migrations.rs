@@ -5,7 +5,9 @@ use std::path::Path;
 
 // Append include_str! entries for schema 2 onward. Never edit a shipped migration.
 // Scripts contain only transactional SQL; this module owns version and commit.
-pub(super) const MIGRATIONS: &[&str] = &[];
+pub(super) const MIGRATIONS: &[&str] = &[include_str!(
+    "../../../../migrations/memory/002_agent_directed.sql"
+)];
 pub(super) const CURRENT: i64 = 1 + MIGRATIONS.len() as i64;
 
 pub(super) fn supported_version(db: &Connection, target: i64) -> Result<i64> {
@@ -71,8 +73,17 @@ mod tests {
 
     fn setup() -> (tempfile::TempDir, MemoryStore, Connection) {
         let dir = tempfile::tempdir().unwrap();
-        let store = MemoryStore::open_application(dir.path()).unwrap();
-        let db = connect(&store.database_path(), false).unwrap();
+        let store = MemoryStore {
+            root: dir.path().to_owned(),
+        };
+        let db = connect(&store.database_path(), true).unwrap();
+        db.execute_batch(include_str!(
+            "../../../../migrations/memory/001_initial.sql"
+        ))
+        .unwrap();
+        db.pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        db.pragma_update(None, "user_version", 1).unwrap();
         (dir, store, db)
     }
 

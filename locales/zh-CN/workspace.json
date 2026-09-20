@@ -143,11 +143,6 @@
     "endDateLabel": "至",
     "endDateAria": "结束日期",
     "clearAll": "清除全部条件",
-    "recommendations_one": "{{count}} 个专题推荐",
-    "recommendations_other": "{{count}} 个专题推荐",
-    "pending": "等待整理",
-    "processing": "整理中…",
-    "incomplete": "整理未完成",
     "emptyFilteredTitle": "没有找到匹配的记忆",
     "emptyTrashTitle": "回收站是空的",
     "emptyCollectionTitle": "专题里还没有记忆",
@@ -155,7 +150,7 @@
     "emptyFilteredText": "试试调整来源、项目或日期范围。",
     "emptyTrashText": "删除的记忆会留在这里，直到你明确永久删除。",
     "emptyCollectionText": "在记忆正文点击“专题”手动加入，或试试上方的 AI 推荐。",
-    "emptyLibraryText": "记下的内容立即可用，AI 可以稍后整理。",
+    "emptyLibraryText": "记下的内容立即可用，可以随时检索或接着聊。",
     "clearFilters": "清除筛选",
     "captureIdea": "记下一个想法",
     "loading": "正在读取本地记忆…",
@@ -169,16 +164,6 @@
     "continue": "结合选中的 {{count}} 条继续想",
     "continue_one": "结合选中的 {{count}} 条继续想",
     "continue_other": "结合选中的 {{count}} 条继续想"
-  },
-  "organization": {
-    "aria": "专题推荐",
-    "suggested": "建议加入",
-    "heading": "专题推荐",
-    "searching": "正在寻找合适的专题…",
-    "why": "为什么推荐{{name}}",
-    "ignore": "忽略本次建议",
-    "retry": "重试推荐",
-    "added": "已加入「{{name}}」"
   },
   "app": {
     "restoreBackupWithCopy": "{{message}} 副本：{{path}}",
@@ -320,7 +305,6 @@
     "saveHelp": "⌘S 保存为新版本",
     "saving": "保存中…",
     "saveVersion": "保存",
-    "saveAsNew": "确认另存为新记忆",
     "continueLater": "稍后继续",
     "discard": "放弃修改",
     "discardTitle": "放弃这份编辑草稿？",
@@ -334,7 +318,6 @@
     "mergedText": "这条内容已归入另一篇记忆。可以查看目标，或通过回执撤销这次整理。",
     "memoryAria": "记忆正文",
     "trashStatus": "回收站",
-    "originalStatus": "输入归档",
     "newVersion": "有新版本，查看",
     "restoreMemory": "恢复记忆",
     "deleteForever": "永久删除",
@@ -354,8 +337,6 @@
     "recordedByMe": "我记录的",
     "editedByMe": "我编辑的",
     "aiOrganized": "AI 整理",
-    "originalSaved": "原话已保存在本机",
-    "archiveOnly": "输入归档，仅供核对与恢复，不参与检索。",
     "reviewedWarning": "目标记忆在确认保存前发生了变化。你的审核稿已保存在本机，尚未写入目标记忆。",
     "reviewedDetails": "查看保留的完整审核稿",
     "reviewedHelp": "请从原讨论重新打开结论审核；输入归档仅供核对。",
@@ -405,30 +386,18 @@
     "versionUnavailable": "这个版本已不可用。",
     "newMemory": "（新建记忆）",
     "statusUndone": "已撤销整理，记忆已恢复。",
-    "statusPending": "已保存，等待后台整理；现在即可编辑和检索。",
-    "statusProcessing": "已保存，正在整理…",
-    "statusDeferred": "已保存，待核对。{{reason}}",
-    "statusFailed": "记忆已保留。{{reason}}",
-    "statusPaused": "自动整理已停止。{{reason}}",
     "statusMerge": "已归入已有记忆。{{reason}}",
-    "statusSeparate": "已整理当前记忆。{{reason}}",
-    "waiting": "等待整理",
-    "organizing": "整理中…",
-    "incomplete": "已保存，整理未完成",
-    "retry": "重试",
-    "collapseAria": "收起整理状态",
     "collapse": "收起",
     "viewMemory": "查看记忆",
     "viewChanges": "查看变化",
-    "undo": "撤销整理",
-    "reorganize": "重新整理",
-    "expandHistory": "更早的整理回执（{{count}}）",
+    "undo": "撤销更改",
+    "expandHistory": "查看更早的更改（{{count}}）",
     "collapseHistory": "收起更早回执",
     "changeTitle": "记忆修改",
     "before": "修改前",
     "after": "修改后",
-    "summaryOrganized": "已整理这条记忆",
-    "summaryMerge": "已合并记忆"
+    "summaryMerge": "已合并记忆",
+    "summaryUpdated": "记忆已更新"
   },
   "saveConclusion": {
     "destinationChanged": "保存目标已经变化。审核稿已保留，请重新核对去向和正文。",
@@ -510,7 +479,8 @@
     "newDiscussion": "新讨论",
     "discussion": "讨论",
     "discussionHelp": "联系已有记忆，继续你的思考。",
-    "discussionStart": "直接说出想法或问题，相关记忆会参与讨论。"
+    "discussionStart": "直接说出想法或问题，相关记忆会参与讨论。",
+    "preparing": "准备上下文…"
   },
   "activity": {
     "title": "足迹",
@@ -545,5 +515,13 @@
     "dayUnit_other": "天",
     "dayTotal_one": "{{count}} 天",
     "dayTotal_other": "{{count}} 天"
+  },
+  "recommendations": {
+    "aria": "专题推荐",
+    "request": "推荐专题",
+    "working": "处理中…",
+    "why": "为什么推荐{{name}}？",
+    "dismiss": "收起",
+    "empty": "暂无可添加的专题推荐。"
   }
 }

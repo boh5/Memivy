@@ -5,6 +5,28 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Actor {
+    User,
+    Ai,
+}
+impl Actor {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Ai => "ai",
+        }
+    }
+}
+
+struct ChangeRequest {
+    request_id: String,
+    destination: Destination,
+    title: String,
+    body: String,
+    actor: Actor,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentUndoResult {
     pub receipt: Option<Receipt>,
@@ -75,18 +97,14 @@ pub(super) fn messages_manual_saves(
     Ok(groups)
 }
 
-fn memberships(db: &Connection, memory: &str) -> Result<Vec<String>> {
-    Ok(db.prepare("SELECT collection_id FROM collection_entries WHERE kind='memory' AND record_id=? ORDER BY collection_id")?.query_map([memory],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)
-}
-
 fn draft_exists(db: &Connection, memory: &str) -> Result<bool> {
     Ok(db
         .prepare("SELECT 1 FROM workspace_drafts WHERE key=?")?
         .exists([format!("memory:{memory}")])?)
 }
 
-fn archive_messages(db: &Connection, input: &str, requested: &[String]) -> Result<Vec<String>> {
-    if requested.is_empty() || requested.len() > 16 {
+fn archive_sources(db: &Connection, input: &str, requested: &[String]) -> Result<Vec<String>> {
+    if requested.len() > 16 {
         return Err(DataError::Invalid);
     }
     let mut message_ids = requested.to_vec();
@@ -99,6 +117,9 @@ fn archive_messages(db: &Connection, input: &str, requested: &[String]) -> Resul
     )?;
     message_ids.iter().map(|message| {
         valid_id(message)?;
+        if db.prepare("SELECT 1 FROM captures WHERE id=?")?.exists([message])? {
+            return Ok(raw(db, message)?.id);
+        }
         let (text,origin,created_at):(String,Option<String>,i64)=db.query_row("SELECT m.text,t.input_origin,m.created_at FROM messages m JOIN turns t ON t.id=m.turn_id WHERE m.id=?1 AND m.conversation_id=?2 AND m.role='user'",params![message,conversation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         let raw_origin=origin.as_deref().map(decode::<Origin>).transpose()?.unwrap_or(Origin::User{app:"Memivy".into(),project:None,uri:None});
         let Origin::User{app,project,uri}=raw_origin else {return Err(DataError::Integrity)};
@@ -140,7 +161,7 @@ fn write_memory(
             )
         }
     };
-    let before_memberships = memberships(db, &memory)?;
+
     let mut captures = previous
         .as_ref()
         .map(|v| v.capture_ids.clone())
@@ -162,14 +183,8 @@ fn write_memory(
         capture_ids: captures,
     };
     write_version(db, &v)?;
-    if previous.is_none() {
-        // Archived topics do not block remembering, nor silently acquire notes.
-        let collection:Option<String>=db.query_row("SELECT cc.collection_id FROM turns t JOIN conversation_collections cc ON cc.conversation_id=t.conversation_id JOIN collections c ON c.id=cc.collection_id WHERE t.id=? AND c.archived=0",[input],|r|r.get(0)).optional()?;
-        if let Some(collection) = collection {
-            db.execute("INSERT INTO collection_entries(collection_id,kind,record_id) VALUES(?1,'memory',?2)",params![collection,memory])?;
-        }
-    }
     let receipt = Receipt {
+        reason: None,
         request_id: write.request_id.clone(),
         action: v.reason.clone(),
         capture_id: source_ids.first().cloned(),
@@ -179,7 +194,10 @@ fn write_memory(
         status: "applied".into(),
     };
     save_receipt(db, &receipt, hash)?;
-    db.execute("UPDATE receipts SET logical_input_id=?2,before_memberships=?3,after_memberships=?4 WHERE request_id=?1",params![write.request_id,input,encode(&before_memberships)?,encode(&memberships(db,&memory)?)?])?;
+    db.execute(
+        "UPDATE receipts SET logical_input_id=?2 WHERE request_id=?1",
+        params![write.request_id, input],
+    )?;
     Ok(receipt)
 }
 
@@ -190,8 +208,8 @@ struct GroupEffect {
     after_version: String,
     before_state: String,
     after_state: String,
-    before_memberships: Vec<String>,
-    after_memberships: Vec<String>,
+    navigation_before: Option<NavigationSnapshot>,
+    navigation_after: Option<NavigationSnapshot>,
     continuous: bool,
 }
 
@@ -207,51 +225,39 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
     }
     let mut groups: BTreeMap<String, GroupEffect> = BTreeMap::new();
     let mut originals = Vec::new();
-    let rows=db.prepare("SELECT r.request_id,r.status,c.memory_id,c.before_version,c.after_version,c.before_state,c.after_state,r.before_memberships,r.after_memberships FROM receipts r JOIN receipt_changes c ON c.request_id=r.request_id WHERE r.logical_input_id=? AND r.action!='undo' ORDER BY r.rowid,c.memory_id")?.query_map([input],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    if rows.is_empty() {
+    let receipts = db.prepare("SELECT request_id,status FROM receipts WHERE logical_input_id=? AND action!='undo' ORDER BY rowid")?
+        .query_map([input], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    if receipts.is_empty() {
         return Err(DataError::Unavailable);
     }
-    for (
-        receipt,
-        status,
-        memory,
-        before,
-        after,
-        before_state,
-        after_state,
-        before_memberships,
-        after_memberships,
-    ) in rows
-    {
-        let before_memberships: Vec<String> = decode(&before_memberships)?;
-        let after_memberships: Vec<String> = decode(&after_memberships)?;
-        let valid = status == "applied";
-        if let Some(group) = groups.get_mut(&memory) {
-            group.continuous &= valid
-                && before.as_ref() == Some(&group.after_version)
-                && before_state == group.after_state
-                && before_memberships == group.after_memberships;
-            group.after_version = after;
-            group.after_state = after_state;
-            group.after_memberships = after_memberships;
-        } else {
-            groups.insert(
-                memory.clone(),
-                GroupEffect {
-                    memory_id: memory,
-                    before_version: before,
-                    after_version: after,
-                    before_state,
-                    after_state,
-                    before_memberships,
-                    after_memberships,
-                    continuous: valid,
-                },
-            );
+    for (receipt, status) in receipts {
+        for effect in changes(db, &receipt)? {
+            let valid = status == "applied";
+            if let Some(group) = groups.get_mut(&effect.memory_id) {
+                group.continuous &= valid
+                    && effect.before_version.as_ref() == Some(&group.after_version)
+                    && effect.before_state == group.after_state
+                    && effect.navigation_before == group.navigation_after;
+                group.after_version = effect.after_version;
+                group.after_state = effect.after_state;
+                group.navigation_after = effect.navigation_after;
+            } else {
+                groups.insert(
+                    effect.memory_id.clone(),
+                    GroupEffect {
+                        memory_id: effect.memory_id,
+                        before_version: effect.before_version,
+                        after_version: effect.after_version,
+                        before_state: effect.before_state,
+                        after_state: effect.after_state,
+                        navigation_before: effect.navigation_before,
+                        navigation_after: effect.navigation_after,
+                        continuous: valid,
+                    },
+                );
+            }
         }
-        if !originals.contains(&receipt) {
-            originals.push(receipt);
-        }
+        originals.push(receipt);
     }
     let mut conflicts = Vec::new();
     for group in groups.values() {
@@ -268,7 +274,12 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
         if !group.continuous
             || !valid
             || draft_exists(db, &group.memory_id)?
-            || memberships(db, &group.memory_id)? != group.after_memberships
+            || group
+                .navigation_after
+                .as_ref()
+                .map(|expected| navigation_matches(db, &group.memory_id, expected))
+                .transpose()?
+                .is_some_and(|matches| !matches)
         {
             conflicts.push(group.memory_id.clone());
         }
@@ -307,14 +318,12 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
             write_version(db, &restored)?;
             restored.id
         };
-        db.execute(
-            "DELETE FROM collection_entries WHERE kind='memory' AND record_id=?",
-            [&group.memory_id],
-        )?;
-        for collection in &group.before_memberships {
-            db.execute("INSERT INTO collection_entries(collection_id,kind,record_id) VALUES(?1,'memory',?2)",params![collection,group.memory_id])?;
+        if let Some(before) = &group.navigation_before {
+            restore_navigation(db, &group.memory_id, before)?;
         }
         inverses.push(ReceiptChange {
+            navigation_before: group.navigation_after.clone(),
+            navigation_after: group.navigation_before.clone(),
             memory_id: group.memory_id.clone(),
             before_version: Some(group.after_version.clone()),
             after_version: after,
@@ -330,6 +339,7 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
     }
     let first = inverses.first().ok_or(DataError::Integrity)?;
     let receipt = Receipt {
+        reason: None,
         request_id: request.into(),
         action: "undo".into(),
         capture_id: None,
@@ -397,6 +407,12 @@ impl MemoryStore {
         )?;
         let (body, message_ids) =
             super::agent::resolve_memory_write(write, previous.as_ref(), |source| {
+                if tx
+                    .prepare("SELECT 1 FROM captures WHERE id=?")?
+                    .exists([source])?
+                {
+                    return raw(&tx, source).map(|capture| capture.text);
+                }
                 tx.query_row(
                     "SELECT text FROM messages WHERE id=?1 AND conversation_id=?2 AND role='user'",
                     params![source, conversation],
@@ -405,13 +421,12 @@ impl MemoryStore {
                 .optional()?
                 .ok_or(DataError::SourceAttribution)
             })?;
-        let sources = archive_messages(&tx, input, &message_ids)?;
+        let sources = archive_sources(&tx, input, &message_ids)?;
+        if sources.is_empty() && previous.as_ref().is_none_or(|v| v.capture_ids.is_empty()) {
+            return Err(DataError::SourceAttribution);
+        }
         let change = ChangeRequest {
             request_id: operation_id.into(),
-            capture_id: sources
-                .first()
-                .cloned()
-                .ok_or(DataError::SourceAttribution)?,
             destination: write.destination.clone(),
             title: write.title.clone(),
             body,
@@ -439,6 +454,139 @@ impl MemoryStore {
         );
         result["receipt"] = serde_json::to_value(&receipt).map_err(|_| DataError::Invalid)?;
         complete_operation(&tx, input, operation_id, &result, Some(&receipt.request_id))?;
+        let result = operation(&tx, input, operation_id)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    pub fn merge_agent_memories(
+        &self,
+        input: &str,
+        attempt: &str,
+        operation_id: &str,
+        merge: &MemoryMergeArgs,
+    ) -> Result<AgentOperation> {
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        agent_fence(&tx, input, attempt)?;
+        let op = operation(&tx, input, operation_id)?;
+        if op.name != "merge_memories"
+            || op.arguments != serde_json::to_value(merge).map_err(|_| DataError::Invalid)?
+        {
+            return Err(DataError::RequestConflict);
+        }
+        let hash = fingerprint(&("merge_memories", input, merge))?;
+        if let Some(receipt) = replay(&tx, operation_id, &hash)? {
+            if op.receipt.as_ref() != Some(&receipt) || op.result.is_none() {
+                return Err(DataError::Integrity);
+            }
+            return Ok(op);
+        }
+        if op.result.is_some() || merge.target_memory_id == merge.source_memory_id {
+            return Err(DataError::Invalid);
+        }
+        valid_text(&merge.reason, 240)?;
+        let target = head(&tx, &merge.target_memory_id, &merge.target_version)?;
+        let source = head(&tx, &merge.source_memory_id, &merge.source_version)?;
+        if draft_exists(&tx, &target.memory_id)? || draft_exists(&tx, &source.memory_id)? {
+            return Err(DataError::Conflict);
+        }
+        let target_navigation = navigation_snapshot(&tx, &target.memory_id)?;
+        let source_navigation = navigation_snapshot(&tx, &source.memory_id)?;
+        let mut captures = target.capture_ids.clone();
+        for capture in &source.capture_ids {
+            if !captures.contains(capture) {
+                captures.push(capture.clone());
+            }
+        }
+        let write = MemoryWriteArgs {
+            destination: Destination::Existing {
+                memory_id: target.memory_id.clone(),
+                expected_version: target.id.clone(),
+            },
+            title: merge.title.clone(),
+            parts: merge.parts.clone(),
+        };
+        let (body, _) = super::agent::resolve_memory_write(&write, Some(&target), |id| {
+            if id == source.id {
+                return Ok(source.body.clone());
+            }
+            if !captures.iter().any(|capture| capture == id) {
+                return Err(DataError::SourceAttribution);
+            }
+            Ok(raw(&tx, id)?.text)
+        })?;
+        let merged = Version {
+            id: id(),
+            memory_id: target.memory_id.clone(),
+            parent_id: Some(target.id.clone()),
+            title: merge.title.clone(),
+            body,
+            actor: "ai".into(),
+            reason: "append".into(),
+            created_at: now()?,
+            capture_ids: captures,
+        };
+        write_version(&tx, &merged)?;
+        let mut target_after = target_navigation.clone();
+        target_after
+            .collections
+            .extend(source_navigation.collections.iter().cloned());
+        target_after.collections.sort();
+        target_after.collections.dedup();
+        target_after.pinned =
+            Some(target_navigation.pinned == Some(true) || source_navigation.pinned == Some(true));
+        restore_navigation(&tx, &target.memory_id, &target_after)?;
+        let source_after = NavigationSnapshot {
+            collections: vec![],
+            pinned: Some(false),
+        };
+        restore_navigation(&tx, &source.memory_id, &source_after)?;
+        tx.execute(
+            "UPDATE memories SET state='merged',updated_at=?2 WHERE id=?1",
+            params![source.memory_id, now()?],
+        )?;
+        let receipt = Receipt {
+            reason: Some(merge.reason.clone()),
+            request_id: operation_id.into(),
+            action: "merge".into(),
+            capture_id: source.capture_ids.first().cloned(),
+            memory_id: Some(target.memory_id.clone()),
+            before_version: Some(target.id),
+            after_version: Some(merged.id.clone()),
+            status: "applied".into(),
+        };
+        save_receipt(&tx, &receipt, &hash)?;
+        tx.execute(
+            "UPDATE receipts SET logical_input_id=?2 WHERE request_id=?1",
+            params![operation_id, input],
+        )?;
+        tx.execute("UPDATE receipt_changes SET navigation_before=?2,navigation_after=?3 WHERE request_id=?1 AND memory_id=?4",params![operation_id,encode(&target_navigation)?,encode(&target_after)?,target.memory_id])?;
+        save_changes(
+            &tx,
+            operation_id,
+            &[ReceiptChange {
+                memory_id: source.memory_id.clone(),
+                before_version: Some(source.id.clone()),
+                after_version: source.id,
+                before_state: "active".into(),
+                after_state: "merged".into(),
+                navigation_before: Some(source_navigation),
+                navigation_after: Some(source_after),
+            }],
+        )?;
+        let evidence = resolve_excerpt(
+            &tx,
+            &SourceRef::Version(merged.id.clone()),
+            3000,
+            &[],
+            Some(0),
+        )?;
+        let mut result =
+            super::agent::evidence_value(&merged.memory_id, evidence, merged.body.chars().count());
+        result["receipt"] = serde_json::to_value(&receipt).map_err(|_| DataError::Invalid)?;
+        result["merged_memory_id"] = serde_json::json!(source.memory_id);
+        complete_operation(&tx, input, operation_id, &result, Some(operation_id))?;
         let result = operation(&tx, input, operation_id)?;
         tx.commit()?;
         Ok(result)
@@ -583,7 +731,6 @@ impl MemoryStore {
         };
         let write = ChangeRequest {
             request_id: request.into(),
-            capture_id: capture.id.clone(),
             destination: destination.clone(),
             title: title.into(),
             body,

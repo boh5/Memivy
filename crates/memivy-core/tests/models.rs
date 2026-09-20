@@ -160,32 +160,6 @@ fn embedding_identity_excludes_key_but_includes_encoding() {
     assert_ne!(r.fingerprint().unwrap(), first);
 }
 #[test]
-fn disabled_organization_does_not_enqueue_new_captures() {
-    let d = tempfile::tempdir().unwrap();
-    let store = memivy_core::memory::MemoryStore::open(d.path()).unwrap();
-    let mut r = ModelSettings {
-        auto_organize: false,
-        ..ModelSettings::default()
-    };
-    r.save(d.path(), "initial").unwrap();
-    store
-        .capture(&memivy_core::memory::CaptureRequest {
-            request_id: uuid::Uuid::new_v4().to_string(),
-            text: "关闭期间保留原话".into(),
-            origin: memivy_core::memory::Origin::User {
-                app: "QA".into(),
-                project: None,
-                uri: None,
-            },
-        })
-        .unwrap();
-    let rev = r.revision.clone();
-    r.auto_organize = true;
-    r.save(d.path(), &rev).unwrap();
-    assert!(store.claim_organization().unwrap().is_none());
-}
-
-#[test]
 fn embedding_activation_rejects_busy_or_clearing_state_before_publishing() {
     use memivy_core::embedding::{self, Preferences};
     let dir = tempfile::tempdir().unwrap();
@@ -273,7 +247,7 @@ fn flat_settings_import_credentials_before_voice_rewrites_its_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("voice")).unwrap();
     let old = json!({
-        "revision":"old-revision", "auto_organize":false,
+        "revision":"old-revision",
         "connections":[
             {"id":"active","name":"Active","base_url":"http://localhost:1234/v1","api_key":"active-secret"},
             {"id":"retained","name":"Retained","base_url":"http://localhost:4321/v1","api_key":"retained-secret"}
@@ -329,7 +303,6 @@ fn flat_settings_import_credentials_before_voice_rewrites_its_snapshot() {
     assert_eq!(flat["format_version"], 2);
     assert!(flat["voice"].get("connection").is_none());
     let reopened = ModelSettings::read(dir.path()).unwrap();
-    assert!(!reopened.auto_organize);
     assert_eq!(reopened.voice.model, "new-asr");
     assert_eq!(
         reopened

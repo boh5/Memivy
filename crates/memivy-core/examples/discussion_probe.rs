@@ -78,6 +78,10 @@ async fn main() {
     fs::create_dir(&output).expect("fresh output directory required");
     fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"context_token_upper_bound":65536,"output_reserve":8192,"max_model_steps":12,"semantic_review":"pending","synthetic_only":true,"memory_write_contract":"parts_with_source_quotes"})).unwrap()).unwrap();
     for case in [
+        "collection_recommendation",
+        "general_question",
+        "multi_query",
+        "read_repair",
         "record_and_question",
         "global_focus",
         "state_changes",
@@ -103,6 +107,102 @@ async fn main() {
         let mut rubric = String::new();
         let mut dataset = Value::Null;
         match case {
+            "collection_recommendation" => {
+                let memory = seed(
+                    &s,
+                    "Shanghai preparation",
+                    "For the next Shanghai trip, collecting material beforehand remains optional and undecided.",
+                );
+                s.create_conversation(&topic, "Independent recommendations")
+                    .unwrap();
+                let travel = id();
+                let cooking = id();
+                s.save_collection(&travel, "Travel planning", "Trips and preparation", None)
+                    .unwrap();
+                s.save_collection(&cooking, "Cooking", "Recipes and groceries", None)
+                    .unwrap();
+                let current = s.memory(&memory.memory_id).unwrap().current;
+                let started = std::time::Instant::now();
+                let result = s
+                    .recommend_collections(&config, &memory.memory_id, &current.id)
+                    .await;
+                let key = RecordKey {
+                    kind: "memory".into(),
+                    id: memory.memory_id.clone(),
+                };
+                let before = s.record_navigation(&key).unwrap();
+                let suggestions = result.as_ref().ok().cloned().unwrap_or_default();
+                if let Some(choice) = suggestions.first() {
+                    s.accept_collection_recommendation(
+                        &memory.memory_id,
+                        &current.id,
+                        &choice.collection.id,
+                        choice.collection.revision,
+                    )
+                    .unwrap();
+                }
+                dataset = json!({"suggestions":result.map_err(|e|format!("{e:?}")),"before_confirmation":before,"after_confirmation":s.record_navigation(&key).unwrap(),"elapsed_ms":started.elapsed().as_millis()});
+                rubric.push_str("One direct structured model request, no Agent. Suggest the existing travel collection; no membership before explicit confirmation. The memory body and version remain unchanged.");
+            }
+            "general_question" => {
+                seed(
+                    &s,
+                    "Unrelated personal budget",
+                    "My travel budget is 5000 yuan.",
+                );
+                s.create_conversation(&topic, "General writing").unwrap();
+                turns.push(ask(&s, &config, &topic, "请把这句话改得简洁一点：由于今天下雨，因此我们决定取消原定在室外举行的活动。只改写，不保存。", &[]).await);
+                rubric.push_str("Respond directly using the supplied sentence. No memory search or mutation is needed. Preserve the cancellation decision without inventing facts.");
+            }
+            "multi_query" => {
+                seed(
+                    &s,
+                    "Skyline budget",
+                    "Skyline project budget is capped at 2000 euros.",
+                );
+                seed(
+                    &s,
+                    "Skyline privacy",
+                    "Skyline interview recordings must remain offline and cannot be uploaded.",
+                );
+                s.create_conversation(&topic, "Project constraints")
+                    .unwrap();
+                turns.push(ask(&s, &config, &topic, "Please find the Skyline budget and recording privacy constraints. Use one multi-query search with a statement-style query for each aspect, then cite the actual saved evidence. Do not save this question.", &[]).await);
+                rubric.push_str("The raw search arguments use at least two complementary queries with natural text and concise keywords. Both saved constraints are found and cited. No new memory is created.");
+            }
+            "read_repair" => {
+                seed(
+                    &s,
+                    "上海准备",
+                    "我下次去上海，可能需要提前收集资料，但还没有决定。",
+                );
+                seed(
+                    &s,
+                    "上海行程补充",
+                    "下次同一趟上海行程，提前收集资料仍是待定选项，不是必须。",
+                );
+                s.create_conversation(&topic, "上海行程").unwrap();
+                let turn = ask(&s, &config, &topic, "查一下关于下次上海行程的记忆，告诉我哪些已定、哪些待定。如果确实重复，可以合并；不要把可能写成确定。", &[]).await;
+                let input = turn["input_id"].as_str().unwrap().to_owned();
+                turns.push(turn);
+                if !s.agent_input_receipts(&input).unwrap().is_empty() {
+                    let undo = s.undo_agent_input(&id(), &input).unwrap();
+                    let next = id();
+                    s.create_conversation(&next, "再次回顾").unwrap();
+                    dataset = json!({"undo":undo,"new_conversation":next});
+                    turns.push(
+                        ask(
+                            &s,
+                            &config,
+                            &next,
+                            "回顾一下我下次去上海的准备事项，哪些是确定的？",
+                            &[],
+                        )
+                        .await,
+                    );
+                }
+                rubric.push_str("Read complete evidence before any merge; preserve uncertainty and the same-trip scope. If merged, both records have an atomic receipt and inherited originals. After undo, retrieval in a new conversation reports the reversal and the Agent does not automatically repeat it.");
+            }
             "record_and_question" => {
                 s.create_conversation(&topic, "随时表达").unwrap();
                 for text in [
@@ -169,7 +269,7 @@ async fn main() {
                     )
                     .await,
                 );
-                rubric.push_str("Both focused-material and collection entry points include the global 10-hour and CNY 5,000 constraints before the first Agent request. Answers must use and cite them without deciding for the user. The later offline/no-upload constraint must be saved and applied.");
+                rubric.push_str("Both focused-material and collection entry points let the Agent retrieve global 10-hour and CNY 5,000 constraints when planning, using its own search calls. Answers must use and cite them without deciding for the user. The later offline/no-upload constraint must be saved and applied.");
             }
             "state_changes" => {
                 s.create_conversation(&topic, "收费决定").unwrap();
@@ -218,7 +318,7 @@ async fn main() {
                     )
                     .await,
                 );
-                rubric.push_str("Add the new idea to the current collection. Update the outside resource plan to eight hours without changing its collection membership. Do not capture the current Memory or start a second organizer. Original plan ID: ");
+                rubric.push_str("Save the new idea without assigning collection membership automatically. Update the outside resource plan to eight hours without changing its collection membership. Preserve each original source. Original plan ID: ");
                 rubric.push_str(&outside.memory_id);
             }
             "history" => {
@@ -430,7 +530,7 @@ async fn main() {
             .iter()
             .map(|m| s.library_detail(&m.key).unwrap())
             .collect::<Vec<_>>();
-        let artifact = json!({"case":case,"rubric":rubric,"dataset":dataset,"turns":turns,"memories":memories,"conversation_context":s.agent_conversation_context(&topic).unwrap(),"semantic_review":"pending"});
+        let artifact = json!({"case":case,"rubric":rubric,"dataset":dataset,"turns":turns,"memories":memories,"conversation_context":s.agent_conversation_context(dataset["new_conversation"].as_str().unwrap_or(&topic)).unwrap(),"semantic_review":"pending"});
         fs::write(
             output.join(format!("{case}.json")),
             serde_json::to_vec_pretty(&artifact).unwrap(),

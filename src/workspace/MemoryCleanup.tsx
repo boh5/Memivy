@@ -24,7 +24,7 @@ export default function MemoryCleanup({ detail, toolbar, onClose, onSaved }: {
   const bodyRef = useRef<string | null>(null);
   const attemptedSave = useRef<SaveRequest | null>(null);
   const [retryingSave, setRetryingSave] = useState(false);
-  const conflict = snapshot && (detail.current?.id !== snapshot.expected_version || detail.state !== "active");
+  const conflict = snapshot && (detail.current.id !== snapshot.expected_version || detail.state !== "active");
   const unchanged = body === detail.body && snapshot?.body === detail.body && snapshot?.title === detail.title;
   const parts = useMemo(() => cleanupDiff(snapshot?.body ?? "", body ?? ""), [snapshot?.body, body]);
   useEffect(() => {
@@ -34,7 +34,7 @@ export default function MemoryCleanup({ detail, toolbar, onClose, onSaved }: {
       try {
         await flushDraft(`memory:${detail.key.id}`);
         if (!active) return;
-        const original = await call<Snapshot>("cleanup_prepare", { id, memory: detail.key.id, expected: detail.current!.id });
+        const original = await call<Snapshot>("cleanup_prepare", { id, memory: detail.key.id, expected: detail.current.id });
         if (!active) { void call("cleanup_cancel", { id }).catch(() => {}); return; }
         snapshotRef.current = original; setSnapshot(original);
         const result = await call<string>("cleanup_generate", { id, snapshot: original, previous: null, instruction: "" });

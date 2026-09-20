@@ -73,9 +73,9 @@ const failures: Record<string, UiMessage> = {
   changes_undone: message("workspace", "input.changesUndone"),
 };
 const progressLabels = {
-  recalling: "input.recalling", search_memories: "input.recalling", list_memories: "input.recalling",
+  preparing: "input.preparing", search_memories: "input.recalling", list_memories: "input.recalling",
   read_memory: "input.readingMemory", read_conversation: "input.readingDiscussion",
-  write_memory: "input.updatingMemory", undo_changes: "input.undoingMemory",
+  write_memory: "input.updatingMemory", merge_memories: "input.updatingMemory", undo_changes: "input.undoingMemory",
 } as const;
 
 export default function Discussion({ topic, revision: requestedRevision = 0, configured, onSettings, onRefresh, onOpenRecord, compact = false, quick = false, sourceApp = "Memivy", composerVisible = true, onReady, onBusy, focus = 1 }: {

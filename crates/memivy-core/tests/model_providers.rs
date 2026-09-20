@@ -362,55 +362,37 @@ async fn all_protocols_roundtrip_tool_results_and_provider_signatures() {
 }
 
 #[tokio::test]
-async fn all_protocols_preserve_organization_receipts_and_reject_truncated_writes() {
+async fn all_protocols_accept_complete_calls_and_reject_truncated_calls() {
     for provider in PROVIDERS {
         for truncated in [false, true] {
-            let dir = tempfile::tempdir().unwrap();
-            let store = MemoryStore::open(dir.path()).unwrap();
-            let raw = store
-                .capture(&CaptureRequest {
-                    request_id: uuid::Uuid::new_v4().to_string(),
-                    text: "Offline operation remains required.".into(),
-                    origin: Origin::User {
-                        app: "provider fixture".into(),
-                        project: None,
-                        uri: None,
-                    },
-                })
-                .unwrap();
-            let mut task = store.claim_organization().unwrap().unwrap();
-            store.prepare_organization(&mut task).unwrap();
-            let args = json!({"destination":{"kind":"new"},"title":"Offline requirement","parts":[{"text":"Offline operation remains required.","sources":[{"source_id":raw.capture_id,"quote":"Offline operation remains required."}]}]});
+            let args = json!({"queries":[{"text":"Offline requirements","keywords":["offline"]}]});
             let (config, requests, server) = fixture(provider, 1, true, move |_| {
                 reply(
                     provider,
                     true,
-                    Some(("write_memory", args.clone())),
+                    Some(("search_memories", args.clone())),
                     "",
                     truncated,
                 )
             });
-
-            let result = store.run_organization(&config, &task).await;
+            let result = tools::stream_turn(
+                &config,
+                &[Message::user("Find offline requirements")],
+                &[tools::function(
+                    "search_memories",
+                    "Search saved memories",
+                    json!({"queries":{"type":"array","items":{"type":"object"}}}),
+                )],
+                |_| Ok(()),
+            )
+            .await;
             server.join().unwrap();
             assert_eq!(requests.lock().unwrap().len(), 1);
             if truncated {
                 assert_eq!(result.unwrap_err(), ProbeError::Truncated);
             } else {
-                assert_eq!(
-                    result.unwrap().unwrap().memory_id.as_deref(),
-                    Some(raw.memory_id.as_str())
-                );
+                assert_eq!(model::calls(&result.unwrap()).count(), 1);
             }
-            let db = rusqlite::Connection::open(store.database_path()).unwrap();
-            let versions: i64 = db
-                .query_row(
-                    "SELECT count(*) FROM memory_versions WHERE memory_id=?",
-                    [&raw.memory_id],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(versions, if truncated { 1 } else { 2 });
         }
     }
 }
@@ -431,8 +413,6 @@ async fn explicit_refusals_cannot_commit_accompanying_tool_calls() {
                 },
             })
             .unwrap();
-        let mut task = store.claim_organization().unwrap().unwrap();
-        store.prepare_organization(&mut task).unwrap();
         let args = json!({"destination":{"kind":"new"},"title":"Original","parts":[{"text":"Keep the original text.","sources":[{"source_id":raw.capture_id,"quote":"Keep the original text."}]}]});
         let (config, _, server) = fixture(provider, 1, true, move |_| {
             let refusal = match provider {
@@ -454,7 +434,9 @@ async fn explicit_refusals_cannot_commit_accompanying_tool_calls() {
         });
 
         assert_eq!(
-            store.run_organization(&config, &task).await.unwrap_err(),
+            tools::stream_turn(&config, &[Message::user("Read the note")], &[], |_| Ok(()))
+                .await
+                .unwrap_err(),
             ProbeError::InvalidResponse
         );
         server.join().unwrap();

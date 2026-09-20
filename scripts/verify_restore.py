@@ -58,7 +58,7 @@ def check():
                 assert current.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
             finally: before.close();current.close()
             # The already-connected stdio server follows the stable root after restore.
-            result=client.tool('memory_search',{'query':'backup'})
+            result=client.tool('memory_search',{'queries':[{'text':'backup','keywords':['backup']}]})
             assert result['items'],result
             client.close()
         finally:

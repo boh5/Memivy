@@ -122,10 +122,7 @@ fn current_read_model_omits_archive_bodies_but_preserves_counts_and_provenance()
     let current = store.library_detail_view(&key, false).unwrap();
     let archive = store.library_detail(&key).unwrap();
     assert_eq!(current.body, "new body");
-    assert_eq!(
-        current.current.unwrap().capture_ids,
-        archive.current.unwrap().capture_ids
-    );
+    assert_eq!(current.current.capture_ids, archive.current.capture_ids);
     assert!(current.history.is_empty());
     assert!(current.sources.is_empty());
     assert_eq!(current.history_count, archive.history.len());

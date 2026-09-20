@@ -44,24 +44,6 @@ fn memory(s: &MemoryStore, text: &str) -> (RecordKey, Receipt) {
         r,
     )
 }
-fn organize(s: &MemoryStore, record: &RecordKey) -> Result<Receipt> {
-    let task = s.claim_organization()?.ok_or(DataError::Unavailable)?;
-    assert_eq!(task.memory.memory_id, record.id);
-    s.apply_organization(
-        &task,
-        &MemoryWriteArgs {
-            destination: Destination::New,
-            title: task.memory.title.clone(),
-            parts: vec![MemoryWritePart {
-                text: task.memory.body.clone(),
-                sources: vec![MemorySourceQuote {
-                    source_id: task.capture_id.clone(),
-                    quote: task.memory.body.trim().chars().take(512).collect(),
-                }],
-            }],
-        },
-    )
-}
 fn collection(s: &MemoryStore, name: &str) -> String {
     let c = id();
     s.save_collection(&c, name, "", None).unwrap();
@@ -161,7 +143,7 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     s.archive_collection(&c, true, 2).unwrap();
     assert!(
         s.search(&SearchRequest {
-            query: "面试".into(),
+            queries: vec![MemoryQuery::text("面试")],
             scope: SearchScope {
                 collection_id: Some(c.clone()),
                 ..Default::default()
@@ -203,7 +185,7 @@ fn explicit_topic_search_filters_before_ranking_and_keeps_history_separate() {
     }
     let sources = s
         .search(&SearchRequest {
-            query: "木桥".into(),
+            queries: vec![MemoryQuery::text("木桥")],
             scope: SearchScope {
                 collection_id: Some(c.clone()),
                 ..Default::default()
@@ -298,9 +280,11 @@ fn navigation_survives_backup_and_purge_removes_metadata() {
     s.collect_record(&c, &m, true).unwrap();
     let backup = d.path().join("navigation.backup");
     s.backup(&backup).unwrap();
-    let restored = MemoryStore::restore_backup(&backup, d.path().join("restored")).unwrap();
-    assert!(restored.record_navigation(&m).unwrap().pinned);
-    assert_eq!(restored.collections().unwrap()[0].count, 1);
+    let prepared = s.prepare_restore(&backup).unwrap();
+    s.arm_restore(&prepared.id).unwrap();
+    let s = MemoryStore::open_application(d.path()).unwrap();
+    assert!(s.record_navigation(&m).unwrap().pinned);
+    assert_eq!(s.collections().unwrap()[0].count, 1);
     s.trash_memory(&m.id, r.after_version.as_ref().unwrap())
         .unwrap();
     s.purge_memory(&m.id).unwrap();
@@ -375,7 +359,7 @@ fn navigation_performance_10000_records() {
     };
     s.pin_record(&key, true).unwrap();
     s.collect_record(&collection, &key, true).unwrap();
-    let status_keys: Vec<_> = s
+    let _status_keys: Vec<_> = s
         .library(&LibraryQuery {
             limit: 100,
             ..Default::default()
@@ -390,11 +374,10 @@ fn navigation_performance_10000_records() {
         for _ in 0..20 {
             let start = Instant::now();
             if mode == "status_100" {
-                assert_eq!(s.organization_states(&status_keys).unwrap().len(), 100);
             } else if mode == "scoped_rag" {
                 assert_eq!(
                     s.search(&SearchRequest {
-                        query: "蓝鲸旅行".into(),
+                        queries: vec![MemoryQuery::text("蓝鲸旅行")],
                         scope: SearchScope {
                             collection_id: Some(collection.clone()),
                             ..Default::default()
@@ -432,19 +415,19 @@ fn navigation_performance_10000_records() {
 }
 
 #[test]
-fn receipt_collection_confirmation_is_explicit_idempotent_and_rejects_stale_targets() {
+fn collection_confirmation_is_explicit_idempotent_and_rejects_stale_targets() {
     let (_d, s) = setup();
     let raw = capture(&s, "整理完成后推荐专题，保留这段原话");
-    let receipt = organize(&s, &raw).unwrap();
+    let current = s.memory(&raw.id).unwrap().current;
     let key = RecordKey {
         kind: "memory".into(),
-        id: receipt.memory_id.clone().unwrap(),
+        id: raw.id.clone(),
     };
     let c = collection(&s, "产品设计");
     let revision = s.collections().unwrap()[0].revision;
     assert!(s.record_navigation(&key).unwrap().collections.is_empty());
     for _ in 0..2 {
-        s.accept_organization_collection(&receipt.request_id, &c, revision)
+        s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .unwrap();
     }
     assert_eq!(s.collections().unwrap()[0].count, 1);
@@ -456,52 +439,58 @@ fn receipt_collection_confirmation_is_explicit_idempotent_and_rejects_stale_targ
     assert_eq!(s.collections().unwrap()[0].count, 0);
     s.save_collection(&c, "新方向", "", Some(revision)).unwrap();
     assert!(
-        s.accept_organization_collection(&receipt.request_id, &c, revision)
+        s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .is_err()
     );
     let revision = s.collections().unwrap()[0].revision;
-    s.trash_memory(&key.id, receipt.after_version.as_deref().unwrap())
-        .unwrap();
+    s.trash_memory(&key.id, &current.id).unwrap();
     assert!(
-        s.accept_organization_collection(&receipt.request_id, &c, revision)
+        s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .is_err()
     );
     s.restore_memory(&key.id).unwrap();
-    s.undo(&id(), &receipt.request_id).unwrap();
+    s.edit_memory(&EditRequest {
+        request_id: id(),
+        memory_id: raw.id.clone(),
+        expected_version: current.id.clone(),
+        title: "Changed".into(),
+        body: "Changed topic".into(),
+    })
+    .unwrap();
     assert!(
-        s.accept_organization_collection(&receipt.request_id, &c, revision)
+        s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .is_err()
     );
     assert_eq!(s.collections().unwrap()[0].count, 0);
 }
 
 #[test]
-fn receipt_collection_confirmation_rejects_a_newer_memory_version() {
+fn collection_confirmation_rejects_a_newer_memory_version() {
     let (_d, s) = setup();
     let raw = capture(&s, "记录体验需要保持简单");
-    let r = organize(&s, &raw).unwrap();
+    let current = s.memory(&raw.id).unwrap().current;
     let c = collection(&s, "产品");
     let revision = s.collections().unwrap()[0].revision;
     s.edit_memory(&EditRequest {
         request_id: id(),
-        memory_id: r.memory_id.clone().unwrap(),
-        expected_version: r.after_version.unwrap(),
+        memory_id: raw.id.clone(),
+        expected_version: current.id.clone(),
         title: "新的主题".into(),
         body: "这条记忆已改为另一件事".into(),
     })
     .unwrap();
     assert!(
-        s.accept_organization_collection(&r.request_id, &c, revision)
+        s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .is_err()
     );
     assert_eq!(s.collections().unwrap()[0].count, 0);
 }
 
 #[tokio::test]
-async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist() {
+async fn recommendation_skips_model_when_no_eligible_collections_exist() {
     let (_d, s) = setup();
     let raw = capture(&s, "木桥产品记录体验");
-    let receipt = organize(&s, &raw).unwrap();
+    let current = s.memory(&raw.id).unwrap().current;
     // An invalid endpoint would fail immediately if a model call were attempted.
     let config = memivy_core::model::ModelConfig {
         provider: Default::default(),
@@ -513,7 +502,7 @@ async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist()
         disable_reasoning: false,
     };
     assert!(
-        s.recommend_organization_collections(&config, &receipt.request_id)
+        s.recommend_collections(&config, &raw.id, &current.id)
             .await
             .unwrap()
             .is_empty()
@@ -523,89 +512,16 @@ async fn receipt_recommendation_skips_model_when_no_eligible_collections_exist()
         &c,
         &RecordKey {
             kind: "memory".into(),
-            id: receipt.memory_id.unwrap(),
+            id: raw.id.clone(),
         },
         true,
     )
     .unwrap();
     assert!(
-        s.recommend_organization_collections(&config, &receipt.request_id)
+        s.recommend_collections(&config, &raw.id, &current.id)
             .await
             .unwrap()
             .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn dismissing_receipt_suggestions_survives_restart_and_does_not_affect_new_input() {
-    let (dir, s) = setup();
-    let raw = capture(&s, "木桥记录体验");
-    let r = organize(&s, &raw).unwrap();
-    let c = collection(&s, "木桥");
-    s.dismiss_organization_collections(&r.request_id).unwrap();
-    let reopened = MemoryStore::open(dir.path()).unwrap();
-    let config = memivy_core::model::ModelConfig {
-        provider: Default::default(),
-        base_url: "invalid".into(),
-        model: "unused".into(),
-        api_key: None,
-        max_output_tokens: None,
-        output_token_parameter: Default::default(),
-        disable_reasoning: false,
-    };
-    assert!(
-        reopened
-            .recommend_organization_collections(&config, &r.request_id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    let key = RecordKey {
-        kind: "memory".into(),
-        id: r.memory_id.unwrap(),
-    };
-    assert_eq!(
-        reopened.organization_states(&[key]).unwrap()[0].recommendations,
-        0
-    );
-    assert_eq!(
-        reopened
-            .collections()
-            .unwrap()
-            .iter()
-            .find(|v| v.id == c)
-            .unwrap()
-            .count,
-        0
-    );
-    let raw2 = capture(&reopened, "新的输入有独立建议");
-    let r2 = organize(&reopened, &raw2).unwrap();
-    assert!(
-        reopened
-            .organization_collection_feedback(&r2.request_id)
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
-fn permanent_erasure_cleans_receipt_feedback() {
-    let (dir, s) = setup();
-    let raw = capture(&s, "需要永久擦除的合成记录");
-    let r = organize(&s, &raw).unwrap();
-    s.dismiss_organization_collections(&r.request_id).unwrap();
-    s.trash_memory(
-        r.memory_id.as_deref().unwrap(),
-        r.after_version.as_deref().unwrap(),
-    )
-    .unwrap();
-    s.purge_memory(r.memory_id.as_deref().unwrap()).unwrap();
-    let db = rusqlite::Connection::open(dir.path().join("memivy.db")).unwrap();
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM collection_feedback", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        0
     );
 }
 
@@ -658,53 +574,4 @@ fn related_memories_keep_collection_discussions_within_their_scope() {
         )
         .is_err()
     );
-}
-
-#[test]
-fn cached_recommendations_and_batch_status_revalidate_membership_and_revision() {
-    let (_d, s) = setup();
-    let raw = capture(&s, "旅行记录");
-    let receipt = organize(&s, &raw).unwrap();
-    let key = RecordKey {
-        kind: "memory".into(),
-        id: receipt.memory_id.clone().unwrap(),
-    };
-    let collection = collection(&s, "旅行");
-    let meta = s.collections().unwrap().remove(0);
-    let cached = serde_json::json!([{"collection":meta,"reason":"都关于旅行"}]);
-    rusqlite::Connection::open(s.database_path())
-        .unwrap()
-        .execute(
-            "INSERT INTO collection_feedback(receipt_id,suggestions) VALUES(?1,?2)",
-            rusqlite::params![receipt.request_id, cached.to_string()],
-        )
-        .unwrap();
-    assert_eq!(
-        s.organization_collection_feedback(&receipt.request_id)
-            .unwrap()
-            .unwrap()
-            .len(),
-        1
-    );
-    let states = s.organization_states(&[raw.clone(), key.clone()]).unwrap();
-    assert!(
-        states
-            .iter()
-            .all(|r| r.status == "done" && r.recommendations == 1)
-    );
-    s.collect_record(&collection, &key, true).unwrap();
-    assert_eq!(
-        s.organization_states(std::slice::from_ref(&key)).unwrap()[0].recommendations,
-        0
-    );
-    s.collect_record(&collection, &key, false).unwrap();
-    s.save_collection(&collection, "不同主题", "改变关注点", Some(1))
-        .unwrap();
-    assert!(
-        s.organization_collection_feedback(&receipt.request_id)
-            .unwrap()
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(s.organization_states(&[key]).unwrap()[0].recommendations, 0);
 }

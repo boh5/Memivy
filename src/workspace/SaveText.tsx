@@ -17,7 +17,7 @@ export default function SaveText({ message, topic, onClose, onSaved }: { message
   const [unresolved, setUnresolved] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    const timer = setTimeout(() => { void call<Page>("library_query", { query: { query, trash: false, limit: 30 } }).then(page => { if (active) setRows(page.items.filter(row => row.key.kind === "memory")); }).catch(e => { if (active) setError(errorText(e)); }); }, 120);
+    const timer = setTimeout(() => { void call<Page>("library_query", { query: { query, trash: false, limit: 30 } }).then(page => { if (active) setRows(page.items); }).catch(e => { if (active) setError(errorText(e)); }); }, 120);
     return () => { active = false; clearTimeout(timer); };
   }, [query]);
   async function select(id: string) {
@@ -27,7 +27,7 @@ export default function SaveText({ message, topic, onClose, onSaved }: { message
     lock.current = true; setBusy(true); setError("");
     try {
       const detail = await call<Detail>("library_detail", { key: { kind: "memory", id } });
-      if (detail.state !== "active" || !detail.current) throw { code: "unavailable" };
+      if (detail.state !== "active") throw { code: "unavailable" };
       draft.update({ destination: { kind: "existing", memory_id: id, expected_version: detail.current.id } }); setUnresolved(null);
     } catch (e) { setError(errorText(e)); }
     finally { lock.current = false; setBusy(false); }

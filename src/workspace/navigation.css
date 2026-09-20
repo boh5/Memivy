@@ -89,9 +89,9 @@
   .collection-header h1 { font-size: 19px; }
 }
 
-.organization-collections { margin-top: 12px; padding-top: 11px; border-top: 1px solid #e8dfbe; }
-.organization-collections .quiet { padding: 3px 0; font-size: 11px; white-space: nowrap; }
-.organization-collections-error { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; font-size: 11px; color: #807b6b; }
+.collection-recommendations { margin-top: 12px; padding-top: 11px; border-top: 1px solid #e8dfbe; }
+.collection-recommendations .quiet { padding: 3px 0; font-size: 11px; white-space: nowrap; }
+.collection-recommendations-error { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; font-size: 11px; color: #807b6b; }
 
 /* Contextual feedback shares the existing reading and button palette. */
 .workspace-toast-region { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 80; pointer-events: none; max-width: calc(100vw - 40px); }
@@ -101,15 +101,15 @@
 .workspace-toast button:last-child { color: #bbb; }
 .organization-inline-state { display:flex;align-items:center;gap:10px;font-size:11px;color:#9a8550;margin-top:9px; }
 .organization-inline-state .quiet { font-size:11px;padding:0; }
-.organization-history-entry {padding:14px 0;font-size:12px;color:#777; }
-.organization-history-entry+.organization-history-entry{border-top:1px solid var(--line)}
-.organization-history-entry p {margin:0 0 8px;}
-.collection-choices>label:last-child,.suggestion-rows>article:last-child,.organization-history-entry:last-child{border-bottom:0}
+.memory-history-entry {padding:14px 0;font-size:12px;color:#777; }
+.memory-history-entry+.memory-history-entry{border-top:1px solid var(--line)}
+.memory-history-entry p {margin:0 0 8px;}
+.collection-choices>label:last-child,.suggestion-rows>article:last-child,.memory-history-entry:last-child{border-bottom:0}
 .memory-collections { margin: -8px 0 18px; }
 .memory-collections:empty {display:none;}
 .memory-collection-tags, .recommendation-tags {display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
 .collection-tag {display:inline-flex;background:#f5f3eb;border:1px solid #eae6d8;border-radius:20px;padding:5px 10px;font-size:11px;color:#77705c;}
-.memory-collections .organization-collections {border:0;margin:8px 0 0;padding:0;}
+.memory-collections .collection-recommendations {border:0;margin:8px 0 0;padding:0;}
 .recommendation-label {font-size:11px;color:#999;}
 .recommendation-chip {display:inline-flex;align-items:center;border:1px dashed #dcd4bc;border-radius:20px;color:#867445;background:#fffdf5;}
 .recommendation-chip button {font-size:11px;padding:5px 9px;}

@@ -498,9 +498,41 @@ impl MemoryStore {
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn query_vector(
+    pub(super) fn query_vectors(&self, queries: &[MemoryQuery]) -> Vec<super::search::QueryVector> {
+        let started = std::time::Instant::now();
+        let mut cache = std::collections::HashMap::new();
+        queries
+            .iter()
+            .map(|query| {
+                let text = query.text.trim();
+                cache
+                    .entry(text.to_owned())
+                    .or_insert_with(|| {
+                        let remaining = Duration::from_secs(3).saturating_sub(started.elapsed());
+                        let result = if remaining.is_zero() {
+                            Err("embedding_query_budget".into())
+                        } else {
+                            self.query_vector(text, remaining)
+                        };
+                        match result {
+                            Ok(vector) => super::search::QueryVector {
+                                vector,
+                                error: None,
+                            },
+                            Err(error) => super::search::QueryVector {
+                                vector: None,
+                                error: Some(error),
+                            },
+                        }
+                    })
+                    .clone()
+            })
+            .collect()
+    }
+    fn query_vector(
         &self,
-        request: &SearchRequest,
+        text: &str,
+        timeout: Duration,
     ) -> std::result::Result<Option<(String, Vec<u8>)>, String> {
         let control = emb::lock(&self.root, "embedding-control.lock")?;
         let prefs = Preferences::read(&self.root)?;
@@ -525,29 +557,19 @@ impl MemoryStore {
         if index.state != "ready" || index.fingerprint != fingerprint {
             return Err("embedding_index_rebuilding".into());
         }
-        let text = if let Some(m) = &request.reference_memory_id {
-            let v = self.memory(m).map_err(|e| e.to_string())?.current;
-            format!(
-                "{}\n{}",
-                v.title.chars().take(150).collect::<String>(),
-                v.body.chars().take(650).collect::<String>()
-            )
-        } else {
-            request.query.clone()
-        };
         let vector = if remote {
             crate::models::bytes(&crate::models::embed(
                 &registry.embedding.model_config()?,
-                &text,
+                text,
                 registry.embedding.dimensions,
-                Duration::from_secs(3),
+                timeout,
             )?)
         } else {
             emb::vector_bytes(&client::encode(
                 &self.root,
                 "query",
-                &chunk::query(&text)?,
-                Duration::from_secs(2),
+                &chunk::query(text)?,
+                timeout.min(Duration::from_secs(2)),
             )?)?
         };
         if !Preferences::read(&self.root)?.enabled
@@ -811,7 +833,7 @@ mod tests {
 
     #[test]
     fn cancellation_and_rebuild_invalidate_inflight_units() {
-        let (_d, s) = setup();
+        let (dir, s) = setup();
         capture(&s, "first");
         s.embedding_step_with(|_| {
             s.embedding_control("disable").unwrap();
@@ -831,7 +853,12 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let backup = out.path().join("backup.db");
         s.backup(&backup).unwrap();
-        let restored = MemoryStore::restore_backup(&backup, out.path().join("restored")).unwrap();
+        let prepared = s.prepare_restore(&backup).unwrap();
+        s.arm_restore(&prepared.id).unwrap();
+        drop(s);
+
+        let restored = MemoryStore::open_application(dir.path()).unwrap();
+        assert!(restored.last_restore_result().unwrap().unwrap().restored);
         assert_ne!(
             meta(&restored.connection().unwrap())
                 .unwrap()

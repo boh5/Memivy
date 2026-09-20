@@ -1,4 +1,6 @@
 use memivy_core::memory::*;
+use memivy_core::model::{AssistantContent, Message, ToolCall};
+use rig_core::message::ToolFunction;
 use rusqlite::{Connection, params};
 use serde_json::json;
 use uuid::Uuid;
@@ -104,7 +106,13 @@ fn one_discussion_input_split_into_two_memories_is_one_historical_recording() {
         let args = serde_json::to_value(&write).unwrap();
         let call = id();
         let mut protocol = store.agent_execution(&run.input_id).unwrap().protocol;
-        protocol.push(json!({"role":"assistant","content":null,"tool_calls":[{"id":call,"type":"function","function":{"name":"write_memory","arguments":args.to_string()}}]}));
+        protocol.push(json!(Message::Assistant {
+            id: None,
+            content: vec![AssistantContent::ToolCall(ToolCall::from_wire(
+                call.clone(),
+                ToolFunction::new("write_memory".into(), args.clone())
+            ))]
+        }));
         store
             .checkpoint_agent(&run.input_id, &run.attempt_id, &protocol)
             .unwrap();
@@ -126,11 +134,10 @@ fn one_discussion_input_split_into_two_memories_is_one_historical_recording() {
     store
         .finish_agent_input(&run.input_id, &run.attempt_id, &[])
         .unwrap();
-    store.delete_conversation(&conversation).unwrap();
     assert_eq!(
         store.activity_summary().unwrap().days[0].count,
         1,
-        "Durable provenance outlives the discussion"
+        "Completing the discussion preserves the recording count"
     );
     let records = store.activity_records(timestamp, timestamp + 1, 0).unwrap();
     assert_eq!(records.items.len(), 1);

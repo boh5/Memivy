@@ -1311,6 +1311,13 @@ No UI QA, native build or app launch was performed for this review. Verification
 - Local `cargo test --workspace --all-targets --offline` completed: 304 passed, 0 failed, 3 intentionally ignored. This does not establish the cause of the remote timeout. Diagnostic wrapper probes cover live output, exact log bytes, private output, nonzero exit, descendant cleanup, closed stdout, and fail-fast summary persistence.
 - Remote rerun and the v0.1.3 release remain pending; no timeout was extended and no checks were removed.
 
+## Agent-directed memory plan review (2026-09-19)
+
+- At the user's request, wrote `docs/goals/agent-directed-memory-plan.md`. This is documentation only; no product implementation, configuration, library data, or database schema was changed by this task.
+- The plan removes fixed pre-retrieval and automatic semantic organization, reuses the existing Agent and MemoryStore, adds bounded multi-query retrieval and evidence-based repair, and keeps MCP limited to capture and search. It explicitly excludes periodic scans, new background queues, separate query-rewriting models, generic frameworks, and new configuration panels.
+- Three independent sub-agents reviewed separate concerns: Tesla reviewed architecture and scope; Jason reviewed retrieval and Agent/MCP contracts; Godel reviewed provenance, merge, deletion, and undo. Five findings were addressed: lexical versus semantic keyword constraints, legacy query limits, merged historical citations, successive-merge purge, and undo context across conversations. The fixes reuse existing search, citation, and receipt mechanisms. All three reviewers re-read the revisions and reported no remaining substantive findings within their focus.
+- Document validation passed: relative file links resolve, both JSON examples parse and satisfy the proposed query bounds, code fences are balanced, and no trailing whitespace remains. No product tests, real-model probes, native QA, or performance measurements were run for this documentation task; the plan separately lists implementation-time acceptance requirements. No commit or push was made.
+
 ## 删除冗余实现与回归检查（2026-09-19）
 
 - 按用户明确要求，删除导致 CI 卡住的 `core_faults` 假 HTTP 服务、八场景组合测试及其专用 fixture，不新增替代模拟服务。保留直接验证原文、重试、事务回滚以及模型协议边界的现有测试。远端日志已定位到该组合测试，未声称已拿到阻塞线程的堆栈。
@@ -1326,3 +1333,49 @@ No UI QA, native build or app launch was performed for this review. Verification
 - Replace the release-only debug Cargo test invocation with a small Node wrapper around Minisign. It decodes Tauri's signature/public-key files and verifies the actual archive with the shipped public key. Existing official-updater Rust tests remain unchanged. PR updates cancel the preceding check for that same PR; main and release verification runs are not cancelled by this rule.
 - Validation: actionlint passed for both workflows; release metadata validation and all 24 existing release-build, release-metadata and updater Node tests passed. The public v0.1.4 archive verified locally in approximately 0.35 seconds. Signature checks accepted a valid archive path containing spaces and rejected modified archive bytes, a modified signed comment, malformed or missing signatures, and a different public key. Seven checks ran the workflow's actual source-validation shell against a temporary Git repository: annotated/lightweight tags and an advanced main branch worked; SHA mismatch, non-SHA input, invalid tag, moved tag and unmerged source were rejected.
 - Independent read-only review by Socrates found no actionable issues in workflow scope, source pinning, permissions, cancellation, publication dependencies or signature verification. No product code, dependencies, user library or application installation changed. No commit, push, remote CI dispatch or release was performed. Cross-version cache hits and end-to-end release timing still require a subsequent authorized release; local signature timing excludes CI tool installation.
+
+
+## Agent 按需检索与修正实施（2026-09-19）
+
+- 按已授权方案取消固定预检索和后台语义整理，统一多查询检索，保留明确的语义失败状态与关键词结果。内置 Agent 支持已读证据修正、两条记忆原子合并、来源和导航快照、整轮撤销；MCP 仍仅显式原样保存和只读搜索。专题推荐独立为按钮触发的单次模型调用，选择后才写成员关系。无新依赖、服务或任务平台，公开 schema 1 未改，前向迁移为 schema 2。
+- 三位独立实现 reviewer（Bernoulli、Lovelace、Pauli）审查并交叉复核；修复多查询分页截断、未读 capture 引用、单条撤销后旧执行仍有效、合并历史来源遗漏、永久删除残留理由和过期推荐。清空只擦除归属明确且仍在回收站的原文；收尾核对修改前代码，原文筛选条件与既有规则一致，不是新增产品决策，撤销此前不必要的确认阻塞。用户追问后进一步核实：回收站只列记忆，来源区域只支持将原始输入恢复为未删除记忆的正文。`restore_capture` 虽在底层和内部调用接口存在，正常界面没有删除记忆后单独恢复原文的入口；此前将该底层能力描述为用户可用功能的解释有误，已更正。本轮解释核查只更正文档，未改变产品代码。不新增兼容路径、额外持久化表或墓碑测试，并删去重复 UI 与 undo 验证。
+- 完整离线回归 `research/core-tests/20260919T135540Z-39857b81` 通过：格式、Clippy、workspace/all-targets Rust、UI、前端构建、启动器、进程存储／故障和真实 stdio MCP；`python3 scripts/verify_restore.py` 通过并验证在途写入备份和连接恢复；i18n 与 whitespace 检查通过。完整运行后仅继续删去重复测试断言／用例，产品代码未再扩大范围。
+- 真实模型证据位于 `research/agent-directed-model-20260919`、`research/agent-directed-model-followup-20260919`、`research/agent-directed-global-retest-20260919` 和 `research/agent-directed-aspect-retest-20260919`。普通改写不搜索或写入；互补查询找出预算和隐私；上海案例保留待定与否定，合并撤销并删除原会话后未自动重做；专题推荐直接返回已有候选，确认前无成员变化。初测出现未来行程确定性夸大和漏查全局约束，经系统提示及 AND／多方面查询描述修订，最终选定材料与专题入口均检索并引用每周 10 小时和 5000 元限制。仅记录实际请求、原始工具参数、数据库效果和耗时；没有可靠 Token 用量，不声称节省比例或模型语义保证。
+- 原生检查使用 `com.memivy.app.dev` 和 `/private/tmp/memivy-agent-native-20260919`。首次自动重编译期间，CUA 重新连接误自动启动默认开发库，schema 1→2 自动迁移；发现后停止交互及误启动进程。与 `recovery/before-migration-1-to-2-e119b256-ea6f-4de1-b0d7-c9601d20fb2a.db` 核对，原话、状态、正文、版本来源、会话、消息、草稿、专题成员和置顶逐项一致，双方 integrity_check 均为 ok。用户随后明确开发库可直接删除重建，实际保留升级状态，无需恢复或重新确认。正式安装和生产库未用作测试。
+- 随后用 `npm run qa:app -- --no-watch` 和同一合成库重启，确认实际打开路径与锁所有权，再完成中文 Command+Enter 保存、独立专题推荐、点击加入及修改回执的原生视觉验证。数据库保持 1 条记忆／版本／原文，1 次 Agent write，添加专题仅增加成员。已停止自己的 QA runner 并释放锁，清除外部私有测试配置及合成库，保留必要 JSON 和检查日志。没有提交、推送、发布或声称用户验收完成。
+
+
+## 无产品入口的接口清理（2026-09-19）
+
+- 用户明确要求删除独立恢复原始输入及同类无实际入口的能力。移除原始输入独立编辑、删除、恢复、清空、导航和导出路径；资料库条目收敛为记忆，详情始终有当前版本，原话继续作为来源证据和恢复正文的材料。
+- 同时删除未使用的 `library_capture` IPC、旧 `apply_capture`／`correct_assignment` 写入、会话删除、整库 Markdown 导出、恢复到新目录的另一套 API 和冗余草稿操作。保留实际 MCP 保存、聊天写入、单条导出、设置内备份恢复和草稿并发保护；所有已注册 Tauri 命令均核实有前端调用。旧整理状态 `understanding` 不再由运行时读写或返回；数据库结构、已有内容和来源历史未修改。
+- 三位独立子 Agent 分工清理并交叉审查。复审发现回收站恢复／永久删除错误携带 `expected`，与后端严格参数不符；修复为只有移入回收站携带版本，并通过复审。删除无入口功能的专属测试及过时验收条目，其他现有测试改用真实产品 API；没有新增测试或墓碑测试。
+- 浏览器预览核实记忆正文、来源和“恢复这份输入为正文”入口。原生使用稳定 Memivy Dev 身份及 `/private/tmp/memivy-unused-api-qa.Nuearb` 合成库，启动前后核实共享锁和实际数据库路径；完成移入回收站 → 恢复 → 再次移入 → 永久删除。最终 1 条记忆为 purged，原文和版本正文均为空，完整性为 ok。证据在 `research/unused-api-cleanup-20260919/native.json`；已退出自己的 QA 会话并释放锁，删除合成库、关闭预览页及服务。
+- 最终完整回归 `research/core-tests/20260919T145323Z-0e0f4d93` 全部通过：Rust 格式、Clippy、workspace/all-targets 测试、启动器、UI、前端构建、存储、故障恢复和真实 stdio MCP。独立备份恢复检查通过，保留 4 次在途 MCP 写入、恢复期间阻止新旧连接访问、原连接随后复用恢复后的库，完整性为 ok；日志在 `research/unused-api-cleanup-20260919/restore.log`。i18n 和 whitespace 检查通过。未提交、推送或发布。
+
+## 改造后录入与检索效果 QA（2026-09-19）
+
+- 使用当前配置的 `gpt-5.6-luna`，复用现有 `discussion_probe` 完成 8 组、17 轮真实模型讨论，针对历史接续问题再复跑 2 轮；核对原始工具参数、返回、当前正文、来源与回执。普通改写无检索或写入，多查询覆盖预算和隐私，材料／专题讨论能检索全局时间和预算，价格更正保留未上线／未收款及第三方建议归属，上海待定事项合并和撤销均正常，更新后检索返回新版本。34 个回答来源链接均有实际记录；不以接口完成状态等同于语义全通过。
+- 发现模型质量问题：首次历史接续连续五次填错用户消息 UUID，随后新建记忆时错误引用旧版本，再退为另存当前决定，共 6 次拒绝，耗时 81.1 秒，将相关内容拆成两条但未丢原话；重跑一次调用即正确更新原记忆，耗时 20.8 秒，没有发现合法写入被错误拒绝。另有一轮使用 `current_message` 占位来源后重试成功。回答和后续建议偶尔将“决定恢复”表达为“已恢复”，或从“收费待定”扩展到未确认的执行状态；这些问题未进入本轮已核对的持久记忆。个性化建议存在未声明的产品解释及未落实时间约束的计划；撤销回顾存在重复搜索。17 轮整体耗时中位数 26.1 秒、范围 10.8–81.1 秒，包含后续建议生成，不是首字延迟；未做旧版对照或 Token 节省比较。
+- 独立 MCP QA 经真实 stdio 原样保存 8 条中英文记录，来源与重复请求行为正确；多查询关键词并集、去重及边界正常。本地缓存语义模型为四个关键词零命中的改写问题找回目标，均排第一，热查询约 29–58 毫秒；小语料中的后位候选仍含无关内容，`matched_queries` 只能说明参与召回，不能当成问题已覆盖的证明。实际无效语义配置明确返回 `embedding_settings_invalid`，关键词结果不丢；查询与索引未改正文。8 条首次启动和索引用时 12.9 秒，不代表大库性能。
+- 原生使用稳定 Memivy Dev 身份和 `/private/tmp/memivy-effect-native.SQipT1` 合成库，先核实锁及实际打开路径。通过中文录入、独立讨论检索、来源弹窗、更正 3200→2600 且其余约束不变、修改对照、快捷窗口 Enter 换行、多行草稿转入主窗口，以及新讨论同时检索青禾新预算和海棠待定招募。最终 2 条记忆、3 份原始输入，完整性为 ok。CUA 首次逐键输入中文只产生数字，已单列为自动化输入问题；后续完整中文均先在界面核对再提交，不把它算作产品丢字。
+- 两位独立子 Agent 分别执行 MCP／语义 QA 和复核模型／原生证据。证据在 `research/agent-effect-qa-20260919/`，已停止自己的原生 QA、释放共享锁、清除合成数据库与仓库外私有配置，保留脱敏结果。未修改产品代码、未新增测试／墓碑测试、未提交或发布；因此未重复运行上一轮已通过的完整回归。本轮不覆盖大规模库、实际麦克风／语音识别或物理中文输入法组合过程。
+
+
+## Agent 效果修复与复测（2026-09-20）
+
+- 持续使用用户配置的 `gpt-5.6-luna`。写入参数或来源校验失败时，返回真实的当前消息 ID 和同一目标重试指引；保留原有校验、取消检查和回执规则，不自动替换参数或放宽来源要求。加强一条既有工作流测试，验证拒绝后用正确 ID 更新原记忆，只有一份成功回执且旧版本仍可引用。没有新增测试函数或墓碑测试。
+- 收敛系统提示与 Agent／MCP 工具说明：按需多查询、分别覆盖相关方面、检查正文而非把排名当证据；个性化规划查询缺失的全局限制；区分考虑、决定和执行；新纠正引用本轮原文、未变事实继承旧来源；明确版本 ID 与原文 ID 的获取字段。后续建议避免虚构用户执行状态，回复语言跟随本轮问题。保留 Agent 自主检索，无新工具、后台任务、数据表、依赖或额外模型调用。
+- 真实模型迭代发现并修正了漏查全局限制、英文问句受中文界面语言干扰、新金额错误沿用旧来源、复用前一轮链接但本轮引用未绑定，以及将旧版本当成已核对原话。独立审查确认：最终回顾引用要么有本轮可用绑定，要么直接依据用户对话回答而不附记忆链接；历史核对实际读到旧暂停原文，当前状态由当前版本验证。
+- 最终汇总覆盖既有 8 组、17 轮核心场景，受修改影响的场景另行复测：普通改写无读写，多查询覆盖预算／隐私，选中材料和专题能检索全局 10 小时／5000 元，价格更正及历史接续保留来源和动作阶段，合并撤销后不自动重做。最终选取证据中 0 次写入拒绝，25 个引用均有当前消息绑定且可用，8 个合成库完整性均为 ok。历史接续最后一次只调用一次 write、约 17.9 秒；这不是整体性能提升或 Token 节省的统计结论。
+- 保留模型质量观察：最后一次历史核对仍误用过一次版本 ID 读取原文，工具拒绝后模型自行改用正确 capture；最终结论和来源正确，没有错误写入。规划长度、估时和是否多读一次仍有波动；未为这些现象增加自动纠错或新机制，也不声称任何模型每轮语义都能完美。
+- 完整回归 `research/core-tests/20260919T162051Z-10e8b348` 通过：Rust 277 项通过、3 项按原设置忽略，UI 264 项通过，格式、Clippy、前端构建、启动器、存储、进程故障及真实 stdio MCP 全部通过。最后仅继续收紧引用／原文读取说明，随后现有 13 项工作流和 3 项手动历史／上下文预算检查再次通过；未提高上下文预算。备份恢复、i18n 与 whitespace 检查通过。
+- 独立最终复审无阻塞性事实、来源或存储问题。证据和最终源文件指纹保存在 `research/agent-effect-fix-20260919/`。本轮未重跑原生交互或大规模库测试，未修改 UI、正式安装、个人资料库或共享模型；测试完成后删除合成数据库和仓库外私有模型配置，保留诊断 JSON／日志。未提交、推送或发布。
+
+## 已知记忆的原话读取简化（2026-09-20）
+
+- 按用户确认，仅修改内置 Agent 的 `read_memory`：用 `memory_id` 和 `view=originals` 直接读取该记忆关联的原始输入，包括历史版本来源；不再要求输入原文 ID。删除混用两种 ID 的 `source_id` 参数，历史正文专用 `version_id`，列表分页 `offset` 与正文位置 `start_char` 分开。检索与 MCP 接口、数据库结构不变，无新工具、后台任务或依赖。
+- 原话按时间去重，每次最多 10 份、合计最多 3000 字符；返回完整的 `next_read` 参数续读。单个事务检查记忆可用性、筛选来源并读取证据，复用现有引用范围与写入来源校验。强化既有长文／目录测试，核实历史独有来源、跨多份原话分页和原文证据修正；没有新增测试函数或墓碑测试。
+- 使用现有 Luna 场景核对录入接续、原话回顾、长文末尾、更新后搜索。历史核对一次 originals 调用即读取旧暂停与新恢复决定，两条原话引用均有效，无 ID 混用或工具拒绝。另发现简单回忆沿用旧回答链接，收紧原有引用提示，复跑后直接依据用户消息回答且不附旧链接。最终选取 4 组 7 轮证据，7 个来源链接全部有本轮可用绑定，6 个合成库完整性与外键检查正常；不声称模型所有语义行为均有保证。
+- 完整 Rust 回归 277 项通过、3 项按原设置忽略；最后提示词澄清后，13 项工作流和 3 项历史／预算检查再次通过。首次新增说明导致预算检查失败，精简重复文字后通过，没有提高预算。完整回归脚本随后在无关 UI 测试收尾异步异常处停止；单独重跑曾遇文件监听限制，授权环境最终 UI 264 项全部通过。另补齐构建、存储、进程故障、真实 stdio MCP、备份恢复、i18n 和格式检查，全部通过；没有为这些运行问题改 UI 或测试实现。
+- 独立只读审查确认新参数、分页、来源归属和证据范围无可行动问题。证据与最终源文件指纹保留于 `research/read-memory-originals-20260920/`；完成后清除本轮合成数据库与外部私有配置，保留必要日志和模型结果。未重跑原生界面，未改个人资料库、正式安装或共享模型，未提交、推送或发布。

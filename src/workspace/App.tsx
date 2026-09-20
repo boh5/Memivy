@@ -129,13 +129,6 @@ export default function App() {
   useEffect(() => {
     if (!native) return;
     const events = [
-      listen<Receipt>("organization-complete", e => {
-        const receipt = e.payload;
-        if (receipt.status === "applied" && receipt.action === "merge" && receipt.memory_id) {
-          const key: Key = {kind:"memory",id:receipt.memory_id};
-          void call<Detail>("library_detail",{key}).then(d => notify(message("workspace", "app.mergedInto", { title: d.title }), message("workspace", "app.view"), () => openRecord(key))).catch(() => {});
-        }
-      }),
       listen("desktop-settings", () => setSettingsOpen(true)),
       listen("workspace-close-request", () => {
         if (document.querySelector("dialog[open]")) { setWindowError(message("workspace", "app.closeDialogBeforeWindow")); return; }
@@ -198,7 +191,7 @@ export default function App() {
     setRecallOpen(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); refresh();
   }
   async function discuss(detail: Detail, related: Source[] = []) {
-    const source: Source = detail.current ? { kind: "version", id: detail.current.id } : { kind: "capture", id: detail.key.id };
+    const source: Source = { kind: "version", id: detail.current.id };
     const t = await call<Topic>("discussion_open", { id: uid(), title: detail.title, context: [source, ...related], collectionId: page === "collection" ? collectionId : null });
     setRecallQuick(false); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); refresh();
   }

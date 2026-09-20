@@ -1,8 +1,6 @@
 //! Execution checkpoints contain Rig messages plus request-local evidence proofs.
-//! Legacy OpenAI checkpoints are converted only when reading stored execution state.
 use super::{DataError, Result};
 use crate::model::{self, AssistantContent, Message, ToolCall, ToolResultContent, UserContent};
-use rig_core::message::{Reasoning, ToolFunction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -32,80 +30,12 @@ pub(super) fn encode(messages: &[Checkpoint]) -> Result<Vec<Value>> {
         .collect()
 }
 pub(super) fn decode(values: &[Value]) -> Result<Vec<Checkpoint>> {
-    let mut messages: Vec<Checkpoint> = Vec::with_capacity(values.len());
-    for value in values {
-        let message = match value["role"].as_str() {
-            Some("system") => Message::system(value["content"].as_str().ok_or(DataError::Invalid)?),
-            Some("user") if value["content"].is_string() => {
-                Message::user(value["content"].as_str().ok_or(DataError::Invalid)?)
-            }
-            Some("assistant") if !value["content"].is_array() => {
-                let mut content = vec![];
-                if let Some(text) = value["reasoning_content"]
-                    .as_str()
-                    .or_else(|| value["reasoning"].as_str())
-                    .filter(|s| !s.is_empty())
-                {
-                    content.push(AssistantContent::Reasoning(Reasoning::new(text)));
-                }
-                if let Some(text) = value["content"].as_str().filter(|s| !s.is_empty()) {
-                    content.push(AssistantContent::text(text));
-                }
-                if let Some(calls) = value["tool_calls"].as_array() {
-                    for call in calls {
-                        let id = call["id"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .ok_or(DataError::Invalid)?;
-                        let function = ToolFunction::new(
-                            call["function"]["name"]
-                                .as_str()
-                                .ok_or(DataError::Invalid)?
-                                .into(),
-                            serde_json::from_str(
-                                call["function"]["arguments"]
-                                    .as_str()
-                                    .ok_or(DataError::Invalid)?,
-                            )
-                            .map_err(|_| DataError::Invalid)?,
-                        );
-                        content.push(AssistantContent::ToolCall(ToolCall::from_wire(
-                            id, function,
-                        )));
-                    }
-                }
-                model::transport::retain_chat_reasoning(&mut content, value)
-                    .map_err(|_| DataError::Invalid)?;
-                Message::Assistant { id: None, content }
-            }
-            Some("tool") => {
-                let id = value["tool_call_id"].as_str().ok_or(DataError::Invalid)?;
-                let call = messages
-                    .iter()
-                    .rev()
-                    .flat_map(|m| calls(&m.message))
-                    .find(|c| c.id.as_str() == id)
-                    .ok_or(DataError::Invalid)?;
-                Message::User {
-                    content: vec![UserContent::tool_result_for(
-                        call.id.clone(),
-                        call.provider.clone(),
-                        call.function.name.clone(),
-                        vec![ToolResultContent::text(
-                            value["content"].as_str().ok_or(DataError::Invalid)?,
-                        )],
-                    )],
-                }
-            }
-            _ => serde_json::from_value(value.clone()).map_err(|_| DataError::Invalid)?,
-        };
-        messages.push(Checkpoint {
-            message,
-            reads: value.get("_memivy_request_reads").cloned(),
-        });
-    }
-    Ok(messages)
+    values
+        .iter()
+        .map(|value| serde_json::from_value(value.clone()).map_err(|_| DataError::Invalid))
+        .collect()
 }
+
 pub(super) fn calls(message: &Message) -> impl Iterator<Item = &ToolCall> {
     let content = match message {
         Message::Assistant { content, .. } => content.as_slice(),

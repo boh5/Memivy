@@ -16,7 +16,7 @@ export type SourceEvidence = {
   start: number;
   additional_spans?: {start:number;text:string;truncated:boolean}[];
 };
-export type Key = { kind: "memory" | "capture"; id: string };
+export type Key = { kind: "memory"; id: string };
 export type Origin = {
   kind: "user" | "agent" | "conversation" | "discussion";
   app?: string;
@@ -30,7 +30,6 @@ export type Raw = {
   text: string;
   origin: Origin;
   created_at: number;
-  understanding: string;
 };
 export type Row = {
   key: Key;
@@ -70,7 +69,7 @@ export type Detail = {
   state: string;
   title: string;
   body: string;
-  current: Version | null;
+  current: Version;
   history: Version[];
   history_count?: number;
   source_count?: number;
@@ -87,7 +86,7 @@ export type Draft = {
   context?: Source[];
   origin?: Origin;
 };
-export type Receipt = {
+export type Receipt = { reason?: string | null;
   status: "applied" | "needs_review" | "undone";
   request_id: string;
   capture_id: string | null;
@@ -96,6 +95,7 @@ export type Receipt = {
   after_version: string | null;
   action: string;
 };
+export type MemoryReceipt = Receipt & { logical_input_id: string | null };
 export type Topic = { id: string; title: string; updated_at: number; collection_id?: string | null };
 export type Collection = { id: string; name: string; description: string; revision: number; count: number };
 export type RecordNavigation = { pinned: boolean; collections: string[] };
@@ -130,26 +130,36 @@ const previewRaw: Raw = {
   text: "I decided to focus on capturing, finding, and reading notes on macOS first.\n\nIdeas should be easy to save, even before they are fully formed.",
   origin: { kind: "user", app: "Memivy", project: "Product ideas" },
   created_at: 1788667200000,
-  understanding: "pending",
 };
 const previewRow: Row = {
-  key: { kind: "capture", id: previewId },
+  key: { kind: "memory", id: "00000000-0000-4000-8000-000000000002" },
   title: "Focus on the desktop experience",
   snippet: previewRaw.text,
   updated_at: previewRaw.created_at,
   origin: previewRaw.origin,
+};
+const previewVersion: Version = {
+  id: "00000000-0000-4000-8000-000000000003",
+  memory_id: previewRow.key.id,
+  parent_id: null,
+  title: previewRow.title,
+  body: previewRaw.text,
+  actor: "user",
+  reason: "create",
+  created_at: previewRaw.created_at,
+  capture_ids: [previewRaw.id],
 };
 export async function call<T>(
   name: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return resourceCall<T>(name, args);
-  if (name === "models_load") return {revision:"preview",llm:null,embedding:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},auto_organize:true} as T;
+  if (name === "models_load") return {revision:"preview",llm:null,embedding:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"}} as T;
   if (name === "embedding_status") return {enabled:false,preparing:false,paused:false,state:"not_downloaded",downloaded:0,bytes:639150592,processed:0,total:1,failed:0,error:null} as T;
   if (name === "voice_status") return {source:"local",label:"voice_local",local_available:false,enabled:false,preload:false,shortcut:"Alt+KeyR",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"",session:null} as T;
   if (name === "navigation_collections") return [] as T;
   if (name === "navigation_record") return { pinned: false, collections: [] } as T;
-  if (name === "organization_jobs") return [] as T;
+  if (name === "memory_receipts") return [] as T;
   if (name === "activity_summary") {
     const date = new Date(previewRaw.created_at);
     const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
@@ -172,11 +182,14 @@ export async function call<T>(
       state: "active",
       title: previewRow.title,
       body: previewRaw.text,
-      current: null,
-      history: [],
-      sources: [{ id: previewId, capture: previewRaw }],
-    } as T;
+      current: previewVersion,
+      history: args?.archives === false ? [] : [previewVersion],
+      history_count: 1,
+      source_count: 1,
+      sources: args?.archives === false ? [] : [{ id: previewRaw.id, capture: previewRaw, conversation_available: null }],
+    } satisfies Detail as T;
   if (
+    name === "memory_related" ||
     name === "library_agent_changes" ||
     name === "library_topics" ||
     name === "discussion_messages"
