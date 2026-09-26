@@ -1,15 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
-import ts from 'typescript';
+import { compileFixture } from './helpers/compile.mjs';
 import * as query from '@tanstack/react-query';
 import * as react from 'react';
 function fixture(t, invoke) {
   const clients=[];
   class Client extends query.QueryClient { constructor(options){super(options);clients.push(this);} }
   const module={exports:{}};
-  const code=ts.transpileModule(fs.readFileSync('src/workspace/resources.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  const code=compileFixture('src/workspace/resources.ts');
   vm.runInNewContext(code,{module,exports:module.exports,console,require:name=>{
     if(name==='@tanstack/react-query')return {...query,QueryClient:Client};
     if(name==='../nativeIpc')return {invoke};

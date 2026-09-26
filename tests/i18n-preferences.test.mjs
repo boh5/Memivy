@@ -1,16 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
-import ts from 'typescript';
+import { compileFixture } from './helpers/compile.mjs';
 
 function fixture({ native = true, failListen = false } = {}) {
   const pending = [], order = [], rendered = [];
   let listener;
   const module = { exports: {} };
-  const code = ts.transpileModule(fs.readFileSync('src/i18n/preferences.ts', 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
+  const code = compileFixture('src/i18n/preferences.ts');
   vm.runInNewContext(code, {
     module, exports: module.exports, navigator: { languages: ['fr', 'zh-CN'] },
     require(name) {
