@@ -1447,3 +1447,12 @@ No UI QA, native build or app launch was performed for this review. Verification
 - 同步架构说明及正式打包启动检查的 schema 2 预期，修正后者仍写死 schema 1 的旧判断；启动检查通过 Python 语法验证，未在个人 macOS 账户运行正式应用启动验收。
 - 独立复审无阻塞发现，46 项定向测试通过。完整回归第一次因会话中断终止，未判为通过；恢复后 `npm run test:core-assets` 完整通过：Rust 306 项通过、3 项按原设置忽略，UI 277 项通过，格式、Clippy、启动器、前端构建、存储、故障恢复及真实 stdio MCP 检查通过。随后 `python3 scripts/verify_restore.py` 通过，恢复前后资料库完整性为 ok。证据位于忽略目录 `research/schema-consolidation-20261003/`，完整成功记录为 `core-resumed/`。
 - 未加入未发布开发格式的兼容转换：原 schema 3 开发库会被版本检查拒绝，旧中间 schema 2 也不等同于本次完整 schema 2。已确认本机正式库为 schema 1、持久开发库为 schema 3；两者均保留原样，测试只使用合成数据。本轮未重跑模型语义验收或正式安装升级，未修改版本号或发布 Release。
+
+## 0.1.5 发布准备与产物验证（2026-10-04，未发布）
+
+- 发布候选 `9be15b901e8dd518e8fddf53b7a772899d2fd429` 包含已审查的 schema 2 合并、版本号和用户更新说明；其代码树为 `5e52c62fd436f3eb36aacaf8fdac1fc032c68030`。本节仅补录验证证据，不改变产品代码、构建配置或依赖，不将文档更新声称为新的产品测试。
+- 该候选的 Rust 格式、启动器、Clippy、306 项 Rust 测试（3 项原有忽略）、277 项 UI 测试、前端构建、存储／故障／MCP 回归及跨进程恢复通过；版本元数据和国际化检查通过。首次 UI 运行失败并超时，TAP 复查定位到 Vite watcher 的 `EMFILE`；正常执行环境完整 UI 通过，复用同一候选已通过的 Rust 结果后补齐后续检查，没有为环境问题修改产品或测试源码。
+- 正式 `build:release` 和 updater 公钥验签通过。首次本地任务继承私有 `umask 077`，导致产物权限过严；保留旧产物后，以构建子进程 `umask 022` 重建全新 bundle，并重新验证全部目录、资源和可执行文件权限。日志保持私有，既有签名密钥未改变或输出。
+- 最终 DMG SHA-256 为 `6cd1ef681a1d1a136d40ade67af72739cec8da3b5ae0037983e834971654f76c`，updater 包 SHA-256 为 `056f3f039a9832b8b8ac612712643c0613a1b0c39240ccd3a7dddcd00a0521a6`。只读挂载核实 `com.memivy.app`、版本 `0.1.5`、arm64、最低 macOS 26.0、完整签名及麦克风 entitlement；DMG、updater 和原始 bundle 的 16 个内部条目内容与权限一致。更新 manifest 的版本、目标 URL 和签名一致；实际包内 MCP 的合成数据、多进程和完整性检查也通过。
+- 未启动或替换日常正式安装，未以个人资料库进行验收。尚未完成本版本正式包在干净 Mac／独立账户中的安装、首次放行及真实输入／语音／权限交互验收，也未完成实际 v0.1.4 经设置下载、重启安装到 v0.1.5 及其草稿、设置、模型和权限连续性验收。合成 schema 1→2 迁移测试不能替代实际安装升级；发布工作流中的正式包新库启动检查也不能替代上述项目。此时尚未推送发布标签或发布版本。
+- 必要日志和结果保留于忽略目录 `research/release-0.1.5/`：`core/`、`resumed/`、`packaged-mcp.log`、`updater-signature-final.log`、`artifact-check-final/result.json`。本地安装包只证明上述已执行检查，不将其校验和当作未来 GitHub 构建产物的校验和；发布后需另行核对公开下载和 manifest。
