@@ -1,3 +1,4 @@
+use super::CollectionChange;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +88,8 @@ pub struct Version {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
+    #[serde(default)]
+    pub collection_changes: Vec<CollectionChange>,
     pub reason: Option<String>,
     pub request_id: String,
     pub action: String,

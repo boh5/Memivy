@@ -1,6 +1,6 @@
 //! Agent memory changes use the same versions, source archives and receipts as
 //! manual editing. No capture promotion or background organization is scheduled.
-use super::{agent_state::*, db::*, records::*, *};
+use super::{agent_collections::*, agent_state::*, db::*, records::*, *};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -31,6 +31,7 @@ struct ChangeRequest {
 pub struct AgentUndoResult {
     pub receipt: Option<Receipt>,
     pub conflicts: Vec<String>,
+    pub collection_conflicts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -184,6 +185,7 @@ fn write_memory(
     };
     write_version(db, &v)?;
     let receipt = Receipt {
+        collection_changes: vec![],
         reason: None,
         request_id: write.request_id.clone(),
         action: v.reason.clone(),
@@ -213,6 +215,45 @@ struct GroupEffect {
     continuous: bool,
 }
 
+#[derive(Clone)]
+struct CollectionGroupEffect {
+    change: CollectionChange,
+    continuous: bool,
+}
+
+fn extend_collection_group(
+    group: &mut CollectionGroupEffect,
+    effect: CollectionChange,
+    valid: bool,
+) {
+    group.continuous &= valid && effect.before.as_ref() == Some(&group.change.after);
+    for memory in effect.added_memory_ids {
+        if let Some(index) = group
+            .change
+            .removed_memory_ids
+            .iter()
+            .position(|id| id == &memory)
+        {
+            group.change.removed_memory_ids.remove(index);
+        } else if !group.change.added_memory_ids.contains(&memory) {
+            group.change.added_memory_ids.push(memory);
+        }
+    }
+    for memory in effect.removed_memory_ids {
+        if let Some(index) = group
+            .change
+            .added_memory_ids
+            .iter()
+            .position(|id| id == &memory)
+        {
+            group.change.added_memory_ids.remove(index);
+        } else if !group.change.removed_memory_ids.contains(&memory) {
+            group.change.removed_memory_ids.push(memory);
+        }
+    }
+    group.change.after = effect.after;
+}
+
 fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoResult> {
     valid_id(request)?;
     valid_id(input)?;
@@ -221,18 +262,20 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
         return Ok(AgentUndoResult {
             receipt: Some(receipt),
             conflicts: vec![],
+            collection_conflicts: vec![],
         });
     }
     let mut groups: BTreeMap<String, GroupEffect> = BTreeMap::new();
+    let mut collection_groups: BTreeMap<String, CollectionGroupEffect> = BTreeMap::new();
     let mut originals = Vec::new();
-    let receipts = db.prepare("SELECT request_id,status FROM receipts WHERE logical_input_id=? AND action!='undo' ORDER BY rowid")?
-        .query_map([input], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let receipts = db.prepare(&format!("SELECT {RECEIPT_COLUMNS} FROM receipts WHERE logical_input_id=? AND action!='undo' ORDER BY rowid"))?
+        .query_map([input], read_receipt)?.collect::<rusqlite::Result<Vec<_>>>()?;
     if receipts.is_empty() {
         return Err(DataError::Unavailable);
     }
-    for (receipt, status) in receipts {
-        for effect in changes(db, &receipt)? {
-            let valid = status == "applied";
+    for receipt in receipts {
+        for effect in changes(db, &receipt.request_id)? {
+            let valid = receipt.status == "applied";
             if let Some(group) = groups.get_mut(&effect.memory_id) {
                 group.continuous &= valid
                     && effect.before_version.as_ref() == Some(&group.after_version)
@@ -257,7 +300,43 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
                 );
             }
         }
-        originals.push(receipt);
+        for effect in receipt.collection_changes {
+            // A later relationship tool in the same input extends the expected
+            // navigation of a body change without creating another body version.
+            for memory in &effect.added_memory_ids {
+                if let Some(navigation) = groups
+                    .get_mut(memory)
+                    .and_then(|g| g.navigation_after.as_mut())
+                    && !navigation.collections.contains(&effect.collection_id)
+                {
+                    navigation.collections.push(effect.collection_id.clone());
+                    navigation.collections.sort();
+                }
+            }
+            for memory in &effect.removed_memory_ids {
+                if let Some(navigation) = groups
+                    .get_mut(memory)
+                    .and_then(|g| g.navigation_after.as_mut())
+                {
+                    navigation
+                        .collections
+                        .retain(|id| id != &effect.collection_id);
+                }
+            }
+            let valid = receipt.status == "applied";
+            if let Some(group) = collection_groups.get_mut(&effect.collection_id) {
+                extend_collection_group(group, effect, valid);
+            } else {
+                collection_groups.insert(
+                    effect.collection_id.clone(),
+                    CollectionGroupEffect {
+                        change: effect,
+                        continuous: valid,
+                    },
+                );
+            }
+        }
+        originals.push(receipt.request_id);
     }
     let mut conflicts = Vec::new();
     for group in groups.values() {
@@ -284,12 +363,30 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
             conflicts.push(group.memory_id.clone());
         }
     }
-    if !conflicts.is_empty() {
+    let collection_changes: Vec<_> = collection_groups
+        .values()
+        .map(|group| group.change.clone())
+        .collect();
+    let restoring_active = groups
+        .values()
+        .filter(|group| group.before_state == "active")
+        .map(|group| group.memory_id.clone())
+        .collect();
+    let mut collection_conflicts =
+        collection_undo_conflicts(db, &collection_changes, &restoring_active)?;
+    for (id, group) in &collection_groups {
+        if !group.continuous && !collection_conflicts.contains(id) {
+            collection_conflicts.push(id.clone());
+        }
+    }
+    if !conflicts.is_empty() || !collection_conflicts.is_empty() {
         return Ok(AgentUndoResult {
             receipt: None,
             conflicts,
+            collection_conflicts,
         });
     }
+    let undo_collections_before = collection_before(db, collection_groups.keys().cloned())?;
     let mut inverses = Vec::new();
     for group in groups.values() {
         let after = if group.before_state == "undone" {
@@ -331,21 +428,26 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
             after_state: group.before_state.clone(),
         });
     }
+    undo_collection_effects(db, &collection_changes)?;
+    for inverse in &mut inverses {
+        inverse.navigation_after = Some(navigation_snapshot(db, &inverse.memory_id)?);
+    }
     for original in originals {
         db.execute(
             "UPDATE receipts SET status='undone' WHERE request_id=?",
             [original],
         )?;
     }
-    let first = inverses.first().ok_or(DataError::Integrity)?;
+    let first = inverses.first();
     let receipt = Receipt {
+        collection_changes: collection_effects(db, &undo_collections_before)?,
         reason: None,
         request_id: request.into(),
         action: "undo".into(),
         capture_id: None,
-        memory_id: Some(first.memory_id.clone()),
-        before_version: first.before_version.clone(),
-        after_version: Some(first.after_version.clone()),
+        memory_id: first.map(|v| v.memory_id.clone()),
+        before_version: first.and_then(|v| v.before_version.clone()),
+        after_version: first.map(|v| v.after_version.clone()),
         status: "applied".into(),
     };
     save_receipt(db, &receipt, &hash)?;
@@ -362,6 +464,7 @@ fn undo_input(db: &Connection, request: &str, input: &str) -> Result<AgentUndoRe
     Ok(AgentUndoResult {
         receipt: Some(receipt),
         conflicts: vec![],
+        collection_conflicts: vec![],
     })
 }
 
@@ -380,8 +483,21 @@ impl MemoryStore {
         if op.name != "write_memory" {
             return Err(DataError::Invalid);
         }
-        if op.arguments != serde_json::to_value(write).map_err(|_| DataError::Invalid)? {
+        let staged: MemoryWriteArgs =
+            serde_json::from_value(op.arguments.clone()).map_err(|_| DataError::Invalid)?;
+        if serde_json::to_value(&staged).map_err(|_| DataError::Invalid)?
+            != serde_json::to_value(write).map_err(|_| DataError::Invalid)?
+        {
             return Err(DataError::RequestConflict);
+        }
+        // The staged operation owns the original wire arguments. Once its
+        // atomic result exists, replay that result after semantic validation;
+        // new optional fields must not change a completed operation's identity.
+        if op.result.is_some() {
+            if op.receipt.is_none() {
+                return Err(DataError::RequestConflict);
+            }
+            return Ok(op);
         }
         let hash = fingerprint(&("agent_memory", input, write, Actor::Ai))?;
         if let Some(receipt) = replay(&tx, operation_id, &hash)? {
@@ -390,9 +506,12 @@ impl MemoryStore {
             }
             return Ok(op);
         }
-        if op.result.is_some() {
-            return Err(DataError::RequestConflict);
+        if !matches!(write.destination, Destination::New) && !write.initial_collections.is_empty() {
+            return Err(DataError::Invalid);
         }
+        validate_initial_collections(&tx, &write.initial_collections)?;
+        let collections_before =
+            collection_before(&tx, write.initial_collections.iter().map(|r| r.id.clone()))?;
         let previous = match &write.destination {
             Destination::New => None,
             Destination::Existing {
@@ -432,7 +551,21 @@ impl MemoryStore {
             body,
             actor: Actor::Ai,
         };
-        let receipt = write_memory(&tx, input, &change, &sources, &hash)?;
+        let mut receipt = write_memory(&tx, input, &change, &sources, &hash)?;
+        let memory_id = receipt.memory_id.clone().ok_or(DataError::Integrity)?;
+        for collection in &write.initial_collections {
+            set_collection_member(&tx, &collection.id, &memory_id, true)?;
+        }
+        attach_collection_effects(&tx, &mut receipt, &collections_before)?;
+        if !write.initial_collections.is_empty() {
+            tx.execute(
+                "UPDATE receipt_changes SET navigation_after=?2 WHERE request_id=?1",
+                params![
+                    operation_id,
+                    encode(&navigation_snapshot(&tx, &memory_id)?)?
+                ],
+            )?;
+        }
         let committed = version(
             &tx,
             receipt
@@ -452,7 +585,7 @@ impl MemoryStore {
             evidence,
             committed.body.chars().count(),
         );
-        result["receipt"] = serde_json::to_value(&receipt).map_err(|_| DataError::Invalid)?;
+        result["receipt"] = agent_receipt_value(&receipt);
         complete_operation(&tx, input, operation_id, &result, Some(&receipt.request_id))?;
         let result = operation(&tx, input, operation_id)?;
         tx.commit()?;
@@ -493,6 +626,14 @@ impl MemoryStore {
         }
         let target_navigation = navigation_snapshot(&tx, &target.memory_id)?;
         let source_navigation = navigation_snapshot(&tx, &source.memory_id)?;
+        let collections_before = collection_before(
+            &tx,
+            target_navigation
+                .collections
+                .iter()
+                .chain(source_navigation.collections.iter())
+                .cloned(),
+        )?;
         let mut captures = target.capture_ids.clone();
         for capture in &source.capture_ids {
             if !captures.contains(capture) {
@@ -506,6 +647,7 @@ impl MemoryStore {
             },
             title: merge.title.clone(),
             parts: merge.parts.clone(),
+            initial_collections: vec![],
         };
         let (body, _) = super::agent::resolve_memory_write(&write, Some(&target), |id| {
             if id == source.id {
@@ -546,7 +688,8 @@ impl MemoryStore {
             "UPDATE memories SET state='merged',updated_at=?2 WHERE id=?1",
             params![source.memory_id, now()?],
         )?;
-        let receipt = Receipt {
+        let mut receipt = Receipt {
+            collection_changes: vec![],
             reason: Some(merge.reason.clone()),
             request_id: operation_id.into(),
             action: "merge".into(),
@@ -561,6 +704,7 @@ impl MemoryStore {
             "UPDATE receipts SET logical_input_id=?2 WHERE request_id=?1",
             params![operation_id, input],
         )?;
+        attach_collection_effects(&tx, &mut receipt, &collections_before)?;
         tx.execute("UPDATE receipt_changes SET navigation_before=?2,navigation_after=?3 WHERE request_id=?1 AND memory_id=?4",params![operation_id,encode(&target_navigation)?,encode(&target_after)?,target.memory_id])?;
         save_changes(
             &tx,
@@ -584,7 +728,7 @@ impl MemoryStore {
         )?;
         let mut result =
             super::agent::evidence_value(&merged.memory_id, evidence, merged.body.chars().count());
-        result["receipt"] = serde_json::to_value(&receipt).map_err(|_| DataError::Invalid)?;
+        result["receipt"] = agent_receipt_value(&receipt);
         result["merged_memory_id"] = serde_json::json!(source.memory_id);
         complete_operation(&tx, input, operation_id, &result, Some(operation_id))?;
         let result = operation(&tx, input, operation_id)?;
@@ -614,7 +758,7 @@ impl MemoryStore {
         {
             return Err(DataError::Unavailable);
         }
-        let inputs:Vec<String>=tx.prepare("SELECT r.logical_input_id FROM receipts r JOIN receipt_changes c ON c.request_id=r.request_id WHERE c.memory_id=? AND r.logical_input_id IS NOT NULL GROUP BY r.logical_input_id ORDER BY max(r.rowid) DESC")?.query_map([memory_id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let inputs:Vec<String>=tx.prepare("SELECT r.logical_input_id FROM receipts r WHERE r.logical_input_id IS NOT NULL AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) GROUP BY r.logical_input_id ORDER BY max(r.rowid) DESC")?.query_map([memory_id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         inputs.into_iter().map(|input_id|{
             let receipts=tx.prepare(&format!("SELECT {RECEIPT_COLUMNS} FROM receipts WHERE logical_input_id=? ORDER BY rowid"))?.query_map([&input_id],read_receipt)?.collect::<rusqlite::Result<_>>()?;
             Ok(AgentChangeGroup{input_id,receipts})
@@ -656,7 +800,7 @@ impl MemoryStore {
             &tx,
             input,
             operation_id,
-            &serde_json::to_value(&result).map_err(|_| DataError::Invalid)?,
+            &serde_json::json!({"receipt":result.receipt.as_ref().map(agent_receipt_value),"conflicts":result.conflicts,"collection_conflicts":result.collection_conflicts}),
             result.receipt.as_ref().map(|r| r.request_id.as_str()),
         )?;
         let op = operation(&tx, input, operation_id)?;

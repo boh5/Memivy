@@ -609,6 +609,86 @@ mod tests {
     use rusqlite::params;
 
     #[test]
+    fn semantic_collection_scope_filters_before_limit_and_global_search_keeps_outside_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(dir.path()).unwrap();
+        let db = store.connection().unwrap();
+        super::super::embedding::reset(&db).unwrap();
+        let collection = id();
+        store
+            .save_collection(&collection, "松果计划", "Synthetic semantic scope", None)
+            .unwrap();
+        let mut vector = vec![0.0; 1024];
+        vector[0] = 1.0;
+        let bytes = crate::embedding::vector_bytes(&vector).unwrap();
+        let mut inside = String::new();
+        for n in 0..45 {
+            let saved = store
+                .capture(&CaptureRequest {
+                    request_id: id(),
+                    text: format!("Semantic evidence {n:03}"),
+                    origin: Origin::User {
+                        app: "QA".into(),
+                        project: None,
+                        uri: None,
+                    },
+                })
+                .unwrap();
+            db.execute(
+                "INSERT INTO embedding_chunks VALUES(?1,?2,0,0,20,'synthetic',?3)",
+                params![saved.memory_id, saved.version_id, bytes],
+            )
+            .unwrap();
+            if n == 44 {
+                inside = saved.memory_id.clone();
+                store
+                    .collect_record(
+                        &collection,
+                        &RecordKey {
+                            kind: "memory".into(),
+                            id: saved.memory_id,
+                        },
+                        true,
+                    )
+                    .unwrap();
+            }
+        }
+        db.execute("UPDATE embedding_index_meta SET state='ready'", [])
+            .unwrap();
+        let revision = super::super::embedding::meta(&db)
+            .unwrap()
+            .unwrap()
+            .revision;
+        let vectors = vec![QueryVector {
+            vector: Some((revision, bytes)),
+            error: None,
+        }];
+        let mut request = SearchRequest {
+            queries: vec![MemoryQuery {
+                text: "Project limits".into(),
+                keywords: vec!["no-lexical-match".into()],
+            }],
+            scope: SearchScope {
+                collection_id: Some(collection),
+                ..Default::default()
+            },
+            limit: 1,
+            ..Default::default()
+        };
+        let scoped = search_in(&db, &request, &vectors).unwrap();
+        assert_eq!(scoped.mode, "hybrid");
+        assert_eq!(scoped.queries[0].semantic, "completed");
+        assert_eq!(scoped.items.len(), 1);
+        assert_eq!(scoped.items[0].memory_id, inside);
+        assert!(scoped.next_offset.is_none());
+        request.scope = SearchScope::default();
+        request.limit = 100;
+        let global = search_in(&db, &request, &vectors).unwrap();
+        assert_eq!(global.items.len(), 45);
+        assert!(global.items.iter().any(|hit| hit.memory_id == inside));
+    }
+
+    #[test]
     fn native_text_search_keeps_every_and_term_beyond_six() {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path()).unwrap();

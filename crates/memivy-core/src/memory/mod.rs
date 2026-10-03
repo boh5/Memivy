@@ -6,6 +6,7 @@ pub use changes::*;
 mod access;
 mod activity;
 mod agent;
+mod agent_collections;
 mod agent_mutations;
 mod agent_state;
 mod cleanup;
@@ -28,6 +29,7 @@ mod types;
 
 pub use activity::*;
 pub use agent::{MemoryMergeArgs, MemorySourceQuote, MemoryWriteArgs, MemoryWritePart};
+pub use agent_collections::*;
 pub use agent_mutations::*;
 pub use agent_state::*;
 pub use cleanup::*;

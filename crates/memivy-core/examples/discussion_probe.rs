@@ -1,11 +1,89 @@
 //! Real-model acceptance evidence using synthetic memories only.
 //! Writes full inputs/results for human semantic review; no credentials copied.
-use memivy_core::{memory::*, model::ModelConfig};
+use memivy_core::{memory::*, model::ModelConfig, models::ModelSettings};
 use serde_json::{Value, json};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 use uuid::Uuid;
 fn id() -> String {
     Uuid::new_v4().to_string()
+}
+fn read_config(path: &Path) -> ModelConfig {
+    let metadata = fs::symlink_metadata(path).expect("private configuration metadata");
+    assert!(
+        metadata.is_file() && metadata.permissions().mode() & 0o777 == 0o600,
+        "configuration must be a private regular 0600 file"
+    );
+    assert!(metadata.len() <= 256 * 1024, "configuration is too large");
+    let value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    if value.get("format_version").is_some() {
+        assert_eq!(
+            value["format_version"], 2,
+            "current settings format required"
+        );
+        // Deserialization is read-only; ModelSettings::read can migrate a file.
+        serde_json::from_value::<ModelSettings>(value)
+            .unwrap()
+            .llm_config()
+            .unwrap()
+    } else {
+        ModelConfig::read(path).expect("current private configuration")
+    }
+}
+fn state_snapshot(s: &MemoryStore) -> Value {
+    let db = rusqlite::Connection::open(s.database_path()).unwrap();
+    let rows = |sql: &str| -> Vec<Value> {
+        let mut statement = db.prepare(sql).unwrap();
+        statement
+            .query_map([], |r| {
+                let raw: String = r.get(0)?;
+                Ok(serde_json::from_str(&raw).unwrap())
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    json!({
+        "collections": rows("SELECT json_object('id',id,'name',name,'description',description,'revision',revision,'archived',archived) FROM collections ORDER BY id"),
+        "memberships": rows("SELECT json_object('collection_id',collection_id,'kind',kind,'record_id',record_id) FROM collection_entries ORDER BY collection_id,kind,record_id"),
+        "memories": rows("SELECT json_object('id',id,'state',state,'current_version_id',current_version_id) FROM memories ORDER BY id"),
+        "versions": rows("SELECT json_object('id',id,'memory_id',memory_id,'title',title,'body',body) FROM memory_versions ORDER BY id"),
+        "receipt_count": db.query_row("SELECT count(*) FROM receipts", [], |r| r.get::<_, i64>(0)).unwrap()
+    })
+}
+fn collection_dataset(s: &MemoryStore) -> Value {
+    let pine = id();
+    let review = id();
+    let empty = id();
+    s.save_collection(&pine, "松果计划", "离线访谈工具的准备事项", None)
+        .unwrap();
+    s.save_collection(&review, "本周复盘", "本周需要回顾的事项", None)
+        .unwrap();
+    s.save_collection(&empty, "稍后再看", "暂时没有成员", None)
+        .unwrap();
+    let budget = seed(s, "试点预算", "松果工具的试点预算是3600元，尚未上线。");
+    let privacy = seed(s, "录音处理", "访谈录音仅在本机处理，禁止上传。");
+    let hours = seed(s, "时间安排", "我每周能投入六小时，周六优先。");
+    for (collection, memory) in [
+        (&pine, &budget.memory_id),
+        (&pine, &privacy.memory_id),
+        (&review, &budget.memory_id),
+        (&review, &hours.memory_id),
+    ] {
+        s.collect_record(
+            collection,
+            &RecordKey {
+                kind: "memory".into(),
+                id: memory.clone(),
+            },
+            true,
+        )
+        .unwrap();
+    }
+    json!({"pine":pine,"review":review,"empty":empty,"budget":budget.memory_id,"privacy":privacy.memory_id,"hours":hours.memory_id})
 }
 fn seed(s: &MemoryStore, title: &str, body: &str) -> CaptureResult {
     let c = s
@@ -38,6 +116,7 @@ async fn ask(
     text: &str,
     focus: &[String],
 ) -> Value {
+    let before = state_snapshot(s);
     let input = id();
     let attempt = id();
     let e = s
@@ -61,7 +140,8 @@ async fn ask(
     let message = s.turn(&input).unwrap().assistant;
     json!({"input_id":input,"user_message_id":e.user_message_id,"input":text,"focus":focus,
         "result":result.map_err(|e|format!("{e:?}")),"message":message,"execution":execution,
-        "stream_updates":updates,"memory_updates":mutations,"elapsed_ms":started.elapsed().as_millis()})
+        "stream_updates":updates,"memory_updates":mutations,"elapsed_ms":started.elapsed().as_millis(),
+        "business_state_before":before,"business_state_after":state_snapshot(s)})
 }
 #[tokio::main]
 async fn main() {
@@ -70,14 +150,33 @@ async fn main() {
         (3..=4).contains(&args.len()),
         "discussion_probe PRIVATE_CONFIG FRESH_OUTPUT_DIR [CASE[,CASE...]]"
     );
-    let config =
-        ModelConfig::read(std::path::Path::new(&args[1])).expect("current private configuration");
+    let mut config = read_config(Path::new(&args[1]));
+    if let Ok(base_url) = std::env::var("MEMIVY_PROBE_BASE_URL") {
+        let url = reqwest::Url::parse(&base_url).expect("valid probe proxy URL");
+        assert!(
+            url.scheme() == "http"
+                && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+                && url.username().is_empty()
+                && url.password().is_none(),
+            "probe proxy must be an HTTP loopback URL without credentials"
+        );
+        config.base_url = base_url;
+    }
     let output = std::env::current_dir()
         .unwrap()
         .join(PathBuf::from(&args[2]));
     fs::create_dir(&output).expect("fresh output directory required");
     fs::write(output.join("manifest.json"),serde_json::to_vec_pretty(&json!({"model":config.model,"context_token_upper_bound":65536,"output_reserve":8192,"max_model_steps":12,"semantic_review":"pending","synthetic_only":true,"memory_write_contract":"parts_with_source_quotes"})).unwrap()).unwrap();
     for case in [
+        "collection_global_list",
+        "collection_named_lookup",
+        "collection_membership",
+        "collection_scoped_lookup",
+        "collection_create",
+        "collection_initial_membership",
+        "collection_lifecycle",
+        "collection_no_auto_assignment",
+        "collection_scoped_search",
         "collection_recommendation",
         "general_question",
         "multi_query",
@@ -99,7 +198,8 @@ async fn main() {
         {
             continue;
         }
-        let s = MemoryStore::open(output.join(case)).unwrap();
+        let library = tempfile::tempdir().expect("isolated synthetic library");
+        let s = MemoryStore::open(library.path()).unwrap();
 
         let topic = id();
         let mut focus = vec![];
@@ -107,6 +207,129 @@ async fn main() {
         let mut rubric = String::new();
         let mut dataset = Value::Null;
         match case {
+            "collection_global_list"
+            | "collection_named_lookup"
+            | "collection_membership"
+            | "collection_scoped_lookup"
+            | "collection_create"
+            | "collection_initial_membership"
+            | "collection_lifecycle"
+            | "collection_no_auto_assignment"
+            | "collection_scoped_search" => {
+                dataset = collection_dataset(&s);
+                let pine = dataset["pine"].as_str().unwrap();
+                if matches!(
+                    case,
+                    "collection_scoped_lookup"
+                        | "collection_no_auto_assignment"
+                        | "collection_scoped_search"
+                ) {
+                    s.create_scoped_conversation(&topic, "Collection acceptance", Some(pine))
+                        .unwrap();
+                } else {
+                    s.create_conversation(&topic, "Collection acceptance")
+                        .unwrap();
+                }
+                match case {
+                    "collection_global_list" => {
+                        turns.push(
+                            ask(
+                                &s,
+                                &config,
+                                &topic,
+                                "我现在有哪些专题？分别有几条记忆？",
+                                &[],
+                            )
+                            .await,
+                        );
+                        rubric.push_str("List exactly three collections: 松果计划 with two active members, 本周复盘 with two, 稍后再看 with zero. Never present memory titles as collection names. No business mutation.");
+                    }
+                    "collection_named_lookup" => {
+                        turns.push(ask(&s, &config, &topic, "帮我找一下松果计划这个专题，里面都记了什么？再看看稍后再看是不是空的。", &[]).await);
+                        rubric.push_str("Resolve collection names to IDs, read two Pine members, summarize and cite budget 3600 and offline/no uploads. Distinguish the existing empty collection from an absent collection. No business mutation.");
+                    }
+                    "collection_membership" => {
+                        focus.push(dataset["budget"].as_str().unwrap().to_owned());
+                        turns.push(
+                            ask(
+                                &s,
+                                &config,
+                                &topic,
+                                "这条试点预算记忆目前在哪几个专题里？",
+                                &focus,
+                            )
+                            .await,
+                        );
+                        rubric.push_str("Query actual membership and report both 松果计划 and 本周复盘. No business mutation.");
+                    }
+                    "collection_scoped_lookup" => {
+                        turns.push(
+                            ask(
+                                &s,
+                                &config,
+                                &topic,
+                                "我们现在在哪个专题里？这里的两条记忆分别讲了什么？",
+                                &[],
+                            )
+                            .await,
+                        );
+                        rubric.push_str("Use current real collection context, report 松果计划, read members and cite 3600 budget and local-only recordings. No business mutation.");
+                    }
+                    "collection_create" => {
+                        focus = vec![
+                            dataset["privacy"].as_str().unwrap().to_owned(),
+                            dataset["hours"].as_str().unwrap().to_owned(),
+                        ];
+                        turns.push(ask(&s, &config, &topic, "新建一个叫执行准备的专题，说明写‘开始前要核对的条件’，把我附上的录音处理和时间安排这两条加入。", &focus).await);
+                        rubric.push_str("One collection create operation atomically stores name/description and both existing members. Preserve Pine/Review memberships and all memory versions. Return a persistent undoable receipt.");
+                    }
+                    "collection_initial_membership" => {
+                        turns.push(ask(&s, &config, &topic, "记住：松果工具先访谈三位独立开发者，还没有开始。把这条新记忆放进松果计划专题。", &[]).await);
+                        rubric.push_str("Resolve Pine ID and revision, then one write_memory operation creates the sourced memory and initial membership atomically. Preserve not-started status, create only one new memory, and do not also use a separate membership write.");
+                    }
+                    "collection_lifecycle" => {
+                        focus.push(dataset["budget"].as_str().unwrap().to_owned());
+                        for input in [
+                            "把这条试点预算从松果计划移到稍后再看，本周复盘里的归属保留。",
+                            "把稍后再看改名为下次讨论，说明改成‘下次讨论的材料’。",
+                            "把这条试点预算也加入松果计划。",
+                            "把这条试点预算从下次讨论移出，其他专题归属保留。",
+                            "撤销刚才从下次讨论移出的操作。",
+                        ] {
+                            turns.push(ask(&s, &config, &topic, input, &focus).await);
+                        }
+                        rubric.push_str("Atomic cross-collection move preserves Review; metadata update checks current revision; add/remove/undo preserve memory text and version count. Final budget membership is Pine, Review, and renamed 下次讨论. Each applied change is receipted; undo targets the immediately prior removal.");
+                    }
+                    "collection_no_auto_assignment" => {
+                        turns.push(
+                            ask(
+                                &s,
+                                &config,
+                                &topic,
+                                "记住一个独立想法：周末想试试做陶艺，目前只是考虑。",
+                                &[],
+                            )
+                            .await,
+                        );
+                        turns.push(
+                            ask(
+                                &s,
+                                &config,
+                                &topic,
+                                "你觉得哪几条已有记忆适合放进稍后再看？先只给建议。",
+                                &[],
+                            )
+                            .await,
+                        );
+                        rubric.push_str("Save the tentative pottery idea without any collection membership despite scoped conversation. A recommendation-only follow-up changes no memberships, memories, or versions.");
+                    }
+                    "collection_scoped_search" => {
+                        turns.push(ask(&s, &config, &topic, "先在松果计划专题里查一下预算，再去整个资料库查我每周能投入多久。只查已有记忆。", &[]).await);
+                        rubric.push_str("Use collection_id for Pine budget search, use null/global scope for time search, read evidence and cite 3600 and six hours. No business mutation; scoped conversation must not hide global constraints.");
+                    }
+                    _ => unreachable!(),
+                }
+            }
             "collection_recommendation" => {
                 let memory = seed(
                     &s,

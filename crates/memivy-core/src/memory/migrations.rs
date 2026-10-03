@@ -5,9 +5,10 @@ use std::path::Path;
 
 // Append include_str! entries for schema 2 onward. Never edit a shipped migration.
 // Scripts contain only transactional SQL; this module owns version and commit.
-pub(super) const MIGRATIONS: &[&str] = &[include_str!(
-    "../../../../migrations/memory/002_agent_directed.sql"
-)];
+pub(super) const MIGRATIONS: &[&str] = &[
+    include_str!("../../../../migrations/memory/002_agent_directed.sql"),
+    include_str!("../../../../migrations/memory/003_collection_agent.sql"),
+];
 pub(super) const CURRENT: i64 = 1 + MIGRATIONS.len() as i64;
 
 pub(super) fn supported_version(db: &Connection, target: i64) -> Result<i64> {
@@ -89,7 +90,7 @@ mod tests {
 
     #[test]
     fn upgrades_all_steps_once_and_preserves_a_valid_private_backup() {
-        let (dir, store, mut db) = setup();
+        let (dir, _store, mut db) = setup();
         fs::write(dir.path().join("models.json"), "private configuration").unwrap();
         upgrade(&mut db, Some(dir.path()), STEPS).unwrap();
         assert_eq!(supported_version(&db, 3).unwrap(), 3);
@@ -120,9 +121,9 @@ mod tests {
             "private configuration"
         );
         assert_eq!(
-            store.check_integrity(),
+            supported_version(&db, 2),
             Err(DataError::Schema),
-            "Old clients must reject a migrated library"
+            "Clients supporting only schema 2 must reject the schema 3 fixture"
         );
     }
 

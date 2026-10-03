@@ -480,7 +480,11 @@
     "discussion": "讨论",
     "discussionHelp": "联系已有记忆，继续你的思考。",
     "discussionStart": "直接说出想法或问题，相关记忆会参与讨论。",
-    "preparing": "准备上下文…"
+    "preparing": "准备上下文…",
+    "findingCollections": "正在查找专题…",
+    "readingCollection": "正在阅读专题详情…",
+    "updatingCollections": "正在更新专题…",
+    "undoingChanges": "正在撤销修改…"
   },
   "activity": {
     "title": "足迹",
@@ -523,5 +527,26 @@
     "why": "为什么推荐{{name}}？",
     "dismiss": "收起",
     "empty": "暂无可添加的专题推荐。"
+  },
+  "collectionChanges": {
+    "updatedCollections_other": "已更新 {{count}} 个专题",
+    "created": "已创建",
+    "changeTitle": "本次修改",
+    "addedMembers_other": "加入 {{count}} 条记忆",
+    "removedMembers_other": "移出 {{count}} 条记忆",
+    "loadingMember": "正在读取第 {{count}} 条记忆…",
+    "unavailableMember": "这条记忆已不可用。",
+    "noDescription": "未填写说明",
+    "undoConflict": "以下记忆或专题已有后续修改，本次未撤销：",
+    "changedCollection": "已有后续修改的专题",
+    "notApplied": "修改未执行",
+    "partial": "本次处理尚未完成就已停止，以下修改已经保存。",
+    "historyTitle": "变更历史",
+    "historyFor": "「{{name}}」的变更历史",
+    "historyHelp": "对话中的修改会保留在这里，删除对话也不会丢失。撤销会恢复整轮修改，包括同轮的记忆修改。",
+    "loading": "正在读取变更历史…",
+    "empty": "还没有通过对话修改过这个专题。",
+    "memberReadFailed": "暂时无法读取这条记忆，请重试。",
+    "undoneHelp": "这些修改已撤销，以下保留当时的变更记录。"
   }
 }

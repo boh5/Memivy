@@ -394,30 +394,22 @@ mod restore_tests {
         let original = fs::read(&backup).unwrap();
         let source = backup_source(&backup).unwrap();
         let target = dir.path().join("upgraded.db");
-        publish_upgraded_backup(
-            &source,
-            &target,
-            &[
-                super::super::migrations::MIGRATIONS[0],
-                "CREATE TABLE restore_probe(id INTEGER);",
-            ],
-        )
-        .unwrap();
+        let mut future_steps = super::super::migrations::MIGRATIONS.to_vec();
+        future_steps.push("CREATE TABLE restore_probe(id INTEGER);");
+        publish_upgraded_backup(&source, &target, &future_steps).unwrap();
         let upgraded = Connection::open(&target).unwrap();
         assert_eq!(
-            super::super::migrations::supported_version(&upgraded, 3).unwrap(),
-            3
+            super::super::migrations::supported_version(
+                &upgraded,
+                super::super::migrations::CURRENT + 1
+            )
+            .unwrap(),
+            super::super::migrations::CURRENT + 1
         );
         check(&upgraded).unwrap();
         let failed = dir.path().join("failed.db");
-        assert!(
-            publish_upgraded_backup(
-                &source,
-                &failed,
-                &[super::super::migrations::MIGRATIONS[0], "INVALID SQL"]
-            )
-            .is_err()
-        );
+        *future_steps.last_mut().unwrap() = "INVALID SQL";
+        assert!(publish_upgraded_backup(&source, &failed, &future_steps).is_err());
         assert!(!failed.exists());
         assert_eq!(fs::read(&backup).unwrap(), original);
         store.check_integrity().unwrap();

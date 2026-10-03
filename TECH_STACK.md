@@ -329,11 +329,15 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 
 ### 9.1 导航元数据与专题检索
 
-`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系；schema 6 增加 `record_pins`、`collections`、`collection_entries`、`conversation_collections` 及关系索引，使用原有事务和备份机制。元数据不修改 capture 文本或创建正文版本；专题编辑使用 revision 防止陈旧覆盖，成员增删和置顶设置幂等。原话与整理记忆各保留自己的稳定 record key。永久擦除触发关系清理，回收站状态只影响可见性。
+`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系。公开 schema 1 已包含导航表；schema 3 在保留发布迁移的前提下，追加专题回执和成员／记忆状态变化的 revision 触发器。`memory::agent_collections` 共用事务内元数据及关系规则，为内部 Agent 提供查找、详情、创建、编辑和成员批次操作。元数据不修改 capture 文本或创建正文版本；预期 revision 拒绝陈旧写入，重复成员设置不制造变化。永久擦除清理对应关系，回收站状态影响可见性。
 
 `LibraryQuery` 增加置顶、专题、排除专题和较早排序条件；列表仍分页限量。回顾每批三条，手动换组；不做全库客户端加载或定时模型请求。侧栏置顶与专题各最多 100 项，普通记忆库不受此限制。
 
 专题作为会话焦点独立持久化，附名称、说明、有界目录及相关成员；全局相关条件始终可读取，指定材料不构成检索权限。专题只是讨论焦点；Agent 新建不隐式分配成员，更新既有记忆保留成员关系。移除专题不删除会话或记忆，显示不可用且停止新增成员。资料库显式筛选与专题推荐仍按指定成员条件在 SQL 排名和限量前生效。快捷新讨论不隐式继承主窗口浏览范围。
+
+Agent 的 `list_collections` 返回有界元数据摘要，`read_collection` 提供说明和成员目录；记忆读取同时返回当前归属，`search_memories.collection_id` 可显式限定范围。新建记忆的 `initial_collections` 和新建专题的 `initial_memory_ids` 仅用于用户明确指定的初始关系；已有关系统一通过 `update_collection_members` 增量调整。每个工具或成员批次在一个事务中校验、写入、记录回执及幂等结果；整轮多工具执行不宣称为一个事务。
+
+专题 before/after 和成员差量独立保存在 `receipts.collection_changes`，不依赖聊天生命周期；纯成员变化不写正文版本。正文与专题混合撤销共用冲突检查和事务，校验后续名称、成员及记忆状态。模型接收紧凑执行回执，界面读取完整持久快照。请求预算包含实际工具目录，必要时释放可再次读取的上下文，并重新计算正文读取凭据；持久执行协议保持完整。外部 MCP 继续只暴露 `memory_capture` 和 `memory_search`。
 
 专题 AI 推荐由明确按钮启动一次查询规划，发送专题名称／说明和最多三条短节选；本地 FTS 查询排除已有成员，合并去重后返回最多八条真实记录供确认，不增加第二个验证模型、自动归类或外部工具。编辑、推荐和成员管理复用现有 Modal；Milkdown 仍按需加载，没有新增前端依赖。
 

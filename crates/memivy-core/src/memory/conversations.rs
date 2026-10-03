@@ -99,7 +99,7 @@ impl MemoryStore {
             super::agent_mutations::messages_manual_saves(&tx, &message_ids, manual_saves_offset)?;
         messages.into_iter().map(|m| {
             let manual_saves = manual_saves.remove(&m.id).unwrap_or_default();
-            Ok(serde_json::json!({"id":m.id,"logical_input_id":m.turn_id,"seq":m.seq,"role":m.role,"text":m.text,"status":m.status,"created_at_ms":m.created_at,"receipts":m.receipts,"manual_saves":manual_saves}))
+            Ok(serde_json::json!({"id":m.id,"logical_input_id":m.turn_id,"seq":m.seq,"role":m.role,"text":m.text,"status":m.status,"created_at_ms":m.created_at,"receipts":m.receipts.iter().map(super::agent_collections::agent_receipt_value).collect::<Vec<_>>(),"manual_saves":manual_saves}))
         }).collect()
     }
 

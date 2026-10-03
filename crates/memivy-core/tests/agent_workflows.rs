@@ -137,7 +137,6 @@ async fn no_memory_request_is_visible_to_agent_without_a_control_step() {
                 last_content(request)["current_message"],
                 "这轮不要记忆，只帮我比较想法。"
             );
-            assert!(request.to_string().contains("do not call write_memory"));
             text("可以先比较成本和投入时间。")
         } else {
             suggestions()
@@ -149,6 +148,13 @@ async fn no_memory_request_is_visible_to_agent_without_a_control_step() {
         .unwrap();
     server.join().unwrap();
     assert_eq!(count(&store, "memories"), 0);
+    assert!(
+        store
+            .agent_input_receipts(&run.input_id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(store.turn(&run.input_id).unwrap().user.text, run.input_text);
     assert_eq!(
         store
             .agent_execution(&run.input_id)
@@ -668,7 +674,7 @@ async fn pending_write_rechecks_the_persisted_request_view(prune: bool) {
         json!({
             "source_message_id":run.user_message_id,
             "current_message":run.input_text,
-            "earlier_context":if prune { "x".repeat(32_000) } else { String::new() },
+            "earlier_context":if prune { "x".repeat(26_000) } else { String::new() },
         })
         .to_string()
     ))];

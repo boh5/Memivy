@@ -51,6 +51,7 @@ fn generated(store: &MemoryStore, conversation: &str) -> bool {
 
 fn commit_memory(store: &MemoryStore, run: &AgentExecution) -> Receipt {
     let args = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "用户计划".into(),
         parts: vec![MemoryWritePart {

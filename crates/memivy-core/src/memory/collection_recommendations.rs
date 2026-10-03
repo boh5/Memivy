@@ -90,15 +90,18 @@ impl MemoryStore {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         records::head(&tx, memory, expected_version)?;
-        let valid: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM collections WHERE id=?1 AND revision=?2 AND archived=0)",
-            params![collection, revision],
-            |r| r.get(0),
-        )?;
-        if !valid {
-            return Err(DataError::Conflict);
+        navigation::active_collection(&tx, collection)?;
+        if tx.prepare("SELECT 1 FROM collection_entries WHERE collection_id=?1 AND kind='memory' AND record_id=?2")?.exists(params![collection,memory])? {
+            return Ok(());
         }
-        tx.execute("INSERT OR IGNORE INTO collection_entries(collection_id,kind,record_id) VALUES(?1,'memory',?2)", params![collection, memory])?;
+        agent_collections::require_collection_revision(
+            &tx,
+            &CollectionRef {
+                id: collection.into(),
+                revision,
+            },
+        )?;
+        agent_collections::set_collection_member(&tx, collection, memory, true)?;
         tx.commit()?;
         Ok(())
     }
