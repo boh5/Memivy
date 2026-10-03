@@ -122,12 +122,29 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     let (m, _) = memory(&s, "面试原话");
     let c = collection(&s, "面试");
     let other = collection(&s, "产品");
+    let created_revision = s.read_agent_collection(&c).unwrap().revision;
+    s.save_collection(&c, "面试", "", None).unwrap();
+    assert_eq!(s.collections().unwrap().len(), 2);
+    assert_eq!(
+        s.read_agent_collection(&c).unwrap().revision,
+        created_revision
+    );
     s.collect_record(&c, &m, true).unwrap();
     s.collect_record(&other, &m, true).unwrap();
     assert_eq!(s.record_navigation(&m).unwrap().collections.len(), 2);
     let revision = s.read_agent_collection(&c).unwrap().revision;
+    s.save_collection(&c, "面试", "", Some(created_revision))
+        .unwrap();
+    assert_eq!(s.read_agent_collection(&c).unwrap().revision, revision);
     s.save_collection(&c, "面试准备", "关注技术问答", Some(revision))
         .unwrap();
+    let renamed_revision = s.read_agent_collection(&c).unwrap().revision;
+    s.save_collection(&c, "面试准备", "关注技术问答", Some(revision))
+        .unwrap();
+    assert_eq!(
+        s.read_agent_collection(&c).unwrap().revision,
+        renamed_revision
+    );
     assert!(matches!(
         s.save_collection(&c, "陈旧修改", "", Some(revision)),
         Err(DataError::Conflict)
@@ -143,6 +160,10 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     assert!(s.create_conversation(&topic, "Discussion").is_err());
     let renamed_revision = s.read_agent_collection(&c).unwrap().revision;
     s.archive_collection(&c, true, renamed_revision).unwrap();
+    assert_eq!(
+        s.save_collection(&c, "面试准备", "关注技术问答", Some(renamed_revision)),
+        Err(DataError::Unavailable)
+    );
     assert!(
         s.search(&SearchRequest {
             queries: vec![MemoryQuery::text("面试")],

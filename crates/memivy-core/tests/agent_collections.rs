@@ -462,6 +462,23 @@ fn stale_revision_detects_manual_membership_changes_and_undo_preserves_later_edi
             true,
         )
         .unwrap();
+    let current_revision = revision(&store, &c);
+    let receipt_count = count(&store, "receipts");
+    let repeated = stage(&store, &run, "update_collection", &update);
+    let unchanged = store
+        .update_agent_collection(
+            &run.input_id,
+            &run.attempt_id,
+            &repeated.operation_id,
+            &update,
+        )
+        .unwrap();
+    assert!(unchanged.receipt.is_none());
+    let result = unchanged.result.unwrap();
+    assert_eq!(result["changed"], false);
+    assert_eq!(result["collections"][0]["revision"], current_revision);
+    assert_eq!(revision(&store, &c), current_revision);
+    assert_eq!(count(&store, "receipts"), receipt_count);
     let undone = store.undo_agent_input(&id(), &run.input_id).unwrap();
     assert_eq!(undone.collection_conflicts, vec![c.clone()]);
     let current = store.read_agent_collection(&c).unwrap();

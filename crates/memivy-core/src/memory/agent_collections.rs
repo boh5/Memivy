@@ -147,11 +147,11 @@ pub(super) fn save_collection_metadata(
         if old.archived {
             return Err(DataError::Unavailable);
         }
-        if expected != Some(old.revision) {
-            return Err(DataError::Conflict);
-        }
         if old.name == name.trim() && old.description == description.trim() {
             return Ok(());
+        }
+        if expected != Some(old.revision) {
+            return Err(DataError::Conflict);
         }
     } else if expected.is_some() {
         return Err(DataError::Unavailable);
