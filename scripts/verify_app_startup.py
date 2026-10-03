@@ -72,7 +72,7 @@ def check(app):
                         try:
                             with sqlite3.connect(database.as_uri()+'?mode=ro', timeout=1) as connection:
                                 initialized = (connection.execute('PRAGMA application_id').fetchone()[0] == 0x4D454D59
-                                               and connection.execute('PRAGMA user_version').fetchone()[0] == 1)
+                                               and connection.execute('PRAGMA user_version').fetchone()[0] == 2)
                         except sqlite3.Error:
                             pass
                     visible = subprocess.run([str(window_probe), str(process.pid)], timeout=5).returncode == 0
@@ -81,7 +81,7 @@ def check(app):
                             ready_since = time.monotonic()
                         if time.monotonic() - ready_since >= 5:
                             return {'status': 'passed', 'version': info['CFBundleShortVersionString'],
-                                    'checks': ['packaged main process', 'isolated schema-1 library',
+                                    'checks': ['packaged main process', 'isolated schema-2 library',
                                                'visible main window stable for five seconds']}
                     else:
                         ready_since = None

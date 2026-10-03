@@ -803,7 +803,7 @@ fn database_reopens_and_rejects_unrelated_and_future_schemas() {
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        3
+        2
     );
     let application_id: i64 = db
         .pragma_query_value(None, "application_id", |r| r.get(0))

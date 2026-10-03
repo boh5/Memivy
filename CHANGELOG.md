@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.5
+
+- Discuss topics with the Agent: find, read, create and edit collections, and add, remove or move explicitly selected memories between them.
+- Review and undo collection changes alongside memory edits. Repeating an already-saved collection name or description now succeeds safely.
+- Let the Agent retrieve relevant memories when needed, with multiple search queries, optional collection scope, and evidence-based memory edits and merges.
+- Keep collection membership under your control: choosing a topic focuses the discussion without automatically filing memories or excluding relevant global information.
+- Improve the update panel and release packaging, and upgrade the development toolchain to TypeScript 7.
+- Upgrade schema 1 libraries directly to schema 2, with a private backup before migration. Preserve memories, original inputs, version history, drafts and existing collection memberships. Returning to an older app requires a compatible backup.
+- MCP integration change: `memory_search` now accepts a `queries` array of objects with `text` and `keywords` instead of a single `query`. Clients that cache tool definitions should refresh them.
+
 ## 0.1.4
 
 - Version-only release for verifying in-app updates from 0.1.3.

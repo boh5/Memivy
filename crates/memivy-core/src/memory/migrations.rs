@@ -5,10 +5,9 @@ use std::path::Path;
 
 // Append include_str! entries for schema 2 onward. Never edit a shipped migration.
 // Scripts contain only transactional SQL; this module owns version and commit.
-pub(super) const MIGRATIONS: &[&str] = &[
-    include_str!("../../../../migrations/memory/002_agent_directed.sql"),
-    include_str!("../../../../migrations/memory/003_collection_agent.sql"),
-];
+pub(super) const MIGRATIONS: &[&str] = &[include_str!(
+    "../../../../migrations/memory/002_agent_directed.sql"
+)];
 pub(super) const CURRENT: i64 = 1 + MIGRATIONS.len() as i64;
 
 pub(super) fn supported_version(db: &Connection, target: i64) -> Result<i64> {

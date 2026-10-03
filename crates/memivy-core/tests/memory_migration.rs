@@ -122,7 +122,7 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            2
         );
         assert_eq!(store.capture_by_id(&capture).unwrap().text, original);
         assert_eq!(store.capture_by_id(&capture).unwrap().origin, origin);
@@ -137,6 +137,15 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
         );
         assert_eq!(store.receipt(&receipts[1]).unwrap().status, "undone");
         assert_eq!(store.receipt(&receipts[2]).unwrap().action, "undo");
+        for receipt in &receipts {
+            assert!(
+                store
+                    .receipt(receipt)
+                    .unwrap()
+                    .collection_changes
+                    .is_empty()
+            );
+        }
         assert_eq!(
             store.receipt_changes(&receipts[2]).unwrap()[0].after_version,
             versions[2]
@@ -187,7 +196,12 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
         store
             .save_collection(&later_topic, "Later topic", "", None)
             .unwrap();
+        let revision = store.read_agent_collection(&later_topic).unwrap().revision;
         store.collect_record(&later_topic, &key, true).unwrap();
+        assert_eq!(
+            store.read_agent_collection(&later_topic).unwrap().revision,
+            revision + 1
+        );
         if grouped {
             assert_eq!(
                 store.undo_agent_input(&id(), &input).unwrap().conflicts,
@@ -222,6 +236,14 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
             .map(|entry| entry.unwrap().path())
             .collect::<Vec<_>>();
         assert_eq!(backups.len(), 1);
+        assert!(
+            backups[0]
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("before-migration-1-to-2-")
+        );
         let backup = Connection::open(&backups[0]).unwrap();
         assert_eq!(
             backup
