@@ -355,6 +355,7 @@ fn conversation_text_stays_outside_library_and_project_filter_checks_all_sources
         )
         .unwrap();
     let args = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::Existing {
             memory_id: key(&r).id.clone(),
             expected_version: r.after_version.unwrap(),

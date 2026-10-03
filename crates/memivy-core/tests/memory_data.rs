@@ -315,6 +315,7 @@ fn shared_sources_survive_purging_another_memory_and_its_history() {
         )
         .unwrap();
     let args = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "Shared source".into(),
         parts: vec![MemoryWritePart {
@@ -802,7 +803,7 @@ fn database_reopens_and_rejects_unrelated_and_future_schemas() {
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
     let application_id: i64 = db
         .pragma_query_value(None, "application_id", |r| r.get(0))

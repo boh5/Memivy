@@ -1,7 +1,7 @@
 //! Small, explicit navigation metadata. Originals and memory versions are untouched.
 use super::{db::*, *};
 use crate::model::{self, ModelConfig};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -64,45 +64,9 @@ impl MemoryStore {
         description: &str,
         expected: Option<i64>,
     ) -> Result<()> {
-        valid_id(id)?;
-        valid_text(name.trim(), 240)?;
-        if description.len() > 2400 {
-            return Err(DataError::Invalid);
-        }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let old: Option<(String, String, i64, bool)> = tx
-            .query_row(
-                "SELECT name,description,revision,archived FROM collections WHERE id=?",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()?;
-        if let Some((n, d, revision, archived)) = old {
-            if archived {
-                return Err(DataError::Unavailable);
-            }
-            if n == name.trim() && d == description.trim() {
-                return Ok(());
-            }
-            if expected != Some(revision) {
-                return Err(DataError::Conflict);
-            }
-        } else if expected.is_some() {
-            return Err(DataError::Unavailable);
-        } else if tx.query_row(
-            "SELECT count(*) FROM collections WHERE archived=0",
-            [],
-            |r| r.get::<_, i64>(0),
-        )? >= 100
-        {
-            return Err(DataError::NavigationLimit);
-        }
-        let duplicate:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM collections WHERE name=?1 COLLATE NOCASE AND id!=?2 AND archived=0)",params![name.trim(),id],|r|r.get(0))?;
-        if duplicate {
-            return Err(DataError::CollectionName);
-        }
-        tx.execute("INSERT INTO collections(id,name,description,created_at) VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,revision=collections.revision+1",params![id,name.trim(),description.trim(),now()?])?;
+        agent_collections::save_collection_metadata(&tx, id, name, description, expected)?;
         tx.commit()?;
         Ok(())
     }
@@ -182,11 +146,7 @@ impl MemoryStore {
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         active_collection(&tx, collection)?;
         active_record(&tx, key)?;
-        if included {
-            tx.execute("INSERT OR IGNORE INTO collection_entries(collection_id,kind,record_id) VALUES(?1,?2,?3)",params![collection,key.kind,key.id])?;
-        } else {
-            tx.execute("DELETE FROM collection_entries WHERE collection_id=?1 AND kind=?2 AND record_id=?3",params![collection,key.kind,key.id])?;
-        }
+        agent_collections::set_collection_member(&tx, collection, &key.id, included)?;
         tx.commit()?;
         Ok(())
     }

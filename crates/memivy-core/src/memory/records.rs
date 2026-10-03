@@ -1,10 +1,12 @@
 use super::{db::*, *};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
-pub(super) const RECEIPT_COLUMNS: &str =
-    "request_id,action,capture_id,memory_id,before_version,after_version,status,reason";
+pub(super) const RECEIPT_COLUMNS: &str = "request_id,action,capture_id,memory_id,before_version,after_version,status,reason,collection_changes";
 pub(super) fn read_receipt(r: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
     Ok(Receipt {
+        collection_changes: serde_json::from_str(&r.get::<_, String>(8)?).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         reason: r.get(7)?,
         request_id: r.get(0)?,
         action: r.get(1)?,
@@ -37,8 +39,12 @@ pub(super) fn replay(db: &Connection, request: &str, hash: &[u8]) -> Result<Opti
     Ok(None)
 }
 pub(super) fn save_receipt(db: &Connection, receipt: &Receipt, hash: &[u8]) -> Result<()> {
-    db.execute("INSERT INTO receipts(request_id,fingerprint,action,capture_id,memory_id,before_version,after_version,status,created_at,reason) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![receipt.request_id,hash,receipt.action,receipt.capture_id,receipt.memory_id,receipt.before_version,receipt.after_version,receipt.status,now()?,receipt.reason])?;
-    if receipt.status == "applied" && receipt.action != "undo" {
+    db.execute("INSERT INTO receipts(request_id,fingerprint,action,capture_id,memory_id,before_version,after_version,status,created_at,reason,collection_changes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", params![receipt.request_id,hash,receipt.action,receipt.capture_id,receipt.memory_id,receipt.before_version,receipt.after_version,receipt.status,now()?,receipt.reason,encode(&receipt.collection_changes)?])?;
+    if receipt.status == "applied"
+        && receipt.action != "undo"
+        && receipt.memory_id.is_some()
+        && receipt.after_version.is_some()
+    {
         save_changes(
             db,
             &receipt.request_id,
@@ -258,15 +264,20 @@ pub(super) fn restore_navigation(
     memory: &str,
     value: &NavigationSnapshot,
 ) -> Result<()> {
-    db.execute(
-        "DELETE FROM collection_entries WHERE kind='memory' AND record_id=?",
-        [memory],
-    )?;
-    for collection in &value.collections {
-        db.execute(
-            "INSERT INTO collection_entries(collection_id,kind,record_id) VALUES(?1,'memory',?2)",
-            params![collection, memory],
-        )?;
+    let current = navigation_snapshot(db, memory)?;
+    for collection in current
+        .collections
+        .iter()
+        .filter(|c| !value.collections.contains(c))
+    {
+        agent_collections::set_collection_member(db, collection, memory, false)?;
+    }
+    for collection in value
+        .collections
+        .iter()
+        .filter(|c| !current.collections.contains(c))
+    {
+        agent_collections::set_collection_member(db, collection, memory, true)?;
     }
     if let Some(pinned) = value.pinned {
         db.execute(
@@ -486,6 +497,7 @@ impl MemoryStore {
         save_receipt(
             &tx,
             &Receipt {
+                collection_changes: vec![],
                 reason: None,
                 request_id: r.request_id.clone(),
                 action: "capture".into(),
@@ -520,6 +532,7 @@ impl MemoryStore {
         v.created_at = now()?;
         write_version(&tx, &v)?;
         let receipt = Receipt {
+            collection_changes: vec![],
             reason: None,
             request_id: r.request_id.clone(),
             action: "edit".into(),
@@ -608,6 +621,7 @@ impl MemoryStore {
         v.created_at = now()?;
         write_version(&tx, &v)?;
         let receipt = Receipt {
+            collection_changes: vec![],
             reason: None,
             request_id: request.into(),
             action: "restore".into(),
@@ -640,7 +654,43 @@ impl MemoryStore {
             [original_request],
             read_receipt,
         )?;
-        let inverse = undo_inner(&tx, &original)?;
+        let restoring_active = changes(&tx, original_request)?
+            .into_iter()
+            .filter(|change| change.before_state == "active")
+            .map(|change| change.memory_id)
+            .collect();
+        if original.status != "applied"
+            || !agent_collections::collection_undo_conflicts(
+                &tx,
+                &original.collection_changes,
+                &restoring_active,
+            )?
+            .is_empty()
+        {
+            return Err(DataError::Conflict);
+        }
+        let collections_before = agent_collections::collection_before(
+            &tx,
+            original
+                .collection_changes
+                .iter()
+                .map(|change| change.collection_id.clone()),
+        )?;
+        let mut inverse = if original.memory_id.is_some() {
+            undo_inner(&tx, &original)?
+        } else if !original.collection_changes.is_empty() {
+            tx.execute(
+                "UPDATE receipts SET status='undone' WHERE request_id=?",
+                [&original.request_id],
+            )?;
+            Vec::new()
+        } else {
+            return Err(DataError::Conflict);
+        };
+        agent_collections::undo_collection_effects(&tx, &original.collection_changes)?;
+        for change in &mut inverse {
+            change.navigation_after = Some(navigation_snapshot(&tx, &change.memory_id)?);
+        }
         // Undoing a correction moves the capture back to its former memory.
         // Point the receipt there, with its new head and removal baseline, so
         // the user can correct that assignment again without stale receipts.
@@ -651,21 +701,20 @@ impl MemoryStore {
                 })
             })
             .flatten();
-        let main = restored
-            .or_else(|| {
-                inverse
-                    .iter()
-                    .find(|c| Some(&c.memory_id) == original.memory_id.as_ref())
-            })
-            .ok_or(DataError::Integrity)?;
+        let main = restored.or_else(|| {
+            inverse
+                .iter()
+                .find(|c| Some(&c.memory_id) == original.memory_id.as_ref())
+        });
         let receipt = Receipt {
+            collection_changes: agent_collections::collection_effects(&tx, &collections_before)?,
             reason: None,
             request_id: request.into(),
             action: "undo".into(),
             capture_id: original.capture_id,
-            memory_id: Some(main.memory_id.clone()),
-            before_version: main.before_version.clone(),
-            after_version: Some(main.after_version.clone()),
+            memory_id: main.map(|change| change.memory_id.clone()),
+            before_version: main.and_then(|change| change.before_version.clone()),
+            after_version: main.map(|change| change.after_version.clone()),
             status: "applied".into(),
         };
         save_receipt(&tx, &receipt, &hash)?;
@@ -691,14 +740,14 @@ impl MemoryStore {
         key.validate()?;
         let db = self.connection()?;
         let sql = format!(
-            "SELECT {RECEIPT_COLUMNS},logical_input_id FROM receipts WHERE action NOT IN ('capture','undo') AND request_id IN (SELECT c.request_id FROM receipt_changes c JOIN memories m ON m.id=c.memory_id WHERE m.id=? AND m.state IN ('active','merged')) ORDER BY rowid DESC LIMIT 20"
+            "SELECT {RECEIPT_COLUMNS},logical_input_id FROM receipts r WHERE action NOT IN ('capture','undo') AND EXISTS(SELECT 1 FROM memories WHERE id=?1 AND state IN ('active','merged')) AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) ORDER BY rowid DESC LIMIT 20"
         );
         Ok(db
             .prepare(&sql)?
             .query_map([&key.id], |row| {
                 Ok(MemoryReceipt {
                     receipt: read_receipt(row)?,
-                    logical_input_id: row.get(8)?,
+                    logical_input_id: row.get(9)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)

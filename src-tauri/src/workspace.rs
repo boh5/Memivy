@@ -454,6 +454,17 @@ async fn library_agent_changes(
     blocking(move || store.memory_agent_changes(&memory_id)).await
 }
 #[tauri::command]
+async fn collection_agent_changes(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    collection_id: String,
+) -> HostResult<Vec<AgentChangeGroup>> {
+    let _update_work = crate::updates::work()?;
+    require(&window)?;
+    let store = state.store.clone();
+    blocking(move || store.collection_agent_changes(&collection_id)).await
+}
+#[tauri::command]
 async fn discussion_undo(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
@@ -1150,6 +1161,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::cleanup::cleanup_save,
             library_changes,
             library_agent_changes,
+            collection_agent_changes,
             library_query,
             activity_summary,
             activity_records,

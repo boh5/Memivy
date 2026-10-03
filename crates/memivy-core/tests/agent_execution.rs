@@ -55,6 +55,7 @@ fn write(
     body: &str,
 ) -> AgentOperation {
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination,
         title: "Plan".into(),
         parts: vec![sourced_part(body, &run.user_message_id, &run.input_text)],
@@ -128,6 +129,7 @@ fn commit_without_delivery_replays_result_and_receipt_in_new_attempt() {
     let (_root, store, conversation) = setup();
     let run = begin(&store, &conversation, "我决定先验证收费，还没有上线");
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "收费".into(),
         parts: vec![sourced_part(
@@ -186,6 +188,7 @@ fn stale_attempt_cannot_write_complete_read_results_or_append_text() {
     let (_root, store, conversation) = setup();
     let old = begin(&store, &conversation, "我有一个想法");
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "Idea".into(),
         parts: vec![sourced_part(
@@ -488,6 +491,7 @@ fn failure_before_commit_preserves_prior_success_without_archiving_a_second_sour
     let run = begin(&store, &conversation, "增加想法并调整目标");
     write(&store, &run, Destination::New, "成功的新想法");
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::Existing {
             memory_id: target.memory_id.clone(),
             expected_version: id(),
@@ -541,6 +545,7 @@ fn workspace_draft_protects_agent_update_and_whole_group_undo() {
     )
     .unwrap();
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::Existing {
             memory_id: target.memory_id.clone(),
             expected_version: target.version_id,
@@ -636,6 +641,7 @@ fn source_ids_cannot_inject_another_conversation_or_ai_text() {
     let run = begin(&store, &conversation, "当前原话");
     for source in [foreign.user_message_id, run.assistant_message_id.clone()] {
         let request = MemoryWriteArgs {
+            initial_collections: vec![],
             destination: Destination::New,
             title: "来源".into(),
             parts: vec![sourced_part("不能伪造", &source, "当前原话")],
@@ -682,6 +688,7 @@ fn item_sources_archive_early_conditions_and_tentative_ideas() {
         "更正：预算3800元，其他条件不变。请记下这些条件和备选思路。",
     );
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "访谈工具约束与备选思路".into(),
         parts: vec![
@@ -759,6 +766,7 @@ fn unmatched_quotes_or_unattributed_new_parts_fail_before_any_source_is_archived
         sourced_part("预算3800元。", &run.user_message_id, " "),
     ] {
         let request = MemoryWriteArgs {
+            initial_collections: vec![],
             destination: Destination::New,
             title: "约束".into(),
             parts: vec![valid.clone(), invalid],
@@ -799,6 +807,7 @@ fn inherited_parts_preserve_complete_lines_and_target_version_sources() {
         expected_version: target.version_id.clone(),
     };
     let mut request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination,
         title: "访谈工具".into(),
         parts: vec![
@@ -964,6 +973,7 @@ fn undo_fences_an_inflight_producer_and_never_retries_its_reversed_writes() {
     let run = begin(&store, &conversation, "记下这个想法");
     write(&store, &run, Destination::New, "Idea");
     let request = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "第二条".into(),
         parts: vec![sourced_part(
@@ -1181,6 +1191,7 @@ fn late_archiving_preserves_when_the_user_originally_expressed_the_source() {
         .unwrap();
     let current = begin(&store, &conversation, "把刚才提到的原因记下来");
     let args = MemoryWriteArgs {
+        initial_collections: vec![],
         destination: Destination::New,
         title: "收费计划".into(),
         parts: vec![sourced_part(

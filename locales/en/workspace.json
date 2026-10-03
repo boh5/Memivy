@@ -481,7 +481,11 @@
     "discussion": "Discussion",
     "discussionHelp": "Connect your memories and keep thinking.",
     "discussionStart": "Share an idea or ask a question. Relevant memories join the discussion.",
-    "preparing": "Preparing context…"
+    "preparing": "Preparing context…",
+    "findingCollections": "Finding collections…",
+    "readingCollection": "Reading collection details…",
+    "updatingCollections": "Updating your collections…",
+    "undoingChanges": "Undoing changes…"
   },
   "activity": {
     "title": "Activity",
@@ -524,5 +528,29 @@
     "why": "Why {{name}}?",
     "dismiss": "Dismiss",
     "empty": "No collection suggestions to add."
+  },
+  "collectionChanges": {
+    "updatedCollections_one": "Updated {{count}} collection",
+    "updatedCollections_other": "Updated {{count}} collections",
+    "created": "Created",
+    "changeTitle": "Changes from this turn",
+    "addedMembers_one": "Added {{count}} memory",
+    "addedMembers_other": "Added {{count}} memories",
+    "removedMembers_one": "Removed {{count}} memory",
+    "removedMembers_other": "Removed {{count}} memories",
+    "loadingMember": "Loading memory {{count}}…",
+    "unavailableMember": "This memory is no longer available.",
+    "noDescription": "No description",
+    "undoConflict": "These memories or collections changed later. Nothing was undone:",
+    "changedCollection": "A collection with later changes",
+    "notApplied": "Changes were not applied",
+    "partial": "This turn stopped before finishing. The changes shown here were saved.",
+    "historyTitle": "Change history",
+    "historyFor": "Changes to “{{name}}”",
+    "historyHelp": "Changes made in discussions stay here even after a discussion is deleted. Undo reverses the whole turn, including any memory changes.",
+    "loading": "Loading change history…",
+    "empty": "No changes from discussions yet.",
+    "memberReadFailed": "This memory could not be read. Try again.",
+    "undoneHelp": "These changes were undone. The details below show the original changes."
   }
 }

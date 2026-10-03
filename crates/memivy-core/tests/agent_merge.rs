@@ -158,6 +158,7 @@ fn share_original(store: &MemoryStore, original: &str, destination: Destination)
         )
         .unwrap();
     let args = MemoryWriteArgs {
+        initial_collections: vec![],
         destination,
         title: "Shared original".into(),
         parts: vec![MemoryWritePart {

@@ -86,7 +86,16 @@ export type Draft = {
   context?: Source[];
   origin?: Origin;
 };
+export type CollectionSnapshot = { name: string; description: string; revision: number; archived: boolean };
+export type CollectionChange = {
+  collection_id: string;
+  before: CollectionSnapshot | null;
+  after: CollectionSnapshot;
+  added_memory_ids: string[];
+  removed_memory_ids: string[];
+};
 export type Receipt = { reason?: string | null;
+  collection_changes?: CollectionChange[];
   status: "applied" | "needs_review" | "undone";
   request_id: string;
   capture_id: string | null;
@@ -96,6 +105,8 @@ export type Receipt = { reason?: string | null;
   action: string;
 };
 export type MemoryReceipt = Receipt & { logical_input_id: string | null };
+export type AgentChangeGroup = { input_id: string; receipts: Receipt[] };
+export type AgentUndoResult = { receipt: Receipt | null; conflicts: string[]; collection_conflicts?: string[] };
 export type Topic = { id: string; title: string; updated_at: number; collection_id?: string | null };
 export type Collection = { id: string; name: string; description: string; revision: number; count: number };
 export type RecordNavigation = { pinned: boolean; collections: string[] };
@@ -191,6 +202,7 @@ export async function call<T>(
   if (
     name === "memory_related" ||
     name === "library_agent_changes" ||
+    name === "collection_agent_changes" ||
     name === "library_topics" ||
     name === "discussion_messages"
   )

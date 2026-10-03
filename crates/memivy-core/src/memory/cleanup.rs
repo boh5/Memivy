@@ -107,6 +107,7 @@ impl MemoryStore {
         version.created_at = now()?;
         write_version(&tx, &version)?;
         let receipt = Receipt {
+            collection_changes: vec![],
             reason: None,
             request_id: request.request_id.clone(),
             action: "edit".into(),

@@ -93,6 +93,7 @@ fn one_discussion_input_split_into_two_memories_is_one_historical_recording() {
     .unwrap();
     for title in ["First idea", "Second idea"] {
         let write = MemoryWriteArgs {
+            initial_collections: vec![],
             destination: Destination::New,
             title: title.into(),
             parts: vec![MemoryWritePart {

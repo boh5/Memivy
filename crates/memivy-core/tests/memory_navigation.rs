@@ -125,10 +125,11 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
     s.collect_record(&c, &m, true).unwrap();
     s.collect_record(&other, &m, true).unwrap();
     assert_eq!(s.record_navigation(&m).unwrap().collections.len(), 2);
-    s.save_collection(&c, "面试准备", "关注技术问答", Some(1))
+    let revision = s.read_agent_collection(&c).unwrap().revision;
+    s.save_collection(&c, "面试准备", "关注技术问答", Some(revision))
         .unwrap();
     assert!(matches!(
-        s.save_collection(&c, "陈旧修改", "", Some(1)),
+        s.save_collection(&c, "陈旧修改", "", Some(revision)),
         Err(DataError::Conflict)
     ));
     assert!(s.save_collection(&id(), "面试准备", "", None).is_err());
@@ -140,7 +141,8 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
         Some(c.as_str())
     );
     assert!(s.create_conversation(&topic, "Discussion").is_err());
-    s.archive_collection(&c, true, 2).unwrap();
+    let renamed_revision = s.read_agent_collection(&c).unwrap().revision;
+    s.archive_collection(&c, true, renamed_revision).unwrap();
     assert!(
         s.search(&SearchRequest {
             queries: vec![MemoryQuery::text("面试")],
@@ -153,7 +155,8 @@ fn collection_metadata_conflicts_and_removal_do_not_delete_records_or_broaden_ch
         .is_err()
     );
     assert_eq!(s.library_detail(&m).unwrap().body, "面试原话");
-    s.archive_collection(&c, false, 3).unwrap();
+    s.archive_collection(&c, false, renamed_revision + 1)
+        .unwrap();
     assert_eq!(
         s.collections()
             .unwrap()
@@ -437,7 +440,13 @@ fn collection_confirmation_is_explicit_idempotent_and_rejects_stale_targets() {
     );
     s.collect_record(&c, &key, false).unwrap();
     assert_eq!(s.collections().unwrap()[0].count, 0);
-    s.save_collection(&c, "新方向", "", Some(revision)).unwrap();
+    s.save_collection(
+        &c,
+        "新方向",
+        "",
+        Some(s.read_agent_collection(&c).unwrap().revision),
+    )
+    .unwrap();
     assert!(
         s.accept_collection_recommendation(&raw.id, &current.id, &c, revision)
             .is_err()
@@ -565,7 +574,8 @@ fn related_memories_keep_collection_discussions_within_their_scope() {
         .unwrap()
         .is_empty()
     );
-    s.archive_collection(&c, true, 1).unwrap();
+    s.archive_collection(&c, true, s.read_agent_collection(&c).unwrap().revision)
+        .unwrap();
     assert!(
         s.related_memories_in_collection(
             &seed.id,

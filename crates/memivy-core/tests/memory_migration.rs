@@ -122,7 +122,7 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
         assert_eq!(store.capture_by_id(&capture).unwrap().text, original);
         assert_eq!(store.capture_by_id(&capture).unwrap().origin, origin);

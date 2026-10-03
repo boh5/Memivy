@@ -27,7 +27,8 @@ export function dependencies(name: string, args: Record<string, unknown> = {}): 
       return [{domain:"discussion",entity:String(args.topicId ?? args.id ?? "*")}];
     case "navigation_collections": return [{domain:"collection"},{domain:"memory"}];
     case "navigation_record": return [{domain:"navigation",entity:record},{domain:"collection"},{domain:"memory",entity:record}];
-    case "memory_receipts": return [{domain:"memory",entity:record}];
+    case "memory_receipts": return [{domain:"memory",entity:record},{domain:"collection"}];
+    case "collection_agent_changes": return [{domain:"collection",entity:String(args.collectionId)},{domain:"memory"}];
     case "memory_related": return [{domain:"memory"},{domain:"collection"},{domain:"navigation"}];
     case "workspace_settings": return [{domain:"settings"}];
     default: return undefined;

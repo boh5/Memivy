@@ -578,7 +578,12 @@ impl MemoryStore {
                 .query_map([input], read_receipt)?
                 .collect::<rusqlite::Result<_>>()?;
             message["memory_changes_undone"] = json!(receipts.iter().any(|r| r.status == "undone"));
-            message["receipts"] = json!(receipts);
+            message["receipts"] = json!(
+                receipts
+                    .iter()
+                    .map(super::agent_collections::agent_receipt_value)
+                    .collect::<Vec<_>>()
+            );
             message["manual_saves"] = json!(
                 manual_saves
                     .remove(message["id"].as_str().ok_or(DataError::Integrity)?)

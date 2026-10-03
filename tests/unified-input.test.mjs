@@ -125,7 +125,9 @@ test('group undo shows conflicts without claiming success or changing receipts',
  const view=f.mount(f.load('src/workspace/Discussion.tsx').default,props(f));await f.settle();
  const node=f.find(view,n=>typeof n.type==='function'&&n.type.name==='MemoryChanges'),group=f.mount(node.type,node.props);await f.settle();
  f.find(group,n=>n.type==='button'&&f.text(n)==="Undo this turn").props.onClick();await f.settle();
- assert(f.text(group.tree).includes("Nothing was undone"));assert(f.text(group.tree).includes("Updated 2 memories"));
+ const Conflict=f.load('src/workspace/MemoryChanges.tsx').UndoConflicts;
+ const conflictNode=f.find(group,n=>n.type===Conflict),conflict=f.mount(Conflict,conflictNode.props);await f.settle();
+ assert(f.text(conflict.tree).includes("Nothing was undone"));assert(f.text(group.tree).includes("Updated 2 memories"));
  assert.equal(f.calls.find(c=>c.name==='discussion_undo').args.inputId,'logical-input');
 });
 test('memory sources expose a whole input receipt group after its conversation is deleted',async t=>{

@@ -20,6 +20,7 @@ import SettingsPanel from "./Settings";
 import Discussion from "./Discussion";
 import type { InputSubmission } from "./CaptureForm";
 import CollectionEditor from "./CollectionEditor";
+import { CollectionChangeHistory } from "./MemoryChanges";
 import CollectionSuggestions from "./CollectionSuggestions";
 import { Modal, MoreMenu } from "./components";
 import LanguageRecovery from "./LanguageRecovery";
@@ -41,6 +42,7 @@ export default function App() {
   const [collectionEditor, setCollectionEditor] = useState<Collection | "new" | null>(null);
   const [suggestions, setSuggestions] = useState<Collection | null>(null), [archiveConfirm, setArchiveConfirm] = useState<Collection | null>(null);
   const [collectionBusy, setCollectionBusy] = useState(false);
+  const [collectionHistory, setCollectionHistory] = useState<Collection | null>(null);
   const collectionLock = useRef(false);
   const [page, setPage] = useState<WorkspacePage>("library");
   const [selected, setSelected] = useState<Key | null>(null);
@@ -248,7 +250,7 @@ export default function App() {
         <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1>{collection.description && <p>{collection.description}</p>}</div>
         <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) {setSettingsInitialPage("ai"); setSettingsOpen(true);} else setSuggestions(collection); }}><Icon name="spark" size={14} />{t("app.recommend")}</button>
           <button onClick={showLibrary}>{t("app.chooseMemories")}</button>
-          <MoreMenu><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
+          <MoreMenu><button onClick={() => setCollectionHistory(collection)}>{t("collectionChanges.historyTitle")}</button><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
         </div>
       </section>}
       <Toast />
@@ -281,6 +283,9 @@ export default function App() {
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor}
       onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} onClose={() => setCollectionEditor(null)} />}
+    {collectionHistory && <Modal title={t("collectionChanges.historyFor", { name: collections.find(collection => collection.id === collectionHistory.id)?.name ?? collectionHistory.name })} onClose={() => setCollectionHistory(null)}>
+      <CollectionChangeHistory key={collectionHistory.id} collectionId={collectionHistory.id} onOpenRecord={key => { setCollectionHistory(null); openRecord(key); }} onRefresh={refresh} />
+    </Modal>}
     {suggestions && <CollectionSuggestions collection={suggestions} onChanged={refresh} onClose={() => setSuggestions(null)} />}
     {archiveConfirm && <Modal title={t("app.removeCollectionTitle")} onClose={() => { if (!collectionBusy) setArchiveConfirm(null); }}>
       <p>{t("app.removeCollectionBody", { name: archiveConfirm.name })}</p>
