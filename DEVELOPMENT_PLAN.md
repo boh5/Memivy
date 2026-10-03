@@ -1439,3 +1439,11 @@ No UI QA, native build or app launch was performed for this review. Verification
 - Codex 审查发现共享专题保存逻辑抽取时改变了校验顺序：操作已保存但响应丢失后，相同名称／说明携带旧 revision 重试会持续冲突。恢复先判断目标内容一致、再检查实际修改 revision 的顺序；参数校验及已归档拒绝仍在前面，真正的陈旧修改继续拒绝。没有新增数据库迁移或修改提示词。
 - 增强两项既有测试：覆盖新建／改名成功后的原参数重试、成员变更后元数据未变、归档对象拒绝，以及 Agent no-op 返回当前 revision、没有新回执或 revision 增长、后续成员变更仍阻止撤销。两项测试先在旧实现上因 Conflict 失败，再验证修复；28 项专题和 9 项导航测试通过，1 项原有性能检查按设置忽略。
 - 独立复审无阻塞发现，格式、workspace all-target Clippy 及 whitespace 检查通过；保留失败及成功日志于 `research/pr8-review-fix-20261003/`。本轮修复确定性的存储重试行为，未更换模型或重复模型采样，未重跑原生界面验收。
+
+## 未发布迁移合并为 schema 2（2026-10-03）
+
+- PR #8 已合并为 `d5d66ba`。最新公开版本 `v0.1.4` 使用 schema 1；按用户要求，将尚未发布的专题迁移逐字追加至 `002_agent_directed.sql`，删除 `003_collection_agent.sql` 及其注册项。发布基线 `001_initial.sql` 与 `v0.1.4` 完全一致；新建资料库和旧版升级的目标统一为 schema 2，仍在迁移前备份并在同一事务内完成全部 SQL。
+- 同一份合成 schema 1 快照分别执行原两步 SQL 和合并后的单步 SQL，188 个结构对象和 33 张表的数据完全一致，仅 `user_version` 由 3 改为 2。增强既有迁移测试，确认旧回执的专题变更为空、迁移后成员修改递增专题 revision、备份命名为 `before-migration-1-to-2-*`；原文、来源、版本、草稿和两种撤销路径继续验证。迁移执行器的虚拟多步测试保持原样。
+- 同步架构说明及正式打包启动检查的 schema 2 预期，修正后者仍写死 schema 1 的旧判断；启动检查通过 Python 语法验证，未在个人 macOS 账户运行正式应用启动验收。
+- 独立复审无阻塞发现，46 项定向测试通过。完整回归第一次因会话中断终止，未判为通过；恢复后 `npm run test:core-assets` 完整通过：Rust 306 项通过、3 项按原设置忽略，UI 277 项通过，格式、Clippy、启动器、前端构建、存储、故障恢复及真实 stdio MCP 检查通过。随后 `python3 scripts/verify_restore.py` 通过，恢复前后资料库完整性为 ok。证据位于忽略目录 `research/schema-consolidation-20261003/`，完整成功记录为 `core-resumed/`。
+- 未加入未发布开发格式的兼容转换：原 schema 3 开发库会被版本检查拒绝，旧中间 schema 2 也不等同于本次完整 schema 2。已确认本机正式库为 schema 1、持久开发库为 schema 3；两者均保留原样，测试只使用合成数据。本轮未重跑模型语义验收或正式安装升级，未修改版本号或发布 Release。

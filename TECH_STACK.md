@@ -329,7 +329,7 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 
 ### 9.1 导航元数据与专题检索
 
-`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系。公开 schema 1 已包含导航表；schema 3 在保留发布迁移的前提下，追加专题回执和成员／记忆状态变化的 revision 触发器。`memory::agent_collections` 共用事务内元数据及关系规则，为内部 Agent 提供查找、详情、创建、编辑和成员批次操作。元数据不修改 capture 文本或创建正文版本；预期 revision 拒绝陈旧写入，重复成员设置不制造变化。永久擦除清理对应关系，回收站状态影响可见性。
+`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系。公开 schema 1 已包含导航表；未发布的 schema 2 合并 Agent 按需检索与专题变更，一次追加专题回执和成员／记忆状态变化的 revision 触发器；已发布的 schema 1 保持不变。`memory::agent_collections` 共用事务内元数据及关系规则，为内部 Agent 提供查找、详情、创建、编辑和成员批次操作。元数据不修改 capture 文本或创建正文版本；预期 revision 拒绝陈旧写入，重复成员设置不制造变化。永久擦除清理对应关系，回收站状态影响可见性。
 
 `LibraryQuery` 增加置顶、专题、排除专题和较早排序条件；列表仍分页限量。回顾每批三条，手动换组；不做全库客户端加载或定时模型请求。侧栏置顶与专题各最多 100 项，普通记忆库不受此限制。
 
