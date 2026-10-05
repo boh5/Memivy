@@ -374,22 +374,23 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
     let displays = screens()?;
     let display_frames: Vec<_> = displays.iter().map(|screen| screen.frame()).collect();
     let primary_top = display_frames[0].origin.y + display_frames[0].size.height;
-    let current_scale = native
-        .screen()
-        .map(|screen| screen.backingScaleFactor())
-        .unwrap_or_else(|| displays[0].backingScaleFactor());
     let saved = {
         let desktop = app.state::<Desktop>();
         let state = desktop.inner.lock().unwrap();
-        let scale = state
-            .prefs
-            .position_scale
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(current_scale);
-        state
-            .prefs
-            .position
-            .map(|position| geometry::saved_leaf(position, scale, primary_top))
+        state.prefs.position.map(|position| {
+            let scale = state
+                .prefs
+                .position_scale
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .unwrap_or_else(|| {
+                    let geometry: Vec<_> = displays
+                        .iter()
+                        .map(|screen| (screen.frame(), screen.backingScaleFactor()))
+                        .collect();
+                    geometry::legacy_position_scale(position, primary_top, &geometry)
+                });
+            geometry::saved_leaf(position, scale, primary_top)
+        })
     };
     let previous = native.frame();
     let destination = match placement {

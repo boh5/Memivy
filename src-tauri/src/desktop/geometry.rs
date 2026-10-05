@@ -76,6 +76,28 @@ pub(super) fn saved_leaf(position: (i32, i32), scale: f64, primary_top: f64) -> 
     )
 }
 
+/// Older preferences omit the scale used to encode their global coordinates.
+/// Prefer a decode that places the leaf on the display supplying that scale.
+/// Overlapping physical ranges are ambiguous; display order breaks ties, with
+/// the primary display first. Only a later drag can save an authoritative scale.
+pub(super) fn legacy_position_scale(
+    position: (i32, i32),
+    primary_top: f64,
+    displays: &[(NSRect, f64)],
+) -> f64 {
+    displays
+        .iter()
+        .min_by(|(a_frame, a_scale), (b_frame, b_scale)| {
+            let distance = |frame, scale| {
+                let anchor = saved_leaf(position, scale, primary_top);
+                distance_to_rect(frame, center(NSRect::new(anchor, LEAF_SIZE)))
+            };
+            distance(*a_frame, *a_scale).total_cmp(&distance(*b_frame, *b_scale))
+        })
+        .map(|(_, scale)| *scale)
+        .unwrap_or(1.0)
+}
+
 pub(super) fn save_leaf(frame: NSRect, scale: f64, primary_top: f64) -> (i32, i32) {
     (
         ((frame.origin.x + frame.size.width - LEAF_SIZE.width) * scale).round() as i32,
@@ -296,6 +318,54 @@ mod tests {
             );
             assert_eq!(receipt.origin, NSPoint::new(-1030.0, 100.0));
         }
+    }
+
+    #[test]
+    fn legacy_anchor_uses_its_own_display_scale() {
+        let primary_top = 900.0;
+        for (primary_scale, secondary_scale, position, expected) in [
+            (2.0, 1.0, (-1700, 100), NSPoint::new(-1700.0, 724.0)),
+            (1.0, 2.0, (-3400, 200), NSPoint::new(-1700.0, 724.0)),
+        ] {
+            let displays = [
+                (rect(0.0, 0.0, 1440.0, 900.0), primary_scale),
+                (rect(-1920.0, 0.0, 1920.0, 1080.0), secondary_scale),
+            ];
+            let scale = legacy_position_scale(position, primary_top, &displays);
+            assert_eq!(scale, secondary_scale);
+            assert_eq!(saved_leaf(position, scale, primary_top), expected);
+        }
+    }
+
+    #[test]
+    fn ambiguous_legacy_anchor_uses_primary_order_but_saved_scale_is_exact() {
+        let displays = [
+            (rect(0.0, 0.0, 1440.0, 900.0), 2.0),
+            (rect(1440.0, 0.0, 1920.0, 1080.0), 1.0),
+        ];
+        // Either display could have produced this pair before scale was stored.
+        let position = (1800, 400);
+        let scale = legacy_position_scale(position, 900.0, &displays);
+        assert_eq!(scale, 2.0);
+        assert_eq!(
+            saved_leaf(position, scale, 900.0),
+            NSPoint::new(900.0, 624.0)
+        );
+        assert_eq!(
+            saved_leaf(position, 1.0, 900.0),
+            NSPoint::new(1800.0, 424.0)
+        );
+    }
+
+    #[test]
+    fn disconnected_legacy_display_restores_within_the_remaining_work_area() {
+        let area = rect(0.0, 0.0, 1440.0, 900.0);
+        let displays = [(area, 2.0)];
+        let position = (-1700, 100);
+        let scale = legacy_position_scale(position, 900.0, &displays);
+        let anchor = saved_leaf(position, scale, 900.0);
+        let frame = panel_frame(LEAF_SIZE, Placement::SavedLeaf, area, Some(anchor), area);
+        assert_eq!(frame, rect(8.0, 774.0, 72.0, 76.0));
     }
 
     #[test]
