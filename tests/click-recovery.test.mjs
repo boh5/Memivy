@@ -15,9 +15,12 @@ function fixture(t) {
     }
     closest(selector) {
       if (selector === '[inert]') return null;
-      return this.owner || (['button', 'summary', 'a'].includes(this.kind) ? this : null);
+      if (selector === '[data-desktop-drag]')
+        return this.draggable ? this : (this.parent || this.owner)?.closest(selector) || null;
+      return this.owner || (['button', 'summary', 'a'].includes(this.kind) ? this : this.parent?.closest(selector) || null);
     }
     matches(selector) {
+      if (selector === '[data-desktop-drag]') return !!this.draggable;
       return selector.includes('textarea') ? this.kind === 'textarea' : this.disabled;
     }
     getClientRects() { return this.visible ? [{}] : []; }
@@ -72,12 +75,49 @@ test('reordered release and press recover one completed click', async t => {
   const f = fixture(t); reversed(f); await settle();
   assert.equal(f.button.activations, 1);
 });
+test('draggable controls own their activation', async t => {
+  const f = fixture(t);
+  f.button.draggable = true;
+  const icon = new f.Element('svg'); icon.owner = f.button;
+  f.root.fire('pointerup', icon); f.root.fire('pointerdown', icon);
+  await settle();
+  assert.equal(f.button.activations, 0);
+});
+test('controls inside a drag surface still recover', async t => {
+  const f = fixture(t);
+  const header = new f.Element('header'); header.draggable = true;
+  f.button.parent = header;
+  reversed(f); await settle();
+  assert.equal(f.button.activations, 1);
+});
+test('pointer travel cancels pending recovery, but jitter and other pointers do not', async t => {
+  const f = fixture(t);
+  reversed(f);
+  f.root.fire('pointermove', f.button, { clientX: 100 });
+  await settle();
+  assert.equal(f.button.activations, 0);
+
+  reversed(f);
+  f.root.fire('pointermove', f.button, { clientX: 12, clientY: 12 });
+  f.root.fire('pointermove', f.button, { pointerId: 2, clientX: 100 });
+  await settle();
+  assert.equal(f.button.activations, 1);
+});
+test('travel between a release and press invalidates the reordered gesture', async t => {
+  const f = fixture(t);
+  f.root.fire('pointerup', f.button);
+  f.root.fire('pointermove', f.button, { clientX: 100 });
+  f.root.fire('pointerdown', f.button);
+  await settle();
+  assert.equal(f.button.activations, 0);
+});
 test('a real click arriving before recovery cancels the synthetic click', async t => {
   const f = fixture(t); reversed(f); f.root.fire('click', f.button); await settle();
   assert.equal(f.button.activations, 1);
 });
 test('a late real click is suppressed, but the next intentional click works', async t => {
   const f = fixture(t); reversed(f); await settle();
+  f.root.fire('pointermove', f.button, { clientX: 30 });
   assert.equal(f.root.fire('click', f.button).prevented, true);
   assert.equal(f.button.activations, 1);
   f.root.fire('pointerdown', f.button);
@@ -109,6 +149,7 @@ test('removed, disabled and hidden controls are rechecked before dispatch', asyn
 test('window deactivation and pointer cancellation clear pending gestures', async t => {
   const f = fixture(t); reversed(f); f.blur(); await settle();
   reversed(f); f.root.fire('pointercancel', f.button); await settle();
+  reversed(f); f.root.fire('lostpointercapture', f.button); await settle();
   assert.equal(f.button.activations, 0);
 });
 test('secondary buttons, modifiers, touch and untrusted pointers are untouched', async t => {

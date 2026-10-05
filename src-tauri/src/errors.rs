@@ -125,6 +125,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "context_limit",
     "database",
     "desktop_dialog_active",
+    "desktop_menu_failed",
     "desktop_settings_confirm_failed",
     "desktop_settings_invalid",
     "desktop_settings_save_failed",

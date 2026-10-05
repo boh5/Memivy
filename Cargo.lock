@@ -2621,6 +2621,7 @@ name = "memivy"
 version = "0.1.5"
 dependencies = [
  "cpal",
+ "dispatch2",
  "memivy-core",
  "objc2",
  "objc2-app-kit",

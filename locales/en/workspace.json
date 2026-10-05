@@ -208,6 +208,7 @@
     "saved": "Saved locally",
     "view": "View",
     "leafSavedAria": "{{saved}}; open {{product}} quick entry",
+    "leafHint": "Click to open · Drag to move · Right-click for options",
     "leafAria": "Open {{product}} quick entry",
     "panelAria": "{{product}} quick entry",
     "unpinAria": "Unpin window",

@@ -208,6 +208,7 @@
     "saved": "已存到本机",
     "view": "查看",
     "leafSavedAria": "{{saved}}，打开{{product}}快捷入口",
+    "leafHint": "单击打开快捷窗口 · 拖动移动 · 右键更多操作",
     "leafAria": "打开{{product}}快捷入口",
     "panelAria": "{{product}}快捷入口",
     "unpinAria": "取消固定窗口",

@@ -67,6 +67,7 @@
   "shortcut_reserved": "这个组合常用于系统或窗口操作，请换一个快捷键。",
   "shortcut_register_failed": "无法设置快捷键，可能已被其他应用占用。请换一个组合；菜单栏入口仍可使用。",
   "desktop_dialog_active": "请先完成或关闭快捷窗口中的对话框，再切换话题。",
+  "desktop_menu_failed": "无法打开桌面菜单，请重试。",
   "native_menu_unavailable": "菜单栏无法更新",
   "window_operation_failed": "窗口操作未完成",
   "desktop_status_failed": "快捷入口状态未能读取",
