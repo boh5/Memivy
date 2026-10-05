@@ -5,21 +5,21 @@ use crate::{
 };
 use memivy_core::memory::{Conversation, RecordKey};
 use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_foundation::{MainThreadMarker, NSRect, NSSize};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::Instant};
-use tauri::{
-    Emitter, Manager,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-};
+use tauri::{Emitter, Manager, tray::TrayIconBuilder};
 use tauri_nspanel::ManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[link(name = "ServiceManagement", kind = "framework")]
 unsafe extern "C" {}
 
+mod geometry;
 mod termination;
+
+use geometry::{Drag, Placement};
+mod menu;
 
 mod panel_events {
     // The pinned panel-event macro requires and repeats an explicit return type.
@@ -55,6 +55,7 @@ struct Preferences {
     topic_id: Option<String>,
     source_app: String,
     position: Option<(i32, i32)>,
+    position_scale: Option<f64>,
     last_memory: Option<String>,
 }
 fn login_already_initialized() -> bool {
@@ -70,6 +71,7 @@ impl Default for Preferences {
             topic_id: None,
             source_app: "Memivy".into(),
             position: None,
+            position_scale: None,
             last_memory: None,
         }
     }
@@ -90,7 +92,7 @@ struct State {
     opened: Option<Instant>,
     ready_ms: Option<u128>,
     error: Option<String>,
-    drag: Option<(tauri::PhysicalPosition<i32>, tauri::PhysicalPosition<f64>)>,
+    drag: Drag,
     ready_windows: HashSet<String>,
     quit: Option<(u64, HashSet<String>)>,
     next_quit: u64,
@@ -175,7 +177,7 @@ impl Desktop {
                 opened: None,
                 ready_ms: None,
                 error,
-                drag: None,
+                drag: Drag::default(),
                 ready_windows: HashSet::new(),
                 quit: None,
                 next_quit: 0,
@@ -354,129 +356,64 @@ pub fn refresh_topic_title(app: &tauri::AppHandle, topic: &Conversation) {
         publish(app);
     }
 }
-pub fn clamp_position(
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-    area: &tauri::PhysicalRect<i32, u32>,
-) -> (i32, i32) {
-    let left = area.position.x + 8;
-    let top = area.position.y + 8;
-    (
-        x.clamp(
-            left,
-            (area.position.x + area.size.width as i32 - width as i32 - 8).max(left),
-        ),
-        y.clamp(
-            top,
-            (area.position.y + area.size.height as i32 - height as i32 - 8).max(top),
-        ),
-    )
-}
-#[derive(Clone, Copy)]
-enum Placement {
-    KeepAnchor,
-    KeepTop,
-    Cursor,
-    SavedLeaf,
-}
-fn panel_frame(
-    requested: tauri::LogicalSize<f64>,
-    placement: Placement,
-    current: tauri::PhysicalRect<i32, u32>,
-    saved: Option<(i32, i32)>,
-    area: &tauri::PhysicalRect<i32, u32>,
-    scale: f64,
-) -> tauri::PhysicalRect<i32, u32> {
-    let size = tauri::LogicalSize::new(
-        requested.width.min(area.size.width as f64 / scale - 16.0),
-        requested.height.min(area.size.height as f64 / scale - 16.0),
-    )
-    .to_physical::<u32>(scale);
-    let (x, y) = match placement {
-        Placement::KeepTop => (current.position.x, current.position.y),
-        Placement::KeepAnchor => (
-            current.position.x + current.size.width as i32 - size.width as i32,
-            current.position.y + current.size.height as i32 - size.height as i32,
-        ),
-        Placement::Cursor => (
-            area.position.x + (area.size.width as i32 - size.width as i32) / 2,
-            area.position.y + (area.size.height as i32 - size.height as i32) / 3,
-        ),
-        Placement::SavedLeaf => saved
-            .map(|(x, y)| (x - (size.width as i32 - (72.0 * scale) as i32), y))
-            .unwrap_or((
-                area.position.x + area.size.width as i32 - size.width as i32 - 28,
-                area.position.y + area.size.height as i32 - size.height as i32 - 72,
-            )),
-    };
-    let (x, y) = clamp_position(x, y, size.width, size.height, area);
-    tauri::PhysicalRect {
-        position: tauri::PhysicalPosition::new(x, y),
-        size,
+// Main thread only. AppKit screen and panel frames are logical points in one
+// global coordinate space, independent of each screen's backing scale.
+fn screens() -> HostResult<Vec<objc2::rc::Retained<objc2_app_kit::NSScreen>>> {
+    let marker = MainThreadMarker::new().ok_or("window_operation_failed")?;
+    let screens: Vec<_> = objc2_app_kit::NSScreen::screens(marker).iter().collect();
+    if screens.is_empty() {
+        return Err("display_unavailable".into());
     }
+    Ok(screens)
 }
-// Main thread only. Commit size and position together; Tao's separate setters
-// queue two AppKit updates and expose an intermediate frame on this clear panel.
 fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement) -> HostResult<()> {
-    let w = app
-        .get_webview_window("capture")
-        .ok_or("capture_window_unavailable")?;
-    let saved = app.state::<Desktop>().inner.lock().unwrap().prefs.position;
-    let destination = match placement {
-        Placement::Cursor => w.cursor_position().ok().map(|p| (p.x, p.y)),
-        Placement::SavedLeaf => saved.map(|(x, y)| (x as f64, y as f64)),
-        Placement::KeepAnchor | Placement::KeepTop => None,
-    };
-    let m = destination
-        .and_then(|(x, y)| w.monitor_from_point(x, y).ok().flatten())
-        .or_else(|| w.current_monitor().ok().flatten())
-        .or_else(|| w.primary_monitor().ok().flatten())
-        .ok_or("display_unavailable")?;
-    let current_scale = w.scale_factor().map_err(|_| "window_geometry_failed")?;
-    let current = tauri::PhysicalRect {
-        position: w.outer_position().map_err(|_| "window_geometry_failed")?,
-        size: w.outer_size().map_err(|_| "window_geometry_failed")?,
-    };
-    let target_scale = m.scale_factor();
-    // The destination monitor's physical coordinate space can have another scale.
-    let target_current = tauri::PhysicalRect {
-        position: current
-            .position
-            .to_logical::<f64>(current_scale)
-            .to_physical(target_scale),
-        size: current
-            .size
-            .to_logical::<f64>(current_scale)
-            .to_physical(target_scale),
-    };
-    let frame = panel_frame(
-        tauri::LogicalSize::new(width, height),
-        placement,
-        target_current,
-        saved,
-        m.work_area(),
-        target_scale,
-    );
     let panel = app
         .get_webview_panel("capture")
         .map_err(|_| "capture_window_unavailable")?;
     let native = panel.as_panel();
+    let displays = screens()?;
+    let display_frames: Vec<_> = displays.iter().map(|screen| screen.frame()).collect();
+    let primary_top = display_frames[0].origin.y + display_frames[0].size.height;
+    let current_scale = native
+        .screen()
+        .map(|screen| screen.backingScaleFactor())
+        .unwrap_or_else(|| displays[0].backingScaleFactor());
+    let saved = {
+        let desktop = app.state::<Desktop>();
+        let state = desktop.inner.lock().unwrap();
+        let scale = state
+            .prefs
+            .position_scale
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(current_scale);
+        state
+            .prefs
+            .position
+            .map(|position| geometry::saved_leaf(position, scale, primary_top))
+    };
     let previous = native.frame();
-    let from = current.position.to_logical::<f64>(current_scale);
-    let to = frame.position.to_logical::<f64>(target_scale);
-    let size = frame.size.to_logical::<f64>(target_scale);
-    // Use the existing AppKit frame as the origin reference; screen focus and
-    // different display scales must not change the global coordinate baseline.
-    let next = NSRect::new(
-        NSPoint::new(
-            previous.origin.x + to.x - from.x,
-            previous.origin.y + previous.size.height - size.height - (to.y - from.y),
-        ),
-        NSSize::new(size.width, size.height),
+    let destination = match placement {
+        Placement::Cursor => objc2_app_kit::NSEvent::mouseLocation(),
+        Placement::SavedLeaf => saved
+            .map(|point| geometry::center(NSRect::new(point, geometry::LEAF_SIZE)))
+            .unwrap_or_else(|| geometry::center(previous)),
+        Placement::KeepAnchor | Placement::KeepTop => geometry::center(previous),
+    };
+    let display = &displays[geometry::screen_for_point(&display_frames, destination)];
+    let next = geometry::panel_frame(
+        NSSize::new(width, height),
+        placement,
+        previous,
+        saved,
+        display.visibleFrame(),
     );
     if next != previous {
+        app.state::<Desktop>()
+            .inner
+            .lock()
+            .unwrap()
+            .drag
+            .relayout(previous, next);
         native.setFrame_display_animate(next, true, false);
     }
     Ok(())
@@ -521,6 +458,7 @@ pub fn open(app: &tauri::AppHandle, at_cursor: bool) -> HostResult<()> {
         s.expanded = true;
         s.handoff = None;
         s.generation += 1;
+        s.drag.cancel();
         s.opened = Some(started);
         s.ready_ms = None;
         discussion = s.prefs.topic_id.is_some();
@@ -556,7 +494,7 @@ fn collapse(app: &tauri::AppHandle, restore: bool) -> HostResult<()> {
         s.expanded = false;
         s.handoff = None;
         s.generation += 1;
-        s.drag = None;
+        s.drag.cancel();
         (s.previous_pid, s.prefs.visible, s.receipt.is_some())
     };
     panel.hide();
@@ -673,67 +611,7 @@ pub(crate) fn set_error(app: &tauri::AppHandle, error: String) {
     app.state::<Desktop>().inner.lock().unwrap().error = Some(error);
     publish(app);
 }
-pub(crate) fn update_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let p = app.state::<Desktop>().inner.lock().unwrap().prefs.clone();
-    let status = MenuItem::with_id(
-        app,
-        "status",
-        crate::i18n::text(app, "statusReady"),
-        false,
-        None::<&str>,
-    )?;
-    let input = MenuItem::with_id(
-        app,
-        "quick-input",
-        crate::i18n::text(app, "quickInput"),
-        true,
-        None::<&str>,
-    )?;
-    let open = MenuItem::with_id(
-        app,
-        "open",
-        crate::i18n::text(app, "open"),
-        true,
-        None::<&str>,
-    )?;
-    let visible = MenuItem::with_id(
-        app,
-        "leaf",
-        if p.visible {
-            crate::i18n::text(app, "hideCompanion")
-        } else {
-            crate::i18n::text(app, "showCompanion")
-        },
-        true,
-        None::<&str>,
-    )?;
-    let settings = MenuItem::with_id(
-        app,
-        "settings",
-        crate::i18n::text(app, "settings"),
-        true,
-        None::<&str>,
-    )?;
-    let quit = MenuItem::with_id(
-        app,
-        "quit",
-        crate::i18n::text(app, "quit"),
-        true,
-        None::<&str>,
-    )?;
-    let sep = PredefinedMenuItem::separator(app)?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &status, &sep, &input, &open, &visible, &settings, &sep2, &quit,
-        ],
-    )?;
-    if let Some(tray) = app.tray_by_id("memivy") {
-        tray.set_menu(Some(menu))?;
-    }
-    Ok(())
-}
+pub(crate) use menu::update_menu;
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let path = app
         .state::<Workspace>()
@@ -759,39 +637,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         ))?)
         .icon_as_template(true)
         .tooltip(app.package_info().name.clone())
-        .on_menu_event(|app, event| {
-            let h = app.clone();
-            let id = event.id.as_ref().to_string();
-            let _ = app.run_on_main_thread(move || {
-                let result = match id.as_str() {
-                    "quick-input" => open(&h, true),
-                    "open" => show_main(&h),
-                    "settings" => {
-                        let r = show_main(&h);
-                        let _ = h.emit_to("main", "desktop-settings", ());
-                        r
-                    }
-                    "leaf" => {
-                        let p = snapshot(&h);
-                        change(
-                            &h,
-                            Patch {
-                                visible: Some(!p.visible),
-                                ..Default::default()
-                            },
-                        )
-                    }
-                    "quit" => {
-                        request_quit(&h);
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                };
-                if let Err(e) = result {
-                    set_error(&h, e.to_string());
-                }
-            });
-        })
+        .on_menu_event(menu::handle_event)
         .build(app)?;
     crate::i18n::update_native(app.handle());
     let p = app.state::<Desktop>().inner.lock().unwrap().prefs.clone();
@@ -1224,54 +1070,101 @@ pub async fn desktop_handoff_ready(
     .await
 }
 #[tauri::command]
-pub async fn desktop_drag(
+pub async fn desktop_menu(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
-    phase: String,
+    x: f64,
+    y: f64,
 ) -> HostResult<()> {
     let _update_work = crate::updates::work()?;
     if window.label() != "capture" {
         return Err("capture_window_required".into());
     }
+    if !x.is_finite() || !y.is_finite() {
+        return Err("desktop_menu_failed".into());
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // Menu tracking runs a nested AppKit loop. Enter it outside Tao's event
+    // callback so queued IPC, including the quit acknowledgement, can run.
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        let _ = tx.send(menu::popup(&app, &window, x, y));
+    });
+    rx.await.map_err(|_| "window_operation_failed")?
+}
+#[tauri::command]
+pub async fn desktop_drag(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    gesture: u64,
+    generation: u64,
+    phase: String,
+    x: f64,
+    y: f64,
+) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
+    if window.label() != "capture" {
+        return Err("capture_window_required".into());
+    }
+    if !x.is_finite() || !y.is_finite() {
+        return Err("window_drag_invalid".into());
+    }
     on_main(&app, move |h| {
-        let d = h.state::<Desktop>();
-        match phase.as_str() {
-            "start" => {
-                let origin = window.outer_position().map_err(|_| "window_drag_failed")?;
-                let cursor = window.cursor_position().map_err(|_| "window_drag_failed")?;
-                d.inner.lock().unwrap().drag = Some((origin, cursor));
+        let panel = h
+            .get_webview_panel("capture")
+            .map_err(|_| "capture_window_unavailable")?;
+        let native = panel.as_panel();
+        let desktop = h.state::<Desktop>();
+        let current = native.frame();
+        let (mut frame, finished) = {
+            let mut state = desktop.inner.lock().unwrap();
+            if state.generation != generation {
+                return Ok(());
             }
-            "move" => {
-                let drag = d.inner.lock().unwrap().drag;
-                if let Some((origin, cursor)) = drag {
-                    let now = window.cursor_position().map_err(|_| "window_drag_failed")?;
-                    window
-                        .set_position(tauri::PhysicalPosition::new(
-                            origin.x + (now.x - cursor.x) as i32,
-                            origin.y + (now.y - cursor.y) as i32,
-                        ))
-                        .map_err(|_| "window_drag_failed")?;
+            match phase.as_str() {
+                "start" => {
+                    if !state.drag.start(gesture, current) {
+                        return Ok(());
+                    }
+                    (state.drag.frame(gesture, x, y).unwrap(), false)
                 }
+                "move" | "end" => {
+                    let Some(frame) = state.drag.frame(gesture, x, y) else {
+                        return Ok(());
+                    };
+                    let finished = phase == "end";
+                    if finished {
+                        state.drag.finish(gesture);
+                    }
+                    (frame, finished)
+                }
+                "cancel" => {
+                    if !state.drag.finish(gesture) {
+                        return Ok(());
+                    }
+                    (current, true)
+                }
+                _ => return Err("window_drag_invalid".into()),
             }
-            "end" => {
-                let pos = window
-                    .outer_position()
-                    .map_err(|_| "window_position_save_failed")?;
-                let mut s = d.inner.lock().unwrap();
-                s.drag = None;
-                let size = window
-                    .outer_size()
-                    .map_err(|_| "window_position_save_failed")?;
-                let scale = window
-                    .scale_factor()
-                    .map_err(|_| "window_position_save_failed")?;
-                s.prefs.position = Some((
-                    pos.x + size.width as i32 - (72.0 * scale) as i32,
-                    pos.y + size.height as i32 - (76.0 * scale) as i32,
-                ));
-                d.persist(&s.prefs)?;
-            }
-            _ => return Err("window_drag_invalid".into()),
+        };
+        let displays = screens()?;
+        let display_frames: Vec<_> = displays.iter().map(|screen| screen.frame()).collect();
+        let display =
+            &displays[geometry::screen_for_point(&display_frames, geometry::center(frame))];
+        if finished {
+            frame = geometry::fit_and_clamp(frame, display.visibleFrame());
+        }
+        // Synchronous on the AppKit thread: the final frame is committed before
+        // persistence. No queued cursor sample can move the panel after release.
+        if frame != current {
+            native.setFrame_display_animate(frame, true, false);
+        }
+        if finished {
+            let primary_top = display_frames[0].origin.y + display_frames[0].size.height;
+            let scale = display.backingScaleFactor();
+            let mut state = desktop.inner.lock().unwrap();
+            state.prefs.position = Some(geometry::save_leaf(native.frame(), scale, primary_top));
+            state.prefs.position_scale = Some(scale);
+            desktop.persist(&state.prefs)?;
         }
         Ok(())
     })
@@ -1430,147 +1323,6 @@ fn finish_quit(app: &tauri::AppHandle) {
 mod tests {
     use super::*;
     #[test]
-    fn content_resize_keeps_the_top_until_the_work_area_requires_clamping() {
-        for scale in [1.0, 2.0] {
-            let area = tauri::PhysicalRect {
-                position: tauri::PhysicalPosition::new(-2000, 30),
-                size: tauri::PhysicalSize::new(2000, 1400),
-            };
-            let current = tauri::PhysicalRect {
-                position: tauri::PhysicalPosition::new(-1500, 150),
-                size: tauri::LogicalSize::new(500.0, 300.0).to_physical(scale),
-            };
-            let expanded = panel_frame(
-                tauri::LogicalSize::new(500.0, 337.0),
-                Placement::KeepTop,
-                current,
-                None,
-                &area,
-                scale,
-            );
-            assert_eq!(expanded.position, current.position);
-            let collapsed = panel_frame(
-                tauri::LogicalSize::new(500.0, 300.0),
-                Placement::KeepTop,
-                expanded,
-                None,
-                &area,
-                scale,
-            );
-            assert_eq!(collapsed.position, current.position);
-            assert_eq!(collapsed.size, current.size);
-            let at_bottom = tauri::PhysicalRect {
-                position: tauri::PhysicalPosition::new(-1500, 1422 - current.size.height as i32),
-                ..current
-            };
-            let clamped = panel_frame(
-                tauri::LogicalSize::new(500.0, 337.0),
-                Placement::KeepTop,
-                at_bottom,
-                None,
-                &area,
-                scale,
-            );
-            assert_eq!(clamped.position.x, at_bottom.position.x);
-            assert_eq!(clamped.position.y + clamped.size.height as i32, 1422);
-        }
-    }
-    #[test]
-    fn open_and_collapse_use_destination_size_regardless_of_previous_frame() {
-        let area = tauri::PhysicalRect {
-            position: tauri::PhysicalPosition::new(0, 0),
-            size: tauri::PhysicalSize::new(2880, 1800),
-        };
-        for (width, height) in [(72, 76), (230, 76), (500, 310), (500, 620)] {
-            let current = tauri::PhysicalRect {
-                position: tauri::PhysicalPosition::new(100, 100),
-                size: tauri::PhysicalSize::new(width * 2, height * 2),
-            };
-            let open = panel_frame(
-                tauri::LogicalSize::new(500.0, 310.0),
-                Placement::Cursor,
-                current,
-                None,
-                &area,
-                2.0,
-            );
-            assert_eq!(open.position, tauri::PhysicalPosition::new(940, 393));
-            assert_eq!(open.size, tauri::PhysicalSize::new(1000, 620));
-            let leaf = panel_frame(
-                tauri::LogicalSize::new(72.0, 76.0),
-                Placement::SavedLeaf,
-                current,
-                Some((2600, 1600)),
-                &area,
-                2.0,
-            );
-            assert_eq!(leaf.position, tauri::PhysicalPosition::new(2600, 1600));
-            assert_eq!(leaf.size, tauri::PhysicalSize::new(144, 152));
-            let receipt = panel_frame(
-                tauri::LogicalSize::new(230.0, 76.0),
-                Placement::SavedLeaf,
-                current,
-                Some((2600, 1600)),
-                &area,
-                2.0,
-            );
-            let expired = panel_frame(
-                tauri::LogicalSize::new(72.0, 76.0),
-                Placement::KeepAnchor,
-                receipt,
-                None,
-                &area,
-                2.0,
-            );
-            assert_eq!(expired.position, leaf.position);
-            assert_eq!(expired.size, leaf.size);
-        }
-    }
-    #[test]
-    fn panel_geometry_respects_destination_scale_work_area_and_anchor() {
-        for scale in [1.0, 2.0] {
-            let area = tauri::PhysicalRect {
-                position: tauri::PhysicalPosition::new(-1920, 30),
-                size: tauri::PhysicalSize::new(1920, 1050),
-            };
-            let leaf = panel_frame(
-                tauri::LogicalSize::new(72.0, 76.0),
-                Placement::SavedLeaf,
-                area,
-                None,
-                &area,
-                scale,
-            );
-            let open = panel_frame(
-                tauri::LogicalSize::new(500.0, 620.0),
-                Placement::KeepAnchor,
-                leaf,
-                None,
-                &area,
-                scale,
-            );
-            assert_eq!(
-                open.position.x + open.size.width as i32,
-                leaf.position.x + leaf.size.width as i32
-            );
-            assert!(open.position.y >= area.position.y + 8);
-            assert!(open.position.y + open.size.height as i32 <= 1072);
-            let centered = panel_frame(
-                tauri::LogicalSize::new(500.0, 620.0),
-                Placement::Cursor,
-                leaf,
-                None,
-                &area,
-                scale,
-            );
-            assert_eq!(
-                centered.position.x,
-                -1920 + (1920 - centered.size.width as i32) / 2
-            );
-            assert!(centered.size.height <= area.size.height - (16.0 * scale) as u32);
-        }
-    }
-    #[test]
     fn shortcut_validation_handles_modifier_order_and_system_combinations() {
         assert!(optional_shortcut("").unwrap().is_none());
         assert!(optional_shortcut(" ").is_err());
@@ -1588,17 +1340,6 @@ mod tests {
         ] {
             assert!(parse_shortcut(reserved).is_err(), "{reserved}");
         }
-    }
-    #[test]
-    fn windows_are_clamped_to_work_area_including_negative_display_coordinates() {
-        let area = tauri::PhysicalRect {
-            position: tauri::PhysicalPosition::new(-1920, 30),
-            size: tauri::PhysicalSize::new(1920, 1050),
-        };
-        assert_eq!(clamp_position(-5000, -200, 500, 620, &area), (-1912, 38));
-        assert_eq!(clamp_position(4000, 2000, 500, 620, &area), (-508, 452));
-        assert_eq!(clamp_position(-1000, 100, 500, 620, &area), (-1000, 100));
-        assert_eq!(clamp_position(1, 1, 4000, 3000, &area), (-1912, 38));
     }
     #[test]
     fn new_install_enables_login_once_and_existing_preferences_keep_system_choice() {
@@ -1643,6 +1384,7 @@ mod tests {
             shortcut: String::new(),
             pinned: true,
             position: Some((-500, 400)),
+            position_scale: Some(2.0),
             ..Default::default()
         };
         desktop.persist(&prefs).unwrap();
@@ -1652,6 +1394,7 @@ mod tests {
         assert!(s.prefs.shortcut.is_empty());
         assert!(s.prefs.pinned);
         assert_eq!(s.prefs.position, Some((-500, 400)));
+        assert_eq!(s.prefs.position_scale, Some(2.0));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
             fs::metadata(path).unwrap().permissions().mode() & 0o777,

@@ -10,6 +10,8 @@ export type PointerSample = {
   editing: boolean;
 };
 
+const movementTolerance = 4;
+
 export class ReorderedPointer {
   private pressed: number | null = null;
   private released: PointerSample | null = null;
@@ -20,7 +22,7 @@ export class ReorderedPointer {
     const reversed = !!(
       up && up.id === sample.id && up.action && up.action === sample.action &&
       sample.at >= up.at && sample.at - up.at <= 250 &&
-      Math.hypot(sample.x - up.x, sample.y - up.y) <= 4
+      Math.hypot(sample.x - up.x, sample.y - up.y) <= movementTolerance
     );
     this.pressed = reversed ? null : sample.id;
     return reversed;
@@ -33,6 +35,14 @@ export class ReorderedPointer {
     this.pressed = null;
   }
 
+  move(sample: Pick<PointerSample, "id" | "x" | "y">) {
+    const up = this.released;
+    if (up?.id === sample.id &&
+      Math.hypot(sample.x - up.x, sample.y - up.y) > movementTolerance) {
+      this.released = null;
+    }
+  }
+
   reset() {
     this.pressed = null;
     this.released = null;
@@ -41,12 +51,13 @@ export class ReorderedPointer {
 
 export function installClickRecovery(root: HTMLElement) {
   const sequence = new ReorderedPointer();
-  let pending: { action: HTMLElement; fired: boolean } | null = null;
+  let pending: { action: HTMLElement; fired: boolean; id: number; x: number; y: number } | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const actionFor = (target: EventTarget | null) => {
     const action = target instanceof Element
       ? target.closest<HTMLElement>("button, summary, a[href]") : null;
-    return action && root.contains(action) ? action : null;
+    // Header controls can recover, but the draggable leaf owns its activation.
+    return action && root.contains(action) && !action.matches("[data-desktop-drag]") ? action : null;
   };
   const enabled = (action: HTMLElement) =>
     action.isConnected && !action.matches(":disabled, [aria-disabled='true']") &&
@@ -76,7 +87,9 @@ export function installClickRecovery(root: HTMLElement) {
     if (!primaryMouse(event)) { sequence.reset(); return; }
     const action = actionFor(event.target);
     if (!sequence.down(sample(event)) || !action || !enabled(action)) return;
-    const activation = { action, fired: false };
+    const activation = {
+      action, fired: false, id: event.pointerId, x: event.clientX, y: event.clientY,
+    };
     pending = activation;
     // Allow WebKit's delayed focus/default action and any real click to finish.
     timer = setTimeout(() => {
@@ -88,6 +101,14 @@ export function installClickRecovery(root: HTMLElement) {
   const up = (event: PointerEvent) => {
     if (primaryMouse(event)) sequence.up(sample(event));
     else sequence.reset();
+  };
+  const move = (event: PointerEvent) => {
+    if (!event.isTrusted) return;
+    sequence.move({ id: event.pointerId, x: event.clientX, y: event.clientY });
+    if (pending?.id === event.pointerId && !pending.fired &&
+      Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > movementTolerance) {
+      clearPending();
+    }
   };
   const click = (event: MouseEvent) => {
     if (!event.isTrusted || !pending) return;
@@ -104,14 +125,18 @@ export function installClickRecovery(root: HTMLElement) {
   };
   root.addEventListener("pointerdown", down, true);
   root.addEventListener("pointerup", up, true);
+  root.addEventListener("pointermove", move, true);
   root.addEventListener("pointercancel", reset, true);
+  root.addEventListener("lostpointercapture", reset, true);
   root.addEventListener("click", click, true);
   window.addEventListener("blur", reset);
   return () => {
     reset();
     root.removeEventListener("pointerdown", down, true);
     root.removeEventListener("pointerup", up, true);
+    root.removeEventListener("pointermove", move, true);
     root.removeEventListener("pointercancel", reset, true);
+    root.removeEventListener("lostpointercapture", reset, true);
     root.removeEventListener("click", click, true);
     window.removeEventListener("blur", reset);
   };

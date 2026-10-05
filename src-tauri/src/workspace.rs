@@ -1221,6 +1221,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::desktop::desktop_expand,
             crate::desktop::desktop_handoff_ready,
             crate::desktop::desktop_drag,
+            crate::desktop::desktop_menu,
             crate::desktop::desktop_login,
             crate::desktop::desktop_login_status,
             crate::desktop::desktop_exit_ready

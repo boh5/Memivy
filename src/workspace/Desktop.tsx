@@ -2,7 +2,7 @@ import { translateCatalog } from "../i18n";
 import { useNotice } from "../i18n/react";
 import { useTranslation } from "react-i18next";
 import { useResourceBridge } from "./resources";
-import { useCallback, useEffect, useRef, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import icon from "../../design-demo/brand/memivy-icon.svg";
 import { Icon } from "../ui";
@@ -15,6 +15,7 @@ import CaptureForm, { type InputSubmission } from "./CaptureForm";
 import Discussion from "./Discussion";
 import { installClickRecovery } from "./clickRecovery";
 import LanguageRecovery from "./LanguageRecovery";
+import { useDesktopGesture } from "./useDesktopGesture";
 import "../base.css";
 import "./workspace.css";
 import "./desktop.css";
@@ -25,8 +26,7 @@ export default function Desktop() {
   const [error, setError] = useNotice();
   const saved: Key | null = state?.receipt && state.last_memory ? { kind: "memory", id: state.last_memory } : null;
   const busy = useRef(false), current = useRef(state), root = useRef<HTMLDivElement>(null), composing = useRef(false);
-  const drag = useRef<{ x: number; y: number; moved: boolean; tail: Promise<unknown> } | null>(null);
-  const dragEnd = useRef<Promise<unknown>>(Promise.resolve()), suppressLeafClick = useRef(false);
+  const gesture = useDesktopGesture(!!state?.expanded, state?.generation ?? 0, error => setError(errorText(error)));
   const dismissing = useRef(false);
   const composerContent = useRef<HTMLDivElement>(null);
   const pendingDismiss = useRef<{ reason: string; generation: number } | null>(null);
@@ -111,38 +111,14 @@ export default function Desktop() {
   function reportReady() {
     if (native && current.current?.expanded) void call("desktop_ready", { generation: current.current.generation }).catch(() => {});
   }
-  function pointerDown(e: PointerEvent<HTMLElement>) {
-    const control = (e.target as HTMLElement).closest("button, input, textarea, a");
-    if (e.button !== 0 || (control && control !== e.currentTarget)) return;
-    suppressLeafClick.current = false;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { x: e.clientX, y: e.clientY, moved: false, tail: native ? call("desktop_drag", { phase: "start" }) : Promise.resolve() };
-  }
-  function pointerMove(e: PointerEvent<HTMLElement>) {
-    const d = drag.current;
-    if (!d) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) d.moved = true;
-    if (d.moved && native) d.tail = d.tail.then(() => call("desktop_drag", { phase: "move" }));
-  }
-  function pointerUp(e: PointerEvent<HTMLElement>) {
-    const d = drag.current;
-    if (!d) return;
-    drag.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    suppressLeafClick.current = d.moved || e.type !== "pointerup";
-    dragEnd.current = d.tail.then(async () => {
-      if (native) await call("desktop_drag", { phase: "end" });
-    }).catch(e => setError(errorText(e)));
-  }
   return <div ref={root} className={`desktop-entry ${state?.expanded ? "is-open" : ""}`}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={e => { if (e.key === "Escape" && !e.repeat && !e.nativeEvent.isComposing && !composing.current && e.keyCode !== 229 && !document.querySelector("dialog[open]")) { e.preventDefault(); void dismiss("explicit"); } }}>
     {!state?.expanded ? <div className="desktop-rest">{state?.receipt && <div className="desktop-toast" role="status"><span>{t("desktop.saved")}</span><button onClick={() => void expand(state.last_memory ? { kind: "memory", id: state.last_memory } : null)}>{t("desktop.view")}</button></div>}<button className={`desktop-leaf ${saved ? "has-saved" : ""}`} aria-label={saved ? t("desktop.leafSavedAria", { saved: t("desktop.saved"), product: "Memivy" }) : t("desktop.leafAria", { product: "Memivy" })}
-      onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
-      onClick={() => { if (!suppressLeafClick.current) void dragEnd.current.then(() => call("desktop_open")).catch(e => setError(errorText(e))); suppressLeafClick.current = false; }}>
+      title={t("desktop.leafHint")} data-desktop-drag {...gesture.pointerHandlers} onClick={gesture.onClick} onContextMenu={gesture.onContextMenu}>
       <img src={icon} alt="" draggable={false} />{saved && <span className="leaf-check"><Icon name="check" size={11} /></span>}
     </button></div> : <section className="desktop-panel" aria-label={t("desktop.panelAria", { product: "Memivy" })}>
-      <header className="desktop-toolbar" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
+      <header className="desktop-toolbar" data-desktop-drag {...gesture.pointerHandlers}>
         <img src={icon} alt="" draggable={false} /><strong>Memivy</strong><span className="desktop-drag-space" />
         <button className={`icon-button ${state.pinned ? "selected" : ""}`} aria-label={state.pinned ? t("desktop.unpinAria") : t("desktop.pinAria")} aria-pressed={state.pinned} title={state.pinned ? t("desktop.pinnedTitle") : t("desktop.pinTitle")} onClick={() => void change({ pinned: !state.pinned })}><Icon name="pin" size={15} /></button>
         <button className="icon-button" aria-label={t("desktop.continueInMainAria")} title={t("desktop.continueInMainTitle")} onClick={() => void expand()}><Icon name="expand" size={15} /></button>

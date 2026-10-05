@@ -67,6 +67,7 @@
   "shortcut_reserved": "This combination is commonly used by the system. Choose another shortcut.",
   "shortcut_register_failed": "Could not set the shortcut. Another app may be using it. Choose another combination; the menu bar entry is still available.",
   "desktop_dialog_active": "Finish or close the quick entry dialog before switching discussions.",
+  "desktop_menu_failed": "The desktop menu could not be opened. Try again.",
   "native_menu_unavailable": "The menu bar could not be updated. Retry the language setting.",
   "window_operation_failed": "The window operation could not finish. Try again.",
   "desktop_status_failed": "Quick entry status could not be read. Try again.",

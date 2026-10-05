@@ -102,21 +102,23 @@ test('an invalid editor draft does not prevent submitting another valid input', 
   assert.equal(sent.text,"Valid input");assert.equal(textarea(f,view).props.value,'');
 });
 
-test('the collapsed leaf supports accessible activation and dragging never opens it', async t => {
+test('the collapsed leaf binds pointer gestures while accessible activation stays usable', async t => {
   const f=workspaceFixture(t);
   f.load('src/workspace/desktopApi.ts').previewDesktop.expanded=false;
   f.overrides.desktop_open=async()=>{};
   const Desktop=f.load('src/workspace/Desktop.tsx').default, view=f.mount(Desktop);await f.settle();
   const leaf=f.find(view,n=>n.type==='button' && n.props.className?.startsWith('desktop-leaf'));
-  leaf.props.onClick();await f.settle();
-  assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,1);
   const element={setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){}};
-  const event={button:0,pointerId:1,clientX:10,clientY:10,currentTarget:element,target:{closest(){return element;}}};
+  const event={button:0,ctrlKey:false,isPrimary:true,pointerId:1,screenX:100,screenY:200,clientX:10,clientY:10,currentTarget:element,target:{closest(){return element;}},preventDefault(){}};
+  const click={detail:1,button:0,ctrlKey:false};
   leaf.props.onPointerDown(event);
-  leaf.props.onPointerMove({...event,clientX:40});
-  leaf.props.onPointerUp({...event,clientX:40,type:'pointerup'});
-  leaf.props.onClick();await f.settle();
+  leaf.props.onPointerUp(event);
+  leaf.props.onClick(click);await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,1);
-  leaf.props.onClick();await f.settle();
+  leaf.props.onPointerDown(event);
+  leaf.props.onPointerUp({...event,screenX:140});
+  leaf.props.onClick(click);await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,1);
+  leaf.props.onClick({...click,detail:0});await f.settle();
   assert.equal(f.calls.filter(c=>c.name==='desktop_open').length,2);
 });
