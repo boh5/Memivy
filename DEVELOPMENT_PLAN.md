@@ -1494,3 +1494,13 @@ No UI QA, native build or app launch was performed for this review. Verification
 
 - Codex 审查发现手动检查会清除损坏／不可读 `updates.json` 的警告，但配置和暂停状态未修复。将持久配置错误独立保存在更新状态内部，读取和事件快照在没有瞬时错误时继续显示该警告；只有设置成功写盘才清除，前端协议不变。
 - 新增真实本地 updater 回归，覆盖两类配置错误下的手动检查到 current／available、检查失败、下载验签失败与成功重试，以及偏好保存失败／成功修复。格式、7 项更新相关 Rust 测试及 workspace all-target Clippy 通过，1 项既有正式签名产物测试按原设置忽略；本轮不涉及安装流程或原生界面变更。
+
+## 0.1.6 发布准备与产物验证（2026-10-07，未发布）
+
+- 从已合并 PR #10、#11 的 `main` 提交 `3a1e637` 创建发布分支，发布候选为 `d12672e0e8364eff2a04aaa0feec6d7d4bf7dedd`，代码树为 `41585939c903d2208e19f14dbe1150cf951253fb`。统一版本和英文更新说明，仅将 DOMPurify、source-map-js 锁定到兼容范围内的补丁 `3.4.16`、`1.2.2`；未增加依赖、override 或数据库迁移，继续使用 schema 2。独立提交前 review 无剩余可操作发现。
+- `npm ci`、`cargo fetch --locked`、发布元数据及国际化检查通过。完整 `test:core-assets` 通过：格式、启动器、workspace all-target Clippy、319 项 Rust 测试（3 项原有忽略）、298 项 UI 测试、前端构建、存储、故障及 stdio MCP 检查；随后跨进程恢复通过，3 次实时 MCP 写入保留，恢复后完整性为 ok。回归运行时版本变更尚未提交，日志中的旧 HEAD 仅为当时基线；其实际受测文件与发布候选一致。
+- 两个补丁消除本轮定位的 DOMPurify 和 source-map-js 告警；最终 npm audit 仍有 KaTeX 依赖链的 4 项 low，无 high。Rust glib 告警位于 Linux／BSD 的 GTK／WebKit 依赖链，不进入本次 Apple Silicon macOS 构建；没有为此扩展 Tauri 或整批依赖升级。
+- 候选提交的 `npm run build:release` 通过，沿用既有 updater 签名密钥，构建子进程使用 `umask 022`，保持 ad-hoc 签名、未公证分发方式。实际包内 MCP 的协议、并发写入、重试、崩溃持久性与数据库完整性检查通过；临时 CMake 环境已清理，必要证据保留于忽略目录 `research/release-0.1.6/`。
+- 独立产物核对通过：DMG SHA-256 为 `34b1dc27ab87c1cc22c4eb21257a34b126c50d9484ec238f844080fd99b126b1`，updater 包为 `7fc728695a552a61d1dfa75cac8ea2425ac56dd9081e083314ee29e88040aeca`。只读挂载确认 DMG、updater 与原始 bundle 的 17 个条目内容和权限一致；正式身份、0.1.6 版本、四个 arm64 可执行文件的最低 macOS 26.0、完整代码签名及麦克风 entitlement 均通过，updater 公钥验签和 manifest 一致性通过。结果为 `artifact-check-verified/result.json`；验证后卸载镜像并清理临时副本，没有启动应用。
+- 本机没有独立 macOS 测试账户，未启动或替换日常正式安装，也未触碰个人资料库、持久开发草稿或共享模型缓存。本轮未完成真实 0.1.5→0.1.6 安装／重启、自动下载到点击安装、草稿／设置／模型及 Gatekeeper／管理员／麦克风权限连续性验收。云端隔离环境的正式包启动检查仍待发布工作流执行，不能替代上述实际升级验收。
+- 本节只补录候选的验证证据，不改变产品代码或构建配置。尚未推送发布标签；未来云端产物需另行核对公开下载、校验和、manifest 和 updater 签名，不能沿用本地包的校验和作为公开产物结论。

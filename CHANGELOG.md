@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- Improve the desktop leaf: drag it to move, click to open the quick window, and use its native menu. Restore its saved position when reopening Memivy.
+- Check for updates and download them automatically in the background. Choose when to restart and install, or turn automatic updates off in General settings.
+- Keep update-setting warnings visible after manual checks and downloads until the setting is saved successfully.
+- Apply security patches for DOMPurify 3.4.16 and source-map-js 1.2.2.
+
+This release keeps database schema 2; no new database migration is required.
+
 ## 0.1.5
 
 - Discuss topics with the Agent: find, read, create and edit collections, and add, remove or move explicitly selected memories between them.
