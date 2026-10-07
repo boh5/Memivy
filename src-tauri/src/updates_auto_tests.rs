@@ -149,7 +149,7 @@ fn automatic_preference_defaults_persists_privately_and_fails_closed() {
     for invalid in ["invalid", "{}", r#"{"automatic":"false"}"#] {
         std::fs::write(&path, invalid).unwrap();
         let invalid = Updates::new("0.1.5".into(), path.clone());
-        let status = invalid.inner.lock().unwrap().status.clone();
+        let status = invalid.snapshot();
         assert!(!status.automatic);
         assert_eq!(status.error, Some("update_preferences_unavailable"));
     }
@@ -162,6 +162,81 @@ fn automatic_preference_defaults_persists_privately_and_fails_closed() {
         "update_preferences_save_failed"
     );
     assert!(!unreadable.inner.lock().unwrap().status.automatic);
+}
+
+#[tokio::test]
+async fn preference_warning_survives_manual_update_activity_until_successful_repair() {
+    for unreadable in [false, true] {
+        let fixture = SignedUpdate::new();
+        let path = fixture.dir.path().join("updates.json");
+        if unreadable {
+            // A directory is consistently unreadable as a JSON file, including
+            // when tests run with permissions that can bypass file mode bits.
+            std::fs::create_dir(&path).unwrap();
+        } else {
+            std::fs::write(&path, "invalid preference JSON").unwrap();
+        }
+        let (download_url, download_server) =
+            serve(vec![b"tampered archive".to_vec(), fixture.bytes.clone()]);
+        let mut current: serde_json::Value =
+            serde_json::from_slice(&fixture.manifest(&download_url)).unwrap();
+        current["version"] = "0.0.0".into();
+        let (url, check_server) = serve(vec![
+            serde_json::to_vec(&current).unwrap(),
+            b"invalid manifest".to_vec(),
+            fixture.manifest(&download_url),
+        ]);
+        let app = fixture.app(&url);
+        let updates = app.state::<Updates>();
+        let assert_status = |phase, error| {
+            let status = updates.snapshot();
+            assert_eq!(status.phase, phase);
+            assert_eq!(status.error, Some(error));
+            assert!(
+                !status.automatic,
+                "Failed preferences must keep automation off"
+            );
+        };
+        assert_status("idle", "update_preferences_unavailable");
+        assert!(!check(app.handle(), false).await.unwrap());
+        assert_status("current", "update_preferences_unavailable");
+        assert!(!check(app.handle(), false).await.unwrap());
+        assert_status("idle", "update_check_failed");
+        assert!(check(app.handle(), false).await.unwrap());
+        assert_status("available", "update_preferences_unavailable");
+        download(app.handle(), false).await.unwrap();
+        assert_status("available", "update_download_failed");
+        download(app.handle(), false).await.unwrap();
+        assert_status("ready", "update_preferences_unavailable");
+        check_server.join().unwrap();
+        download_server.join().unwrap();
+        assert_eq!(
+            updates.inner.lock().unwrap().bytes.as_ref(),
+            Some(&fixture.bytes)
+        );
+
+        if !unreadable {
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                "invalid preference JSON"
+            );
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+        }
+        assert_eq!(
+            updates.set_automatic(true).unwrap_err().code,
+            "update_preferences_save_failed"
+        );
+        assert_status("ready", "update_preferences_unavailable");
+        std::fs::remove_dir(&path).unwrap();
+        updates.set_automatic(true).unwrap();
+        let repaired = updates.snapshot();
+        assert!(repaired.automatic);
+        assert!(repaired.error.is_none());
+        let reloaded = Updates::new("0.1.5".into(), path).snapshot();
+        assert!(reloaded.automatic);
+        assert!(reloaded.error.is_none());
+    }
 }
 
 #[tokio::test]

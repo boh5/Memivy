@@ -68,6 +68,7 @@ pub(crate) struct Status {
 struct Pending {
     attempt: Option<u64>,
     status: Status,
+    preference_error: Option<&'static str>,
     update: Option<Update>,
     bytes: Option<Vec<u8>>,
 }
@@ -89,7 +90,7 @@ impl Updates {
             }
             Err(_) => Err(()),
         };
-        let (automatic, error) = match preference {
+        let (automatic, preference_error) = match preference {
             Ok(preference) => (preference.automatic, None),
             Err(()) => (false, Some("update_preferences_unavailable")),
         };
@@ -106,8 +107,9 @@ impl Updates {
                     notes: None,
                     downloaded: 0,
                     total: None,
-                    error,
+                    error: None,
                 },
+                preference_error,
                 update: None,
                 bytes: None,
             }),
@@ -118,16 +120,18 @@ impl Updates {
         // Native event delivery may reorder background and main-thread events.
         // Number every returned snapshot so the UI can retain the newest one.
         pending.status.revision += 1;
-        pending.status.clone()
+        let mut status = pending.status.clone();
+        // Update activity must not erase a preference problem. A transient
+        // operation error takes priority until the next operation clears it.
+        status.error = status.error.or(pending.preference_error);
+        status
     }
     fn set_automatic(&self, automatic: bool) -> HostResult<()> {
         let mut pending = self.inner.lock().unwrap();
         memivy_core::embedding::write_json(&self.path, &Preferences { automatic })
             .map_err(|_| HostError::new("update_preferences_save_failed"))?;
         pending.status.automatic = automatic;
-        if pending.status.error == Some("update_preferences_unavailable") {
-            pending.status.error = None;
-        }
+        pending.preference_error = None;
         Ok(())
     }
 }
