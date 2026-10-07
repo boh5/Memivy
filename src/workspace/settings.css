@@ -3,6 +3,7 @@
 .update-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .model-settings .update-heading h3{margin:0 0 6px}
 .update-version{margin:0;color:#85857d;font-size:12px;line-height:1.6}
+.update-automatic{margin-top:18px}
 .update-heading>button{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex-shrink:0}
 .model-settings .update-settings .update-status{display:flex;align-items:center;gap:6px;margin:14px 0 0;font-size:12px;line-height:1.7;color:#79796f}
 .model-settings .update-settings .update-current{color:#597251}

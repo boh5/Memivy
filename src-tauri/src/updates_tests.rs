@@ -7,7 +7,7 @@ use std::{
 };
 use tauri_plugin_updater::UpdaterExt;
 
-fn serve(responses: Vec<Vec<u8>>) -> (String, std::thread::JoinHandle<()>) {
+pub(crate) fn serve(responses: Vec<Vec<u8>>) -> (String, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/latest.json", listener.local_addr().unwrap());
     listener.set_nonblocking(true).unwrap();
@@ -42,7 +42,7 @@ fn serve(responses: Vec<Vec<u8>>) -> (String, std::thread::JoinHandle<()>) {
     });
     (url, thread)
 }
-fn cli(root: &Path, args: &[&str]) {
+pub(crate) fn cli(root: &Path, args: &[&str]) {
     let status = std::process::Command::new("node")
         .arg(root.join("node_modules/@tauri-apps/cli/tauri.js"))
         .args(args)

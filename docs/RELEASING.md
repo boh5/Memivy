@@ -132,8 +132,11 @@ when no source change is needed and the release has not been created; otherwise
 prepare a new version. Do not replace published assets in place.
 
 Keep published tags and binaries unchanged. If a fix is needed, release a new
-version. Users check and confirm updates in settings; there is no automatic
-polling or silent installation. Users on a release without the updater must
+version. Release builds check for updates shortly after startup and every 24 hours
+while running, then download and verify available updates automatically. Users can
+disable this in Settings → General → App updates and still check manually.
+Installation and restart always require a user action. Downloaded updates are
+kept in memory until the app exits. Users on a release without the updater must
 manually install an updater-enabled release once. The DMG remains the fallback.
 
 ## Database compatibility

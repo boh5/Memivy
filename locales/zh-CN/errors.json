@@ -201,6 +201,8 @@
   "update_busy": "请等待当前任务完成、关闭其他对话框后重试更新，当前工作已保留。",
   "update_unavailable": "此应用暂不支持更新，或更新尚未准备好。",
   "update_check_failed": "检查更新失败，请检查网络后重试。",
+  "update_preferences_unavailable": "无法读取更新设置，自动更新已暂停。请重新设置自动更新选项。",
+  "update_preferences_save_failed": "未能保存更新设置，原设置保持不变，请重试。",
   "update_download_failed": "更新下载失败或签名校验未通过，请重新下载。",
   "update_mcp_busy": "请先断开外部 Memivy MCP 连接，再重试安装更新。",
   "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。"

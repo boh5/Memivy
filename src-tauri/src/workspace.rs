@@ -1076,7 +1076,10 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         std::process::exit(1);
     });
     let version = context.package_info().version.to_string();
-    let builder = tauri::Builder::default().manage(crate::updates::Updates::new(version));
+    let builder = tauri::Builder::default().manage(crate::updates::Updates::new(
+        version,
+        root.join("updates.json"),
+    ));
     // Development has no release signing configuration and must never replace an app.
     let builder = if !cfg!(debug_assertions) && context.config().identifier == "com.memivy.app" {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
@@ -1125,6 +1128,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::voice::setup(app.handle())?;
             start_embedding(app.handle().clone());
             crate::mcp::watch_library(app.handle().clone());
+            crate::updates::start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1140,6 +1144,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         .manage(crate::cleanup::CleanupJobs::default())
         .invoke_handler(tauri::generate_handler![
             crate::updates::update_status,
+            crate::updates::update_set_automatic,
             crate::updates::update_check,
             crate::updates::update_download,
             crate::updates::update_install,
