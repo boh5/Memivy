@@ -24,6 +24,7 @@ import { CollectionChangeHistory } from "./MemoryChanges";
 import CollectionSuggestions from "./CollectionSuggestions";
 import { Modal, MoreMenu } from "./components";
 import LanguageRecovery from "./LanguageRecovery";
+import UpdateNotice from "./UpdateNotice";
 import Toast, { notify } from "./Toast";
 import { useDesktop, useWindowLifecycle, type MainRoute } from "./desktopApi";
 import "../base.css";
@@ -245,6 +246,7 @@ export default function App() {
     <main className="main-workspace">
       {!native && <div className="preview-banner">{t("app.previewBanner")}</div>}
       <LanguageRecovery />
+      <UpdateNotice />
 
       {page === "collection" && collection && <section className="collection-header">
         <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1>{collection.description && <p>{collection.description}</p>}</div>

@@ -1,6 +1,20 @@
 .memory-app .main-workspace {
   min-width: 0;
 }
+.update-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 12px 18px;
+  background: #fff8db;
+  border-bottom: 1px solid #eee3b8;
+  color: #62552a;
+  font-size: 12px;
+}
+.update-notice > span { flex: 1 1 180px; }
+.update-notice > button { flex-shrink: 0; font-size: 12px; }
 .memory-app .home-page[hidden] {
   display: none;
 }

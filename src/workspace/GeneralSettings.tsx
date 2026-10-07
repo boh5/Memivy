@@ -27,7 +27,7 @@ export default function GeneralSettings({focusEntry=false,onBusyChange,onClose}:
       <LanguageSettings onBusyChange={changeBusy}/>
       <DesktopSettings focusEntry={focusEntry} onBusyChange={changeBusy}><VoiceSettings shortcutOnly onBusyChange={changeBusy}/></DesktopSettings>
     </fieldset>
-    <UpdateSettings onClose={onClose}/>
+    <UpdateSettings onClose={onClose} disabled={busy} onBusyChange={changeBusy}/>
     <section className="settings-section general-settings-reset">
       <button className="outline-button" disabled={busy||!native} onClick={()=>void restore()}>{t('general.restoreDefaults')}</button>
       <ErrorNotice text={error}/>

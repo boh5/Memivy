@@ -5,12 +5,13 @@ import {workspaceFixture} from './helpers/workspace.mjs';
 test('restore general settings handles swapped shortcuts and only writes general preferences',async t=>{
  const f=workspaceFixture(t);
  const {restoreGeneralSettings}=f.load('src/workspace/restoreGeneralSettings.ts');
- const state={desktop:'Alt+KeyR',voice:'Alt+KeyM',visible:false,login:false,language:'en',model:'custom',mcp:false};
+ const state={desktop:'Alt+KeyR',voice:'Alt+KeyM',visible:false,login:false,language:'en',model:'custom',mcp:false,automatic:false};
  const calls=[];
  const call=async(name,args)=>{
   calls.push(name);
   if(name==='desktop_state')return {shortcut:state.desktop,visible:state.visible};
   if(name==='voice_status')return {shortcut:state.voice};
+  if(name==='update_status')return {phase:'idle'};
   if(name==='voice_control'){
    assert.equal(args.action,'shortcut');
    assert.notEqual(args.value,state.desktop);
@@ -20,11 +21,29 @@ test('restore general settings handles swapped shortcuts and only writes general
    assert.deepEqual(Object.keys(args.patch).sort(),['shortcut','visible']);
    state.desktop=args.patch.shortcut;state.visible=args.patch.visible;
   }else if(name==='desktop_login')state.login=args.enabled;
+  else if(name==='update_set_automatic')state.automatic=args.automatic;
   else assert.fail(`unexpected mutation ${name}`);
  };
  await restoreGeneralSettings(call,async language=>{state.language=language});
- assert.deepEqual(state,{desktop:'Alt+KeyM',voice:'Alt+KeyR',visible:true,login:true,language:'system',model:'custom',mcp:false});
- assert.deepEqual(calls,['desktop_state','voice_status','voice_control','desktop_update','voice_control','desktop_login']);
+ assert.deepEqual(state,{desktop:'Alt+KeyM',voice:'Alt+KeyR',visible:true,login:true,language:'system',model:'custom',mcp:false,automatic:true});
+ assert.deepEqual(calls,['desktop_state','voice_status','voice_control','desktop_update','voice_control','desktop_login','update_status','update_set_automatic']);
+});
+
+test('general reset skips unavailable development updates and reports update preference failures',async t=>{
+ const f=workspaceFixture(t);
+ const {restoreGeneralSettings}=f.load('src/workspace/restoreGeneralSettings.ts');
+ for(const phase of ['disabled','idle']) {
+  const calls=[];
+  const reset=restoreGeneralSettings(async(name)=>{
+   calls.push(name);
+   if(name==='desktop_state')return {shortcut:'Alt+KeyM',visible:true};
+   if(name==='voice_status')return {shortcut:'Alt+KeyR'};
+   if(name==='update_status')return {phase};
+   if(name==='update_set_automatic')throw Error('settings cannot be written');
+  },async()=>{});
+  if(phase==='disabled') {await reset;assert(!calls.includes('update_set_automatic'))}
+  else await assert.rejects(reset,{code:'general_reset_partial'});
+ }
 });
 
 test('failed desktop default registration restores the displaced voice binding',async t=>{

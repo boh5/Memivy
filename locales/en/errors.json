@@ -201,6 +201,8 @@
   "update_busy": "Please finish current work, close other dialogs, and retry the update. Your work is preserved.",
   "update_unavailable": "Updates are unavailable in this app or no update is ready.",
   "update_check_failed": "Could not check for updates. Check your connection and try again.",
+  "update_preferences_unavailable": "Could not read your update settings. Automatic updates are paused. Set your automatic update preference again to continue.",
+  "update_preferences_save_failed": "Could not save your update settings. Your previous setting is unchanged. Try again.",
   "update_download_failed": "The update could not be downloaded or its signature could not be verified. Try downloading again.",
   "update_mcp_busy": "Disconnect external Memivy MCP clients before installing the update, then retry.",
   "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually."

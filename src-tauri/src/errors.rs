@@ -57,6 +57,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "update_busy",
     "update_unavailable",
     "update_check_failed",
+    "update_preferences_unavailable",
+    "update_preferences_save_failed",
     "update_download_failed",
     "update_mcp_busy",
     "update_install_failed",

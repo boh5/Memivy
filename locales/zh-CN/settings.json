@@ -238,7 +238,11 @@
     "current": "已是最新版本。",
     "downloading": "正在下载并校验更新…",
     "checking": "正在检查更新…",
-    "install": "重启并安装",
+    "install": "重启并更新",
+    "automatic": "自动检查并下载更新",
+    "automaticDescription": "安装前由你确认重启。",
+    "ready": "新版本 {{version}} 已准备好。",
+    "later": "稍后",
     "download": "下载更新",
     "check": "检查更新"
   }

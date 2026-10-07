@@ -25,5 +25,7 @@ export async function restoreGeneralSettings(
   try {
     await call('desktop_login',{enabled:true});
     await setLanguage('system');
+    const updates = await call<{phase:string}>('update_status');
+    if(updates.phase!=='disabled')await call('update_set_automatic',{automatic:true});
   } catch { throw {code:'general_reset_partial'}; }
 }

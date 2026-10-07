@@ -238,7 +238,11 @@
     "current": "You are up to date.",
     "downloading": "Downloading and verifying update…",
     "checking": "Checking for updates…",
-    "install": "Restart and install",
+    "install": "Restart and update",
+    "automatic": "Automatically check for and download updates",
+    "automaticDescription": "You choose when to restart and install.",
+    "ready": "Version {{version}} is ready to install.",
+    "later": "Later",
     "download": "Download update",
     "check": "Check for updates"
   }
