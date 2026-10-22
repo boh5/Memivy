@@ -751,7 +751,7 @@ impl MemoryStore {
         key.validate()?;
         let db = self.connection()?;
         let sql = format!(
-            "SELECT {RECEIPT_COLUMNS},logical_input_id FROM receipts r WHERE action NOT IN ('capture','undo') AND EXISTS(SELECT 1 FROM memories WHERE id=?1 AND state IN ('active','merged')) AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) ORDER BY rowid DESC LIMIT 20"
+            "SELECT {RECEIPT_COLUMNS},logical_input_id,CASE WHEN r.memory_id=?1 THEN r.after_version ELSE (SELECT c.after_version FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) END AS record_after_version FROM receipts r WHERE action NOT IN ('capture','undo') AND EXISTS(SELECT 1 FROM memories WHERE id=?1 AND state IN ('active','merged')) AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) ORDER BY rowid DESC LIMIT 20"
         );
         Ok(db
             .prepare(&sql)?
@@ -759,6 +759,7 @@ impl MemoryStore {
                 Ok(MemoryReceipt {
                     receipt: read_receipt(row)?,
                     logical_input_id: row.get(9)?,
+                    record_after_version: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)

@@ -106,6 +106,8 @@ pub struct MemoryReceipt {
     #[serde(flatten)]
     pub receipt: Receipt,
     pub logical_input_id: Option<String>,
+    /// Version produced for the queried memory; the receipt retains its group anchor.
+    pub record_after_version: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NavigationSnapshot {

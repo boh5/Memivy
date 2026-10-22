@@ -90,6 +90,123 @@ fn preserves_exact_unicode_bom_crlf_originals_and_filename_titles_without_ai() {
 }
 
 #[test]
+fn receipt_projection_tracks_each_imported_version_without_changing_grouped_undo() {
+    let (_dir, store) = setup();
+    let result = store
+        .import_files(&request(&[
+            ("one.md", "First source"),
+            ("two.md", "Second source"),
+            ("three.md", "Third source"),
+        ]))
+        .unwrap();
+    let canonical = result.receipt.as_ref().unwrap();
+    let before_reads = counts(&store);
+    for item in &result.items {
+        let receipts = store
+            .memory_receipts(&RecordKey {
+                kind: "memory".into(),
+                id: item.memory_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(&receipts[0].receipt, canonical);
+        assert_eq!(
+            receipts[0].record_after_version.as_deref(),
+            Some(item.version_id.as_str())
+        );
+        assert_eq!(receipts[0].logical_input_id, None);
+        let serialized = serde_json::to_value(&receipts[0]).unwrap();
+        assert_eq!(serialized["record_after_version"], item.version_id);
+        assert_eq!(serialized["after_version"], result.items[0].version_id);
+        assert!(serialized["logical_input_id"].is_null());
+    }
+    assert_eq!(counts(&store), before_reads);
+
+    let edited = &result.items[1];
+    let edit = store
+        .edit_memory(&EditRequest {
+            request_id: id(),
+            memory_id: edited.memory_id.clone(),
+            expected_version: edited.version_id.clone(),
+            title: "Edited second source".into(),
+            body: "Later work".into(),
+        })
+        .unwrap();
+    let key = RecordKey {
+        kind: "memory".into(),
+        id: edited.memory_id.clone(),
+    };
+    let receipts = store.memory_receipts(&key).unwrap();
+    let import = receipts
+        .iter()
+        .find(|receipt| receipt.receipt.request_id == result.request_id)
+        .unwrap();
+    assert_eq!(&import.receipt, canonical);
+    assert_eq!(
+        import.record_after_version.as_deref(),
+        Some(edited.version_id.as_str())
+    );
+    let current = store.memory(&edited.memory_id).unwrap().current;
+    assert_ne!(
+        import.record_after_version.as_deref(),
+        Some(current.id.as_str())
+    );
+    assert_eq!(receipts[0].receipt, edit);
+    assert_eq!(
+        receipts[0].record_after_version.as_deref(),
+        Some(current.id.as_str())
+    );
+    assert_eq!(
+        store.undo(&id(), &import.receipt.request_id).unwrap_err(),
+        DataError::Conflict
+    );
+    for item in &result.items {
+        let expected = if item.memory_id == edited.memory_id {
+            &current.id
+        } else {
+            &item.version_id
+        };
+        assert_eq!(&store.memory(&item.memory_id).unwrap().current.id, expected);
+    }
+
+    store.undo(&id(), &edit.request_id).unwrap();
+    assert_eq!(
+        store.undo(&id(), &import.receipt.request_id).unwrap_err(),
+        DataError::Conflict
+    );
+    let clean = store
+        .import_files(&request(&[
+            ("clean-one.md", "First clean source"),
+            ("clean-two.md", "Second clean source"),
+            ("clean-three.md", "Third clean source"),
+        ]))
+        .unwrap();
+    let later_member_receipt = store
+        .memory_receipts(&RecordKey {
+            kind: "memory".into(),
+            id: clean.items[2].memory_id.clone(),
+        })
+        .unwrap();
+    store
+        .undo(&id(), &later_member_receipt[0].receipt.request_id)
+        .unwrap();
+    assert_eq!(store.receipt(&clean.request_id).unwrap().status, "undone");
+    for item in &clean.items {
+        assert!(store.memory(&item.memory_id).is_err());
+        assert!(
+            store
+                .memory_receipts(&RecordKey {
+                    kind: "memory".into(),
+                    id: item.memory_id.clone(),
+                })
+                .unwrap()
+                .is_empty()
+        );
+    }
+    store.check_integrity().unwrap();
+}
+
+#[test]
 fn invalid_batch_and_mid_transaction_failure_never_leave_partial_imports() {
     let (_dir, store) = setup();
     let baseline = counts(&store);

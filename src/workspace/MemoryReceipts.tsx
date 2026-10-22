@@ -74,7 +74,7 @@ export default function MemoryReceipts({ record, revision: requestedRevision = 0
       const collectionCount = new Set(receipt.collection_changes?.map(change => change.collection_id)).size;
       const summary = importedBatch ? t("receipt.summaryImport") : collectionOnly ? t("collectionChanges.updatedCollections", { count: collectionCount }) : t(receipt.action === "merge" ? "receipt.summaryMerge" : "receipt.summaryUpdated");
       if (presentation === "summary") {
-        if (!applied || (!collectionOnly && receipt.after_version !== currentVersion) || receipt.request_id === excludedReceipt) return null;
+        if (!applied || (!collectionOnly && receipt.record_after_version !== currentVersion) || receipt.request_id === excludedReceipt) return null;
         return <div className="memory-change-receipt" role="status" key={receipt.request_id}>
           <Icon name="check" size={15} /><span>{summary}</span>
           <button disabled={busy} onClick={() => void run(receipt, "changes")}>{t("receipt.viewChanges")}</button>

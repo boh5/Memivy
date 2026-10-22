@@ -112,7 +112,7 @@ export type ImportResult = {
   items: { file_name: string; status: "imported" | "duplicate"; memory_id: string; version_id: string }[];
   receipt: Receipt | null;
 };
-export type MemoryReceipt = Receipt & { logical_input_id: string | null };
+export type MemoryReceipt = Receipt & { logical_input_id: string | null; record_after_version: string | null };
 export type AgentChangeGroup = { input_id: string; receipts: Receipt[] };
 export type AgentUndoResult = { receipt: Receipt | null; conflicts: string[]; collection_conflicts?: string[] };
 export type Topic = { id: string; title: string; updated_at: number; collection_id?: string | null };

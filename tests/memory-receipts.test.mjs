@@ -4,7 +4,7 @@ import { workspaceFixture } from './helpers/workspace.mjs';
 for (const failure of [false, true]) test(`switching record removes stale receipt during ${failure ? 'failed' : 'pending'} loading`, async t => {
   const f = workspaceFixture(t);
   let finish;
-  f.overrides.memory_receipts = async ({key}) => key.id === 'a' ? [{request_id:'receipt-a',memory_id:'a',capture_id:'capture-a',status:'applied',before_version:'v0',after_version:'v1'}] : new Promise((resolve,reject) => {finish = failure ? reject : resolve;});
+  f.overrides.memory_receipts = async ({key}) => key.id === 'a' ? [{request_id:'receipt-a',memory_id:'a',capture_id:'capture-a',status:'applied',before_version:'v0',after_version:'v1',record_after_version:'v1'}] : new Promise((resolve,reject) => {finish = failure ? reject : resolve;});
   const props = {record:{kind:'memory',id:'a'},revision:0,onOpen(){},onRefresh(){}};
   const view = f.mount(f.load('src/workspace/MemoryReceipts.tsx').default, props);
   await f.settle();
@@ -21,7 +21,7 @@ for (const failure of [false, true]) test(`switching record removes stale receip
 test('late undo completion cannot navigate to an unmounted record', async t => {
   const f=workspaceFixture(t), opened=[];
   let finish;
-  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',logical_input_id:null}];
+  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',record_after_version:null,logical_input_id:null}];
   f.overrides['library_action']=()=>new Promise(resolve=>finish=resolve);
   const view=f.mount(f.load('src/workspace/MemoryReceipts.tsx').default,{record:{kind:'memory',id:'a'},revision:0,onOpen:key=>opened.push(key),onRefresh(){}});
   await f.settle();
@@ -32,7 +32,7 @@ test('late undo completion cannot navigate to an unmounted record', async t => {
 
 test('background revisions preserve an open immutable change comparison', async t => {
   const f=workspaceFixture(t);
-  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',capture_id:'raw-a',status:'applied',before_version:null,after_version:'v1'}];
+  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',capture_id:'raw-a',status:'applied',before_version:null,after_version:'v1',record_after_version:'v1'}];
   f.overrides.memory_receipt_changes=async()=>([{receipt:{before_version:null},before:null,after:{id:'v1',body:"Confirmed version"}}]);
   const props={record:{kind:'memory',id:'a'},revision:0,onOpen(){},onRefresh(){}};
   const view=f.mount(f.load('src/workspace/MemoryReceipts.tsx').default,props);await f.settle();
@@ -46,7 +46,7 @@ test('background revisions preserve an open immutable change comparison', async 
 
 test('background refresh preserves an in-flight undo', async t => {
   const f=workspaceFixture(t);let refreshed=0,finish;
-  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',logical_input_id:null}];
+  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',record_after_version:null,logical_input_id:null}];
   f.overrides['library_action']=()=>new Promise(resolve=>finish=resolve);
   const props={record:{kind:'memory',id:'a'},revision:0,onOpen(){},onRefresh(){refreshed++;}};
   const view=f.mount(f.load('src/workspace/MemoryReceipts.tsx').default,props);await f.settle();
@@ -60,7 +60,7 @@ test('background refresh preserves an in-flight undo', async t => {
 
 for (const grouped of [false,true]) test(`${grouped?'conversation':'standalone'} receipts use the matching undo endpoint and retain receipt comparisons`,async t=>{
   const f=workspaceFixture(t),opened=[];let refreshed=0;
-  const receipt={request_id:'receipt-a',memory_id:'a',action:'edit',status:'applied',before_version:'v0',after_version:'v1',logical_input_id:grouped?'input-a':null};
+  const receipt={request_id:'receipt-a',memory_id:'a',action:'edit',status:'applied',before_version:'v0',after_version:'v1',record_after_version:'v1',logical_input_id:grouped?'input-a':null};
   f.overrides.memory_receipts=async()=>[receipt];
   f.overrides.memory_receipt_changes=async()=>[{receipt,before:{id:'v0',body:'Before'},after:{id:'v1',body:'After'}}];
   f.overrides.discussion_undo=async()=>({receipt:{action:'undo'},conflicts:[]});
@@ -83,7 +83,7 @@ for (const grouped of [false,true]) test(`${grouped?'conversation':'standalone'}
 
 test('grouped undo conflicts remain actionable and retry reuses the request id without claiming success',async t=>{
   const f=workspaceFixture(t),opened=[];let refreshed=0,attempts=0;
-  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',logical_input_id:'input-a'}];
+  f.overrides.memory_receipts=async()=>[{request_id:'receipt-a',memory_id:'a',status:'applied',record_after_version:null,logical_input_id:'input-a'}];
   f.overrides.discussion_undo=async()=>++attempts===1?{receipt:null,conflicts:['memory-b']}:{receipt:{action:'undo'},conflicts:[]};
   const view=f.mount(f.load('src/workspace/MemoryReceipts.tsx').default,{record:f.keyA,onOpen(key){opened.push(key.id);},onRefresh(){refreshed++;}});await f.settle();
   f.find(view,n=>n.type==='button'&&f.text(n)==='Undo this turn').props.onClick();await f.settle();
@@ -96,7 +96,7 @@ test('grouped undo conflicts remain actionable and retry reuses the request id w
   assert.equal(refreshed,1);assert.deepEqual(opened,['memory-b','a']);assert.equal(f.find(view,n=>n.type===Conflict).props.result,null);
 });
 
-const membershipReceipt={request_id:'membership-change',memory_id:null,before_version:null,after_version:null,status:'applied',action:'update_collection_members',logical_input_id:'membership-input',collection_changes:[{collection_id:'collection-a',before:{name:'Work',description:'',revision:1,archived:false},after:{name:'Work',description:'',revision:2,archived:false},added_memory_ids:['a'],removed_memory_ids:[]}]};
+const membershipReceipt={request_id:'membership-change',memory_id:null,before_version:null,after_version:null,record_after_version:null,status:'applied',action:'update_collection_members',logical_input_id:'membership-input',collection_changes:[{collection_id:'collection-a',before:{name:'Work',description:'',revision:1,archived:false},after:{name:'Work',description:'',revision:2,archived:false},added_memory_ids:['a'],removed_memory_ids:[]}]};
 
 test('a collection-only receipt appears beside the current memory and undoes the complete turn',async t=>{
   const f=workspaceFixture(t);let refreshes=0;
@@ -164,7 +164,7 @@ test('expanded collection members follow renamed deleted and restored memories w
 
 for (const presentation of ['summary', 'history']) test(`${presentation} import receipts name the whole batch before undoing it`, async t => {
   const f = workspaceFixture(t);
-  f.overrides.memory_receipts = async () => [{ request_id: 'import-batch', memory_id: 'a', action: 'import', status: 'applied', before_version: null, after_version: 'v1', logical_input_id: null }];
+  f.overrides.memory_receipts = async () => [{ request_id: 'import-batch', memory_id: 'a', action: 'import', status: 'applied', before_version: null, after_version: 'v1', record_after_version: 'v1', logical_input_id: null }];
   f.overrides.library_action = async () => ({ action: 'undo' });
   const view = f.mount(f.load('src/workspace/MemoryReceipts.tsx').default, { record: f.keyA, presentation, currentVersion: 'v1', onOpen() {}, onRefresh() {} });
   await f.settle();
@@ -176,4 +176,25 @@ for (const presentation of ['summary', 'history']) test(`${presentation} import 
   const undo = f.calls.find(call => call.name === 'library_action');
   assert.equal(undo.args.action.original_request, 'import-batch');
   assert.equal(f.calls.filter(call => call.name === 'discussion_undo').length, 0);
+});
+
+test('a later import member shows the batch receipt only while its imported version is current', async t => {
+  const f = workspaceFixture(t);
+  f.overrides.memory_receipts = async () => [{ request_id: 'import-batch', memory_id: 'a', action: 'import', status: 'applied', before_version: null, after_version: 'version-a', record_after_version: 'version-b', logical_input_id: null }];
+  f.overrides.library_action = async () => ({ action: 'undo' });
+  const props = { record: f.keyB, presentation: 'summary', currentVersion: 'version-b', onOpen() {}, onRefresh() {} };
+  const view = f.mount(f.load('src/workspace/MemoryReceipts.tsx').default, props);
+  await f.settle();
+  assert(f.text(view.tree).includes('Imported memories in this batch'), 'A non-primary batch member must show its current import receipt');
+  f.render(view, { ...props, currentVersion: 'version-b-edited' }); await f.settle();
+  assert(!f.text(view.tree).includes('Imported memories in this batch'), 'An older import receipt must not appear beside a later edit');
+  f.render(view, { ...props, excludedReceipt: 'import-batch' }); await f.settle();
+  assert(!f.text(view.tree).includes('Imported memories in this batch'), 'A receipt already shown by the detail must not appear twice');
+  f.render(view, props); await f.settle();
+  f.find(view, node => node.type === 'button' && f.text(node) === 'Undo this import batch').props.onClick(); await f.settle();
+  assert.equal(f.calls.find(call => call.name === 'library_action').args.action.original_request, 'import-batch');
+  const readReceipts = f.overrides.memory_receipts;
+  f.overrides.memory_receipts = async () => (await readReceipts()).map(receipt => ({ ...receipt, status: 'undone' }));
+  f.render(view, { ...props, revision: 1 }); await f.settle();
+  assert(!f.text(view.tree).includes('Imported memories in this batch'), 'An undone import receipt must not appear as a current change');
 });
