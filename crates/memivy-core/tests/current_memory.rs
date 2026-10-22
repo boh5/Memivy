@@ -97,6 +97,7 @@ fn manual_save_conflict_preserves_draft_without_creating_an_archive() {
         expected_version: target.version_id.clone(),
     };
     let draft = WorkspaceDraft {
+        context_export: None,
         key: format!("save:{}", run.assistant_message_id),
         request_id: id(),
         title: "Manual title".into(),
@@ -183,6 +184,7 @@ fn manual_save_consumes_its_draft_atomically_and_replay_preserves_a_newer_draft(
     let text = "确认的文字";
     let title = "Title";
     let mut draft = WorkspaceDraft {
+        context_export: None,
         key: format!("save:{}", run.assistant_message_id),
         request_id: request.clone(),
         title: title.into(),

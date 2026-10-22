@@ -103,6 +103,8 @@ To revisit something, press **Option+R** and ask. Describe what you remember; yo
 
 ## Connect other AI apps
 
+To bring selected memories into any AI chat, click **Copy for AI** in the memory list or a memory's menu. Choose memories, preview and edit their full text, then copy it with source references. You can also use **Summarize background** with your configured AI model. The preview is saved locally as a draft; it does not change your memories. If a source changes or is deleted, review your selection and reload the preview before copying.
+
 Through MCP, your other AI assistants can save and search memories in Memivy. The other app must support local MCP servers (stdio), and the agent needs permission to edit its configuration.
 
 ![Connect other AI apps: enable access, copy the setup prompt, and give it to your agent](docs/media/en/mcp.gif)

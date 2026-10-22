@@ -99,6 +99,7 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     let c = id();
     s.create_conversation(&c, "私有草稿秘密").unwrap();
     s.save_workspace_draft(&WorkspaceDraft {
+        context_export: None,
         destination: None,
         key: "input".into(),
         request_id: id(),
@@ -190,6 +191,7 @@ fn draft_autosave_and_index_work_do_not_refresh_the_library() {
         let mut previous = None;
         for i in 0..3 {
             let draft = WorkspaceDraft {
+                context_export: None,
                 key: key.clone(),
                 request_id: id(),
                 title: String::new(),

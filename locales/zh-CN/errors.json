@@ -205,5 +205,8 @@
   "update_preferences_save_failed": "未能保存更新设置，原设置保持不变，请重试。",
   "update_download_failed": "更新下载失败或签名校验未通过，请重新下载。",
   "update_mcp_busy": "请先断开外部 Memivy MCP 连接，再重试安装更新。",
-  "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。"
+  "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。",
+  "context_export_budget": "最多选择 20 条记忆，来源正文和信息合计不超过 48 KiB。内容没有被截断。",
+  "context_export_unavailable": "背景预览暂时不可用，请关闭后重试。",
+  "context_export_clipboard": "未能复制到剪贴板，预览内容已保留，请重试。"
 }

@@ -58,6 +58,76 @@ fn key(r: &Receipt) -> RecordKey {
 }
 
 #[test]
+fn context_preview_draft_recovers_without_writing_memories() {
+    let (_dir, store) = setup();
+    let saved = capture(&store, "Tentative launch idea", "user", None);
+    let snapshot = store
+        .prepare_context_export(&[ContextSelection {
+            memory_id: saved.memory_id.clone(),
+            version_id: saved.version_id.clone(),
+        }])
+        .unwrap();
+    let mut draft = WorkspaceDraft {
+        key: "context_export".into(),
+        request_id: id(),
+        title: String::new(),
+        body: "保留编辑中的背景，不把建议写成事实。".into(),
+        expected_version: None,
+        origin: None,
+        destination: None,
+        context: vec![],
+        context_export: Some(ContextExportDraft {
+            snapshot: Some(snapshot.clone()),
+            mode: ContextExportMode::Full,
+            selections: vec![ContextDraftSelection {
+                memory_id: saved.memory_id.clone(),
+                version_id: saved.version_id.clone(),
+                title: "Tentative launch idea".into(),
+            }],
+            collection_id: None,
+        }),
+    };
+    assert!(store.compare_workspace_draft(&draft, None).unwrap());
+    let recovered = store.workspace_draft("context_export").unwrap().unwrap();
+    assert_eq!(recovered.body, draft.body);
+    assert_eq!(
+        recovered.context_export.unwrap().snapshot,
+        Some(snapshot.clone())
+    );
+    let previous = draft.request_id.clone();
+    draft.request_id = id();
+    draft.body.push_str(" Later draft.");
+    assert!(!store.compare_workspace_draft(&draft, None).unwrap());
+    assert!(
+        store
+            .compare_workspace_draft(&draft, Some(&previous))
+            .unwrap()
+    );
+    store
+        .trash_memory(&saved.memory_id, &saved.version_id)
+        .unwrap();
+    draft.request_id = id();
+    store.save_workspace_draft(&draft).unwrap();
+    assert_eq!(
+        store.check_context_export(&snapshot).unwrap_err(),
+        DataError::Unavailable
+    );
+    assert_eq!(
+        store
+            .workspace_draft("context_export")
+            .unwrap()
+            .unwrap()
+            .body,
+        draft.body
+    );
+    draft.key = "input".into();
+    assert_eq!(
+        store.save_workspace_draft(&draft).unwrap_err(),
+        DataError::Invalid
+    );
+}
+
+#[test]
 fn ranking_filters_and_pagination_apply_before_limit() {
     let (_d, s) = setup();
     let a = capture(&s, "最初原话 独有证据", "agent", Some("项目 A"));
@@ -172,6 +242,7 @@ fn edits_are_guarded_preserve_raw_and_restore_adds_history() {
     let (_d, s) = setup();
     let raw = capture(&s, " \n原文要逐字保留\n ", "user", None);
     let mut draft = WorkspaceDraft {
+        context_export: None,
         destination: None,
         context: vec![],
         key: format!("memory:{}", raw.memory_id),
@@ -220,6 +291,7 @@ fn drafts_are_private_to_editing_and_survive_restart() {
     let (d, s) = setup();
     let raw = capture(&s, "可搜索记录", "user", None);
     let draft = WorkspaceDraft {
+        context_export: None,
         destination: None,
         context: vec![],
         key: format!("memory:{}", raw.memory_id),
@@ -425,6 +497,7 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
         .unwrap();
     let selected = key(&current);
     s.save_workspace_draft(&WorkspaceDraft {
+        context_export: None,
         destination: None,
         context: vec![],
         key: format!("memory:{}", selected.id),
@@ -441,6 +514,7 @@ fn single_article_export_contains_only_the_selected_saved_title_and_body() {
     s.create_conversation(&chat, "conversation_private")
         .unwrap();
     s.save_workspace_draft(&WorkspaceDraft {
+        context_export: None,
         destination: None,
         context: vec![],
         key: format!("discussion:{chat}"),

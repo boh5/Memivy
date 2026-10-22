@@ -447,6 +447,7 @@ fn discussions_and_drafts_are_not_memories_and_manual_save_retains_provenance() 
     let (conversation, turn) = finished_turn(&store, &[]);
     store
         .save_workspace_draft(&WorkspaceDraft {
+            context_export: None,
             key: format!("discussion:{conversation}"),
             request_id: id(),
             title: String::new(),

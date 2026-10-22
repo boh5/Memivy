@@ -65,6 +65,7 @@ async fn discussion_open(
         let draft_key = format!("discussion:{id}");
         if s.workspace_draft(&draft_key)?.is_none() {
             s.save_workspace_draft(&WorkspaceDraft {
+                context_export: None,
                 destination: None,
                 key: draft_key,
                 request_id: id.clone(),
@@ -304,6 +305,7 @@ async fn discussion_submit(
         let draft_key = format!("discussion:{}", topic.id);
         if initial && state.store.workspace_draft(&draft_key)?.is_none() {
             state.store.save_workspace_draft(&WorkspaceDraft {
+                context_export: None,
                 key: draft_key,
                 request_id: uuid::Uuid::new_v4().to_string(),
                 title: String::new(),
@@ -1142,6 +1144,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             }
         })
         .manage(crate::cleanup::CleanupJobs::default())
+        .manage(crate::context_export::ContextExportJobs::default())
         .invoke_handler(tauri::generate_handler![
             crate::updates::update_status,
             crate::updates::update_set_automatic,
@@ -1164,6 +1167,12 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::cleanup::cleanup_generate,
             crate::cleanup::cleanup_cancel,
             crate::cleanup::cleanup_save,
+            crate::context_export::context_export_prepare,
+            crate::context_export::context_export_start,
+            crate::context_export::context_export_generate,
+            crate::context_export::context_export_cancel,
+            crate::context_export::context_export_validate,
+            crate::context_export::context_export_copy,
             library_changes,
             library_agent_changes,
             collection_agent_changes,

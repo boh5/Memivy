@@ -106,6 +106,7 @@ pub fn seed(store: &MemoryStore, corpus: &Corpus) -> Seeded {
     }
     store
         .save_workspace_draft(&WorkspaceDraft {
+            context_export: None,
             destination: None,
             key: "input".into(),
             request_id: id(),
