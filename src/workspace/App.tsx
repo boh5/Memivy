@@ -2,7 +2,7 @@ import { message } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useTranslation } from "react-i18next";
 import { finishVoiceInputs } from "./useVoice";
-import { useResourceBridge, useResourceVersion } from "./resources";
+import { expireQueries, useResourceBridge, useResourceVersion } from "./resources";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Icon } from "../ui";
@@ -12,6 +12,8 @@ import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
 import MemoryDetail from "./MemoryDetail";
 import MemoryList from "./MemoryList";
+import ImportMemories from "./ImportMemories";
+import type { ImportOrganization } from "./importMemoryBatch";
 import Activity from "./Activity";
 import PaneResizeHandle from "./PaneResizeHandle";
 import WorkspaceQuery from "./WorkspaceQuery";
@@ -38,6 +40,8 @@ type Handoff = { generation: number; target: "query" | "topic" | "view" };
 
 export default function App() {
   const { t } = useTranslation("workspace");
+  const [importOpen, setImportOpen] = useState(false);
+  const importDispatches = useRef(new Set<string>());
   const [collections, setCollections] = useState<Collection[]>([]), [pins, setPins] = useState<Row[]>([]);
   const [collectionId, setCollectionId] = useState<string | null>(null);
   const [collectionEditor, setCollectionEditor] = useState<Collection | "new" | null>(null);
@@ -198,6 +202,28 @@ export default function App() {
     const t = await call<Topic>("discussion_open", { id: uid(), title: detail.title, context: [source, ...related], collectionId: page === "collection" ? collectionId : null });
     setRecallQuick(false); setTopic(t); setPage("topic"); setTopicFocus(v => v + 1); refresh();
   }
+  async function organizeImport(request: ImportOrganization) {
+    await finishVoiceInputs();
+    await flushDrafts();
+    if (!importDispatches.current.has(request.id)) {
+      await expireQueries(["library_detail"]);
+      await Promise.all(request.memories.map(async memory => {
+        const current = await call<Detail>("library_detail", { key: { kind: "memory", id: memory.memory_id }, archives: false });
+        if (current.state !== "active" || current.current.id !== memory.version_id) throw { code: "import_selection_changed" };
+      }));
+    }
+    await call<Topic>("discussion_open", { id: request.topicId, title: request.title, context: request.context, collectionId: null });
+    // Once submission may have reached storage, retry the same request even if
+    // its Agent changes have advanced one of the imported versions.
+    importDispatches.current.add(request.id);
+    const next = await call<Topic>("discussion_submit", { id: request.id, topicId: request.topicId, text: request.text, context: request.context, origin: { kind: "user", app: "Memivy", project: null, uri: null }, collectionId: null, quick: false });
+    setImportOpen(false); setRecallOpen(false); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); refresh();
+  }
+  async function openImportDiscussion(id: string) {
+    await finishVoiceInputs(); await flushDrafts();
+    const next = await call<Topic>("discussion_topic", { id });
+    setImportOpen(false); setRecallOpen(false); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1);
+  }
   function openRecord(key: Key) { setRecallQuick(false); setSelected(key); setPage("library"); setCollectionId(null); }
   function showLibrary() { setRecallQuick(false); if (page === "trash") setSelected(null); setPage("library"); setCollectionId(null); }
   function showCollection(id: string) { setRecallQuick(false); setCollectionId(id); setSelected(null); setPage("collection"); }
@@ -263,7 +289,7 @@ export default function App() {
         <MemoryList key={listIdentity}
           collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
           selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection"].includes(page)) setPage("library"); }}
-          onCapture={newDiscussion} onRefresh={refresh} />
+          onCapture={newDiscussion} onRefresh={refresh} onImport={!listCollectionId ? () => setImportOpen(true) : undefined} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
           <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : null}</span></div>
           <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
@@ -281,6 +307,7 @@ export default function App() {
           </section>}
       </div>}
     </main>
+    <ImportMemories open={importOpen} configured={configured} onClose={() => setImportOpen(false)} onChanged={refresh} onOpenRecord={openRecord} onOrganize={organizeImport} onOpenDiscussion={openImportDiscussion} />
     {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor}

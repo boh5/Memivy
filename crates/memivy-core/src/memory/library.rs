@@ -161,9 +161,9 @@ impl MemoryStore {
         if q.query.len() > 512
             || q.query.split_whitespace().count() > 16
             || q.offset > 1_000_000
-            || q.origin
-                .as_ref()
-                .is_some_and(|s| !matches!(s.as_str(), "user" | "agent" | "conversation"))
+            || q.origin.as_ref().is_some_and(|s| {
+                !matches!(s.as_str(), "user" | "agent" | "conversation" | "imported")
+            })
             || q.project.as_ref().is_some_and(|s| s.len() > 200)
             || matches!((q.since,q.until), (Some(a),Some(b)) if a > b)
         {

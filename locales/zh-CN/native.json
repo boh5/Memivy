@@ -12,5 +12,6 @@
   "backupOpen": "选择 Memivy 备份；校验后可确认整库恢复。",
   "quickInput": "记下想法或提问",
   "exportDefaultName": "记忆",
-  "exportMessage": "将这一篇的标题和当前正文保存为 Markdown。"
+  "exportMessage": "将这一篇的标题和当前正文保存为 Markdown。",
+  "importOpen": "选择最多 32 个 Markdown 或纯文本文件，预览确认后导入。"
 }

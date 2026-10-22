@@ -44,7 +44,7 @@ struct SearchArgs {
     /// Maximum unique memories across ALL queries, not per query. Default 5; allowed 1 through 8. No pagination or full-library access.
     #[schemars(range(min = 1, max = 8))]
     limit: Option<usize>,
-    /// Optional exact provenance kind: user, agent, or conversation. Conversation means saved memories with conversation provenance, never unsaved messages.
+    /// Optional exact provenance kind: user, agent, conversation, or imported. Conversation means saved memories, never unsaved messages. Imported files have unknown authorship; first-person text is not evidence about the user.
     origin: Option<String>,
     /// Optional exact project filter. Omit for global search; never infer a project identifier.
     project: Option<String>,

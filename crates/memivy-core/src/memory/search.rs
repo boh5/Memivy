@@ -88,7 +88,7 @@ impl SearchRequest {
             || scope
                 .origin
                 .as_deref()
-                .is_some_and(|v| !matches!(v, "user" | "agent" | "conversation"))
+                .is_some_and(|v| !matches!(v, "user" | "agent" | "conversation" | "imported"))
             || matches!((scope.since, scope.until), (Some(a), Some(b)) if a > b)
         {
             return Err(DataError::Invalid);

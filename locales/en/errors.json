@@ -205,5 +205,16 @@
   "update_preferences_save_failed": "Could not save your update settings. Your previous setting is unchanged. Try again.",
   "update_download_failed": "The update could not be downloaded or its signature could not be verified. Try downloading again.",
   "update_mcp_busy": "Disconnect external Memivy MCP clients before installing the update, then retry.",
-  "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually."
+  "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually.",
+  "import_file_type": "Only Markdown (.md) and plain text (.txt) files are supported.",
+  "import_file_read": "This file could not be read. Check its permissions and try again.",
+  "import_file_encoding": "This file is not valid UTF-8 text. Save it as UTF-8 and choose it again.",
+  "import_file_empty": "This file has no text to import.",
+  "import_file_size": "This file exceeds the 128 KiB limit. Split it into smaller files.",
+  "import_total_size": "This file would exceed the 2 MiB batch limit. Import it in another batch.",
+  "import_file_binary": "This file contains binary content rather than plain text.",
+  "import_file_name": "The filename is empty, contains control characters, or exceeds 255 bytes. Rename the file and retry.",
+  "import_file_limit": "Choose no more than 32 files for one import.",
+  "import_busy": "Another import is active. Finish or close its preview before choosing more files.",
+  "import_selection_changed": "An imported memory changed or is no longer available. Review the batch before starting organization."
 }

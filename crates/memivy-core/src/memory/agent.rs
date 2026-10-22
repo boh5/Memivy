@@ -175,6 +175,77 @@ pub(super) fn evidence_value(memory_id: &str, evidence: Evidence, total: usize) 
         "evidence":evidence,"next_start":(next<total).then_some(next),"total_chars":total})
 }
 
+/// Keep provenance attached to the actual cited version, including historical
+/// reads. A bounded list must not hide that other linked sources were imported.
+pub(super) fn attributed_evidence_value(
+    db: &rusqlite::Connection,
+    memory_id: &str,
+    evidence: Evidence,
+    total: usize,
+) -> Result<Value> {
+    let (source_id, relation) = match &evidence.source {
+        SourceRef::Capture(id) => (
+            id,
+            "FROM captures c JOIN capture_state s ON s.capture_id=c.id WHERE c.id=?1 AND s.availability='active' AND c.source IS NOT NULL",
+        ),
+        SourceRef::Version(id) => (
+            id,
+            "FROM version_captures vc JOIN captures c ON c.id=vc.capture_id JOIN capture_state s ON s.capture_id=c.id WHERE vc.version_id=?1 AND s.availability='active' AND c.source IS NOT NULL",
+        ),
+    };
+    let (count, imported): (i64, bool) = db.query_row(
+        &format!(
+            "SELECT count(*),COALESCE(max(json_extract(c.source,'$.kind')='imported'),0) {relation}"
+        ),
+        [source_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let candidates = db
+        .prepare(&format!(
+            "SELECT c.id,c.source,c.created_at {relation} ORDER BY c.created_at,c.id LIMIT 4"
+        ))?
+        .query_map([source_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .map(|row| {
+            let (capture_id, source, recorded_at) = row?;
+            let origin: Origin = decode(&source)?;
+            // Source context stays local; the model only needs provenance and authorship.
+            let metadata = match origin {
+                Origin::Imported { file_name } => json!({"kind":"imported","file_name":file_name}),
+                Origin::User { .. } => json!({"kind":"user"}),
+                Origin::Agent { .. } => json!({"kind":"agent"}),
+                Origin::Discussion { .. } => json!({"kind":"discussion"}),
+                Origin::Conversation { message_role, confirmed_by, .. } => json!({"kind":"conversation","message_role":message_role,"confirmed_by":confirmed_by}),
+            };
+            Ok(json!({"capture_id":capture_id,"origin":metadata,"recorded_at_ms":recorded_at}))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut sources = Vec::new();
+    let mut source_bytes = 2;
+    for source in candidates {
+        let bytes = source.to_string().len() + usize::from(!sources.is_empty());
+        if source_bytes + bytes > 6 * 1024 {
+            break;
+        }
+        source_bytes += bytes;
+        sources.push(source);
+    }
+    let more_sources = count > sources.len() as i64;
+    let mut result = evidence_value(memory_id, evidence, total);
+    result["provenance"] = json!({
+        "sources":sources,
+        "total_sources":count,
+        "contains_imported_material":imported,
+        "more_sources_available":more_sources,
+    });
+    Ok(result)
+}
+
 pub(super) fn collect_evidence(messages: &[Message]) -> Vec<Evidence> {
     fn collect(value: &Value, out: &mut Vec<Evidence>) {
         match value {
@@ -396,7 +467,8 @@ impl MemoryStore {
                 let mut truncated = found.truncated;
                 for hit in found.items {
                     let total = version(&db, &hit.version_id)?.body.chars().count();
-                    let mut item = evidence_value(&hit.memory_id, hit.evidence, total);
+                    let mut item =
+                        attributed_evidence_value(&db, &hit.memory_id, hit.evidence, total)?;
                     item["matched_queries"] = json!(hit.matched_queries);
                     item["current_collections"] = agent_memory_collections(&db, &hit.memory_id)?;
                     item["recent_undone_changes"] = recent_undone_changes(&db, &hit.memory_id)?;
@@ -490,7 +562,12 @@ impl MemoryStore {
                             Some(start),
                         )?;
                         let count = evidence.text.chars().count();
-                        originals.push(evidence_value(&a.memory_id, evidence, total));
+                        originals.push(attributed_evidence_value(
+                            &db,
+                            &a.memory_id,
+                            evidence,
+                            total,
+                        )?);
                         remaining -= count;
                         let position = if start + count < total {
                             Some((a.offset + index, start + count))
@@ -532,7 +609,7 @@ impl MemoryStore {
                     _ => return Err(DataError::Invalid),
                 };
                 let evidence = resolve_excerpt(&db, &source, a.max_chars, &[], Some(a.start_char))?;
-                let mut result = evidence_value(&a.memory_id, evidence, total);
+                let mut result = attributed_evidence_value(&db, &a.memory_id, evidence, total)?;
                 result["current_collections"] = agent_memory_collections(&db, &a.memory_id)?;
                 result["recent_undone_changes"] = recent_undone_changes(&db, &a.memory_id)?;
                 Ok(result)
@@ -625,7 +702,7 @@ pub(super) fn memory_read_tools() -> Vec<ToolDefinition> {
                     },"required":["text","keywords"],"additionalProperties":false}},
                 "limit":{"type":"integer","minimum":1,"maximum":8,"description":"Maximum unique memories across all queries, not per query. Use 5 normally."},
                 "offset":{"type":"integer","minimum":0,"description":"Start at 0; continue with next_offset using exactly the same queries and filters."},
-                "origin":{"type":["string","null"],"enum":["user","agent","conversation",null],"description":"Exact saved-memory provenance, or null for all. Conversation means saved memories, not unsaved messages."},
+                "origin":{"type":["string","null"],"enum":["user","agent","conversation","imported",null],"description":"Provenance, null=all. Conversation=saved memories. Imported=file references with unknown authorship, not assumed user facts."},
                 "project":{"type":["string","null"],"description":"Exact known project identifier, or null for global search. Do not infer an identifier."},
                 "collection_id":{"type":["string","null"],"description":"Known active collection UUID, or null globally. Resolve names with list_collections. Focus never sets this implicitly; global constraints need null. Page result current_collections via list_collections(memory_id)."},
                 "since":{"type":["integer","null"],"description":"Inclusive memory last-updated timestamp in Unix milliseconds, or null. Not the event date."},
@@ -659,7 +736,7 @@ pub(super) fn memory_read_tools() -> Vec<ToolDefinition> {
 pub(super) fn memory_write_tool() -> ToolDefinition {
     tools::function(
         "write_memory",
-        "Save meaningful user facts/ideas/constraints/decisions with item-level exact sources and quotes. Read earlier user messages before saving their facts; 'other conditions unchanged' is not a source. expected_version can source existing facts with inherited captures, never a new correction. Separate differently sourced facts into parts. Repairs may use saved evidence alone; never invent user messages or source AI text/summaries as user facts. Preserve subject/scope/negation/time/speaker and tentative versus decided/executed status; add no unsupported universal claims. Existing replacement requires the full current body in this request and preserves unaffected content. Atomic, versioned, undoable; only applied receipts confirm success.",
+        "Save meaningful user facts/ideas/constraints/decisions with item-level exact sources and quotes. Organize imports on user request; preserve attribution without assuming user facts. Read earlier user messages before saving their facts; 'other conditions unchanged' is not a source. expected_version can source existing facts with inherited captures, never a new correction. Separate differently sourced facts into parts. Repairs may use saved evidence alone; never invent user messages or source AI text/summaries as user facts. Preserve subject/scope/negation/time/speaker and tentative versus decided/executed status; add no unsupported universal claims. Existing replacement requires the full current body in this request and preserves unaffected content. Atomic, versioned, undoable; only applied receipts confirm success.",
         json!({
             "destination":{"description":"Use existing for corrections/extensions. Repair errors on the same destination; never bypass validation with new.","anyOf":[{"type":"object","properties":{"kind":{"type":"string","enum":["new"],"description":"Create a separate memory for independent new content."}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"type":"string","enum":["existing"],"description":"Replace the current body of an existing memory."},"memory_id":{"type":"string","description":"Stable destination memory UUID copied from provided context or tool results; not its version ID."},"expected_version":{"type":"string","description":"Fully read current evidence.source.id, not memory_id; rejects concurrent edits."}},"required":["kind","memory_id","expected_version"],"additionalProperties":false}]},
             "title":{"type":"string","description":"Neutral summary supported by the body, with no new facts; maximum 200 UTF-8 bytes."},

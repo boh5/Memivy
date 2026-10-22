@@ -4,6 +4,7 @@ mod cleanup;
 mod desktop;
 mod errors;
 mod i18n;
+mod imports;
 mod mcp;
 mod models;
 mod storage;

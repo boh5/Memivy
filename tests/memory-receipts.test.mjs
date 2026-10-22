@@ -161,3 +161,19 @@ test('expanded collection members follow renamed deleted and restored memories w
   assert.equal(f.find(view,node=>node.type==='button'&&f.text(node)===title).props.disabled,false);
   assert(f.find(view,node=>node.type==='button'&&node.props['aria-expanded']===true));
 });
+
+for (const presentation of ['summary', 'history']) test(`${presentation} import receipts name the whole batch before undoing it`, async t => {
+  const f = workspaceFixture(t);
+  f.overrides.memory_receipts = async () => [{ request_id: 'import-batch', memory_id: 'a', action: 'import', status: 'applied', before_version: null, after_version: 'v1', logical_input_id: null }];
+  f.overrides.library_action = async () => ({ action: 'undo' });
+  const view = f.mount(f.load('src/workspace/MemoryReceipts.tsx').default, { record: f.keyA, presentation, currentVersion: 'v1', onOpen() {}, onRefresh() {} });
+  await f.settle();
+  assert(f.text(view.tree).includes('Imported memories in this batch'));
+  assert(!f.nodes(view.tree).some(node => node.type === 'button' && f.text(node) === 'Undo change'));
+  await f.language('zh-CN');
+  assert(f.text(view.tree).includes('本批次导入的记忆'));
+  f.find(view, node => node.type === 'button' && f.text(node) === '撤销整批导入').props.onClick(); await f.settle();
+  const undo = f.calls.find(call => call.name === 'library_action');
+  assert.equal(undo.args.action.original_request, 'import-batch');
+  assert.equal(f.calls.filter(call => call.name === 'discussion_undo').length, 0);
+});

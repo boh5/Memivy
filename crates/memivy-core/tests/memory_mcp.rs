@@ -161,6 +161,80 @@ fn snippets_reference_the_used_version_or_original_and_omit_old_bodies() {
     assert!(s.mcp_search(&query("蜂蜜柚子茶")).unwrap().items.is_empty());
 }
 #[test]
+fn mixed_source_search_reports_imported_authorship_beyond_the_origin_sample_limit() {
+    let (_dir, store) = setup();
+    let mut target_request = request("MixedSourceToken 引文：我已经完成演示。这是来源材料。");
+    target_request.origin = Origin::Agent {
+        app: "Agent 0".into(),
+        project: None,
+        uri: None,
+    };
+    let target = store.capture(&target_request).unwrap();
+    let mut source_ids = vec![];
+    for index in 1..5 {
+        let source = store
+            .capture(&CaptureRequest {
+                request_id: id(),
+                text: format!("Other original {index}"),
+                origin: Origin::Agent {
+                    app: format!("Agent {index}"),
+                    project: None,
+                    uri: None,
+                },
+            })
+            .unwrap();
+        source_ids.push(source.capture_id);
+    }
+    let imported = store
+        .import_files(&ImportRequest {
+            request_id: id(),
+            files: vec![ImportFile {
+                file_name: "quotation.md".into(),
+                text: "我已经完成演示。这是外部作者的原话。".into(),
+            }],
+        })
+        .unwrap();
+    let imported_memory = store.memory(&imported.items[0].memory_id).unwrap();
+    source_ids.push(imported_memory.current.capture_ids[0].clone());
+    let db = rusqlite::Connection::open(store.database_path()).unwrap();
+    // Model the source links on a version that combines several inputs. The
+    // imported origin sorts after five distinct Agent origins in search output.
+    for capture_id in source_ids {
+        db.execute(
+            "INSERT INTO version_captures(version_id,capture_id) VALUES(?1,?2)",
+            rusqlite::params![target.version_id, capture_id],
+        )
+        .unwrap();
+    }
+    let regular = store
+        .search(&SearchRequest::text("MixedSourceToken", 5))
+        .unwrap();
+    assert_eq!(regular.items[0].origins.len(), 4);
+    assert!(
+        regular.items[0]
+            .origins
+            .iter()
+            .all(|origin| matches!(origin, Origin::Agent { .. }))
+    );
+    let mut filtered = query("MixedSourceToken");
+    filtered.origin = Some("imported".into());
+    let result = store.mcp_search(&filtered).unwrap();
+    assert_eq!(result.items.len(), 1);
+    let hit = &result.items[0];
+    assert_eq!(hit.record.id, target.memory_id);
+    assert!(matches!(&hit.source, SourceRef::Version(version) if version == &target.version_id));
+    assert!(matches!(&hit.origin, Some(Origin::Agent { .. })));
+    assert_eq!(hit.total_sources, 6);
+    assert!(hit.more_sources_available);
+    assert!(hit.contains_imported_material);
+    assert!(result.notice.contains("unknown authorship"));
+    assert!(result.notice.contains("not automatically the user's"));
+    let plain = store.mcp_search(&query("Other original 1")).unwrap();
+    assert_eq!(plain.items[0].total_sources, 1);
+    assert!(!plain.items[0].more_sources_available);
+    assert!(!plain.items[0].contains_imported_material);
+}
+#[test]
 fn watcher_detects_external_commits_without_a_model() {
     let (dir, s) = setup();
     let mut watcher = s.change_watcher().unwrap();

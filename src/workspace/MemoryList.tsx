@@ -7,8 +7,8 @@ import { call, date, errorText, keyOf, sourceName, type Key, type Page, type Que
 import { Empty, ErrorNotice } from "./components";
 import { useNotice } from "../i18n/react";
 
-export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, collectionId }: {
-  collectionId?: string;
+export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, collectionId, onImport }: {
+  collectionId?: string; onImport?: () => void;
   trash: boolean; active: boolean; selected: Key | null; revision?: number;
   onSelect: (key: Key) => void; onCapture: () => void; onRefresh: () => void;
 }) {
@@ -102,6 +102,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
           </span>
           <h1>{trash ? t("list.trashTitle") : collectionId ? t("list.collectionTitle") : t("list.libraryTitle")}</h1>
         </div>
+        {!trash && onImport && <button className="quiet import-entry" onClick={onImport}>{t("import.entry")}</button>}
         <button
           className="icon-button"
           aria-label={t("list.refresh")}
@@ -132,6 +133,7 @@ export default function MemoryList({ trash, active, selected, revision: requeste
             >
               <option value="">{t("list.allSources")}</option>
               <option value="user">{t("list.myNotes")}</option>
+              <option value="imported">{t("import.sourceFilter")}</option>
               <option value="agent">{t("list.agentSource")}</option>
               <option value="conversation">{t("list.confirmedConclusion")}</option>
             </Select>

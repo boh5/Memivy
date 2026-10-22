@@ -101,6 +101,12 @@ To type instead, press **Option+M** to open the quick window. **Enter** adds a n
 
 To revisit something, press **Option+R** and ask. Describe what you remember; you don't need to find the original conversation first.
 
+### 5. Import existing notes
+
+Open **All memories → Import**, choose UTF-8 Markdown (`.md`) or text (`.txt`) files, then confirm the selected files. You can import up to 32 files at once, with a 128 KiB limit per file and 2 MiB per batch. Invalid files are explained before import; identical content already imported into an active memory is skipped. Linked images are not imported.
+
+The original text is saved locally and becomes searchable immediately, even without a model. Click **Organize this batch** when you want the AI assistant to read and organize it in a discussion. Review the resulting changes and undo receipts there; long batches may need another turn. File sources remain attached, and imported writing is not assumed to be your own statement.
+
 ## Connect other AI apps
 
 Through MCP, your other AI assistants can save and search memories in Memivy. The other app must support local MCP servers (stdio), and the agent needs permission to edit its configuration.

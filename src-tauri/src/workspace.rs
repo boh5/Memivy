@@ -16,6 +16,7 @@ pub(crate) struct Workspace {
     pub(crate) store: MemoryStore,
     pub(crate) config: PathBuf,
     pub(crate) restore_request: Mutex<Option<crate::backup::RestartRequest>>,
+    pub(crate) import_request: Mutex<Option<crate::imports::PendingImport>>,
     pub(crate) exiting: AtomicBool,
     tasks: Mutex<HashMap<String, (String, tokio::task::AbortHandle)>>,
 }
@@ -1120,6 +1121,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 store,
                 config,
                 restore_request: Mutex::new(None),
+                import_request: Mutex::new(None),
                 exiting: AtomicBool::new(false),
                 tasks: Mutex::new(HashMap::new()),
             });
@@ -1207,6 +1209,9 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::backup::backup_discard,
             crate::backup::backup_restore,
             crate::backup::backup_result,
+            crate::imports::import_prepare,
+            crate::imports::import_apply,
+            crate::imports::import_discard,
             workspace_settings,
             workspace_close,
             crate::models::models_clear,

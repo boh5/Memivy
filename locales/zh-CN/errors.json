@@ -205,5 +205,16 @@
   "update_preferences_save_failed": "未能保存更新设置，原设置保持不变，请重试。",
   "update_download_failed": "更新下载失败或签名校验未通过，请重新下载。",
   "update_mcp_busy": "请先断开外部 Memivy MCP 连接，再重试安装更新。",
-  "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。"
+  "update_install_failed": "更新安装失败。请确认 Memivy 已放入“应用程序”且目录可写，也可以手动安装最新版 DMG。",
+  "import_file_type": "仅支持 Markdown（.md）和纯文本（.txt）文件。",
+  "import_file_read": "无法读取此文件，请检查文件权限后重试。",
+  "import_file_encoding": "此文件不是有效的 UTF-8 文本，请保存为 UTF-8 后重新选择。",
+  "import_file_empty": "此文件没有可导入的文字。",
+  "import_file_size": "此文件超过 128 KiB，请拆分成较小的文件后导入。",
+  "import_total_size": "加入此文件会超过每批 2 MiB 的限制，请另开一批导入。",
+  "import_file_binary": "此文件包含二进制内容，不是纯文本文件。",
+  "import_file_name": "文件名为空、包含控制字符或超过 255 字节，请重命名后重试。",
+  "import_file_limit": "每次最多选择 32 个文件。",
+  "import_busy": "已有一批导入正在处理，请完成或关闭预览后再选择文件。",
+  "import_selection_changed": "本批次有记忆已被修改或不再可用，请检查后再开始整理。"
 }
