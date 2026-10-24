@@ -6,6 +6,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub const CONTEXT_EXPORT_MAX_MEMORIES: usize = 20;
 pub const CONTEXT_EXPORT_MAX_BYTES: usize = 48 * 1024;
@@ -82,16 +83,89 @@ fn validate_budget(snapshot: &ContextSnapshot) -> Result<()> {
 }
 
 fn public_uri(uri: &Option<String>) -> Option<String> {
-    uri.as_ref()
-        .filter(|value| {
-            reqwest::Url::parse(value).is_ok_and(|url| {
-                matches!(url.scheme(), "http" | "https")
-                    && url.host_str().is_some()
-                    && url.username().is_empty()
-                    && url.password().is_none()
-            })
+    let mut url = reqwest::Url::parse(uri.as_ref()?).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !public_host(url.host_str()?)
+    {
+        return None;
+    }
+    // Provenance URLs are attribution, not a way to share access tokens or
+    // client-side state. Sanitize this export without changing the saved origin.
+    url.set_query(None);
+    url.set_fragment(None);
+    Some(url.into())
+}
+
+fn public_host(host: &str) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let address = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(address) = address.parse::<IpAddr>() {
+        return match address {
+            IpAddr::V4(address) => public_ipv4(address),
+            IpAddr::V6(address) => public_ipv6(address),
+        };
+    }
+    // Classify literal hosts only: exporting must not perform DNS requests.
+    // Local names and reserved namespaces do not establish public provenance.
+    host.contains('.')
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
-        .cloned()
+        && !matches!(
+            host.rsplit('.').next(),
+            Some(
+                "localhost"
+                    | "local"
+                    | "localdomain"
+                    | "internal"
+                    | "lan"
+                    | "home"
+                    | "intranet"
+                    | "corp"
+                    | "private"
+                    | "onion"
+                    | "invalid"
+                    | "test"
+                    | "example"
+                    | "alt"
+            )
+        )
+        && host != "home.arpa"
+        && !host.ends_with(".home.arpa")
+}
+
+fn public_ipv4(address: Ipv4Addr) -> bool {
+    let [first, second, third, _] = address.octets();
+    !(first == 0
+        || first == 10
+        || first == 127
+        || first >= 224
+        || (first == 100 && (64..=127).contains(&second))
+        || (first == 169 && second == 254)
+        || (first == 172 && (16..=31).contains(&second))
+        || (first == 192
+            && (second == 168
+                || (second == 0 && matches!(third, 0 | 2))
+                || (second == 88 && third == 99)))
+        || (first == 198 && (matches!(second, 18 | 19) || (second == 51 && third == 100)))
+        || (first == 203 && second == 0 && third == 113))
+}
+
+fn public_ipv6(address: Ipv6Addr) -> bool {
+    let [first, second, ..] = address.segments();
+    // Keep ordinary global unicast addresses; omit special-purpose, transition,
+    // documentation and non-global ranges, including IPv4-mapped addresses.
+    first & 0xe000 == 0x2000
+        && !(first == 0x2001 && (second < 0x0200 || second == 0x0db8))
+        && first != 0x2002
+        && !(first == 0x3fff && second < 0x1000)
 }
 
 fn public_label(value: &str) -> bool {
