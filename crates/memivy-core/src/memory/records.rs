@@ -68,6 +68,7 @@ pub(super) fn save_receipt(db: &Connection, receipt: &Receipt, hash: &[u8]) -> R
 }
 pub(super) fn validate_origin(origin: &Origin) -> Result<()> {
     match origin {
+        Origin::Imported { file_name } => imports::validate_file_name(file_name)?,
         Origin::User { app, project, uri } | Origin::Agent { app, project, uri } => {
             valid_text(app, 200)?;
             if project.as_ref().is_some_and(|s| s.len() > 200)
@@ -164,11 +165,6 @@ pub(super) fn create_captured_memory(
     db: &Connection,
     capture: &RawCapture,
 ) -> Result<CaptureResult> {
-    let memory_id = id();
-    db.execute(
-        "INSERT INTO memories(id,created_at,updated_at) VALUES(?1,?2,?2)",
-        params![memory_id, capture.created_at],
-    )?;
     let title: String = capture
         .text
         .lines()
@@ -178,11 +174,25 @@ pub(super) fn create_captured_memory(
         .chars()
         .take(45)
         .collect();
+    create_captured_memory_with_title(db, capture, &title)
+}
+
+pub(super) fn create_captured_memory_with_title(
+    db: &Connection,
+    capture: &RawCapture,
+    title: &str,
+) -> Result<CaptureResult> {
+    valid_text(title, 200)?;
+    let memory_id = id();
+    db.execute(
+        "INSERT INTO memories(id,created_at,updated_at) VALUES(?1,?2,?2)",
+        params![memory_id, capture.created_at],
+    )?;
     let v = Version {
         id: id(),
         memory_id: memory_id.clone(),
         parent_id: None,
-        title,
+        title: title.into(),
         body: capture.text.clone(),
         actor: "user".into(),
         reason: "create".into(),
@@ -341,6 +351,7 @@ fn undo_inner(db: &Connection, original: &Receipt) -> Result<Vec<ReceiptChange>>
                 | "organize"
                 | "merge"
                 | "capture"
+                | "import"
         )
     {
         return Err(DataError::Conflict);
@@ -471,7 +482,7 @@ impl MemoryStore {
     pub fn capture(&self, r: &CaptureRequest) -> Result<CaptureResult> {
         if matches!(
             r.origin,
-            Origin::Conversation { .. } | Origin::Discussion { .. }
+            Origin::Conversation { .. } | Origin::Discussion { .. } | Origin::Imported { .. }
         ) {
             return Err(DataError::Invalid);
         }
@@ -740,7 +751,7 @@ impl MemoryStore {
         key.validate()?;
         let db = self.connection()?;
         let sql = format!(
-            "SELECT {RECEIPT_COLUMNS},logical_input_id FROM receipts r WHERE action NOT IN ('capture','undo') AND EXISTS(SELECT 1 FROM memories WHERE id=?1 AND state IN ('active','merged')) AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) ORDER BY rowid DESC LIMIT 20"
+            "SELECT {RECEIPT_COLUMNS},logical_input_id,CASE WHEN r.memory_id=?1 THEN r.after_version ELSE (SELECT c.after_version FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) END AS record_after_version FROM receipts r WHERE action NOT IN ('capture','undo') AND EXISTS(SELECT 1 FROM memories WHERE id=?1 AND state IN ('active','merged')) AND (EXISTS(SELECT 1 FROM receipt_changes c WHERE c.request_id=r.request_id AND c.memory_id=?1) OR EXISTS(SELECT 1 FROM json_each(r.collection_changes) c WHERE EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.added_memory_ids')) m WHERE m.value=?1) OR EXISTS(SELECT 1 FROM json_each(json_extract(c.value,'$.removed_memory_ids')) m WHERE m.value=?1))) ORDER BY rowid DESC LIMIT 20"
         );
         Ok(db
             .prepare(&sql)?
@@ -748,6 +759,7 @@ impl MemoryStore {
                 Ok(MemoryReceipt {
                     receipt: read_receipt(row)?,
                     logical_input_id: row.get(9)?,
+                    record_after_version: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)

@@ -133,7 +133,7 @@ export function useResourceBridge(onError: (error: unknown) => void) {
   }, []);
 }
 const mutations = new Set([
-  "library_edit","library_action","library_rebuild",
+  "library_edit","library_action","library_rebuild","import_apply",
   "discussion_open","discussion_submit","discussion_retry","discussion_cancel","discussion_undo","discussion_save_text",
   "collection_accept_recommendation","cleanup_save",
   "navigation_pin","navigation_collect","navigation_save_collection","navigation_archive_collection",

@@ -55,6 +55,16 @@ impl From<ProbeError> for HostError {
     }
 }
 pub const KNOWN_CODES: &[&str] = &[
+    "import_busy",
+    "import_file_limit",
+    "import_file_name",
+    "import_file_type",
+    "import_file_read",
+    "import_file_encoding",
+    "import_file_empty",
+    "import_file_size",
+    "import_file_binary",
+    "import_total_size",
     "update_busy",
     "update_unavailable",
     "update_check_failed",

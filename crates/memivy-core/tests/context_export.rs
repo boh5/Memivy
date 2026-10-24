@@ -68,6 +68,8 @@ fn durable_state(store: &MemoryStore) -> Value {
         "conversations",
         "messages",
         "workspace_drafts",
+        "import_batches",
+        "import_sources",
     ];
     let counts: Vec<i64> = tables
         .iter()
@@ -329,6 +331,158 @@ async fn outgoing_context_request_contains_only_sanitized_provenance_urls() {
     }
     assert_eq!(durable_state(&store), before);
     store.check_context_export(&snapshot).unwrap();
+}
+
+#[tokio::test]
+async fn imported_context_keeps_source_identity_without_inferring_authorship() {
+    let (_dir, store) = setup();
+    let file_name = "他人摘录.md";
+    let text = "小林说：“演示已经完成。”这是导入的摘录，作者身份未经确认。";
+    let imported = store
+        .import_files(&ImportRequest {
+            request_id: id(),
+            files: vec![ImportFile {
+                file_name: file_name.into(),
+                text: text.into(),
+            }],
+        })
+        .unwrap();
+    let item = &imported.items[0];
+    let user = capture(
+        &store,
+        "I have not confirmed this imported statement.",
+        user_origin(),
+    );
+    let snapshot = store
+        .prepare_context_export(&[
+            ContextSelection {
+                memory_id: item.memory_id.clone(),
+                version_id: item.version_id.clone(),
+            },
+            user,
+        ])
+        .unwrap();
+    let expected_origin = Origin::Imported {
+        file_name: file_name.into(),
+    };
+    assert_eq!(snapshot.items[0].body, text);
+    assert_eq!(snapshot.items[0].sources[0].origin, expected_origin);
+    assert!(matches!(
+        snapshot.items[1].sources[0].origin,
+        Origin::User { .. }
+    ));
+    store.check_context_export(&snapshot).unwrap();
+    let before = durable_state(&store);
+    let (config, requests, server) = fixture(1, move |_, request| {
+        let content = &request["messages"].as_array().unwrap().last().unwrap()["content"];
+        let content = content
+            .as_str()
+            .or_else(|| content[0]["text"].as_str())
+            .unwrap();
+        let supplied: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(supplied["selected_memories"][0]["memory"]["body"], text);
+        assert_eq!(
+            supplied["selected_memories"][0]["memory"]["sources"][0]["origin"],
+            json!({
+                "kind": "imported", "file_name": file_name,
+            })
+        );
+        assert_eq!(
+            supplied["selected_memories"][1]["memory"]["sources"][0]["origin"]["kind"],
+            "user"
+        );
+        assert!(serde_json::to_string(request).unwrap().contains(
+            "imported source or question is not automatically the user's fact or decision"
+        ));
+        response(
+            json!({"body":"小林在导入摘录中表示演示已经完成；用户尚未确认此说法。[S1][S2]"}),
+            "stop",
+        )
+    });
+    propose_context_export(&config, &snapshot, "zh")
+        .await
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    let saved = store
+        .library_detail(&RecordKey {
+            kind: "memory".into(),
+            id: item.memory_id.clone(),
+        })
+        .unwrap();
+    let original = saved.sources[0].capture.as_ref().unwrap();
+    assert_eq!(original.origin, expected_origin);
+    assert_eq!(original.text, text);
+    assert_eq!(durable_state(&store), before);
+    store.check_context_export(&snapshot).unwrap();
+}
+
+#[test]
+fn imported_context_does_not_expose_invalid_saved_filename_metadata() {
+    let (_dir, store) = setup();
+    let mut db = Connection::open(store.database_path()).unwrap();
+    db.pragma_update(None, "foreign_keys", true).unwrap();
+    for file_name in [
+        "/Users/example/private/source.md",
+        "C:\\private\\source.md",
+        "private\nsource.md",
+    ] {
+        let selection = ContextSelection {
+            memory_id: id(),
+            version_id: id(),
+        };
+        let capture_id = id();
+        let invalid_origin = Origin::Imported {
+            file_name: file_name.into(),
+        };
+        // Create malformed synthetic evidence without modifying an immutable capture.
+        let tx = db.transaction().unwrap();
+        tx.execute(
+            "INSERT INTO captures(id,request_id,fingerprint,text,source,created_at) VALUES(?1,?2,X'01','Imported source text',?3,1)",
+            rusqlite::params![capture_id, id(), serde_json::to_string(&invalid_origin).unwrap()],
+        ).unwrap();
+        tx.execute(
+            "INSERT INTO capture_state(capture_id) VALUES(?)",
+            [&capture_id],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO memories(id,created_at,updated_at) VALUES(?,1,1)",
+            [&selection.memory_id],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO memory_versions(id,memory_id,title,body,actor,reason,created_at) VALUES(?1,?2,'Imported source','Imported source text','user','create',1)",
+            rusqlite::params![selection.version_id, selection.memory_id],
+        ).unwrap();
+        tx.execute(
+            "INSERT INTO version_captures(version_id,capture_id) VALUES(?1,?2)",
+            rusqlite::params![selection.version_id, capture_id],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE memories SET current_version_id=?2 WHERE id=?1",
+            rusqlite::params![selection.memory_id, selection.version_id],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let before = durable_state(&store);
+        let snapshot = store
+            .prepare_context_export(std::slice::from_ref(&selection))
+            .unwrap();
+        assert_eq!(
+            snapshot.items[0].sources[0].origin,
+            Origin::Imported {
+                file_name: "Imported file".into()
+            }
+        );
+        store.check_context_export(&snapshot).unwrap();
+        assert_eq!(
+            store.capture_by_id(&capture_id).unwrap().origin,
+            invalid_origin
+        );
+        assert_eq!(durable_state(&store), before);
+    }
 }
 
 #[test]

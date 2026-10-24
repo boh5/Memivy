@@ -5,9 +5,10 @@ use std::path::Path;
 
 // Append include_str! entries for schema 2 onward. Never edit a shipped migration.
 // Scripts contain only transactional SQL; this module owns version and commit.
-pub(super) const MIGRATIONS: &[&str] = &[include_str!(
-    "../../../../migrations/memory/002_agent_directed.sql"
-)];
+pub(super) const MIGRATIONS: &[&str] = &[
+    include_str!("../../../../migrations/memory/002_agent_directed.sql"),
+    include_str!("../../../../migrations/memory/003_file_imports.sql"),
+];
 pub(super) const CURRENT: i64 = 1 + MIGRATIONS.len() as i64;
 
 pub(super) fn supported_version(db: &Connection, target: i64) -> Result<i64> {
@@ -183,6 +184,25 @@ mod tests {
         upgrade(&mut db, Some(dir.path()), &STEPS[..1]).unwrap();
         upgrade(&mut db, Some(dir.path()), STEPS).unwrap();
         assert_eq!(supported_version(&db, 3).unwrap(), 3);
+    }
+    #[test]
+    fn file_import_migration_blocks_schema_two_readers_and_keeps_a_backup() {
+        let (dir, _, mut db) = setup();
+        upgrade(&mut db, None, &MIGRATIONS[..1]).unwrap();
+        assert_eq!(supported_version(&db, 2).unwrap(), 2);
+        upgrade(&mut db, Some(dir.path()), MIGRATIONS).unwrap();
+        assert_eq!(supported_version(&db, CURRENT).unwrap(), 3);
+        assert_eq!(supported_version(&db, 2), Err(DataError::Schema));
+        assert!(db.prepare("SELECT 1 FROM import_batches").is_ok());
+        assert!(db.prepare("SELECT 1 FROM import_sources").is_ok());
+        let backups: Vec<_> = fs::read_dir(dir.path().join("recovery"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(backups.len(), 1);
+        let backup = Connection::open(&backups[0]).unwrap();
+        assert_eq!(supported_version(&backup, 2).unwrap(), 2);
+        check(&db).unwrap();
     }
     #[test]
     fn deferred_foreign_key_failure_rolls_back_schema_and_data() {

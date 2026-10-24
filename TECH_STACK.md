@@ -15,6 +15,8 @@
 
 2026-09-19 当前架构按 [Agent 按需检索方案](docs/goals/agent-directed-memory-plan.md) 更新：取消固定预检索及后台语义整理；当前聊天 Agent 根据实际任务检索、保存和修正。公开库由 schema 1 前向迁移到 schema 2；保留原话、版本和回执，移除整理队列及推荐反馈缓存。下文带日期的旧阶段描述仅保留历史背景。
 
+2026-10-22 批量文件导入将当前资料库前向升级到 schema 3，追加 `003_file_imports.sql`，保留已发布的 schema 1／2。新来源类型明确文件作者身份未知；导入批次、精确去重索引和成组回执在同一事务保存，旧客户端拒绝读取 schema 3。AI 整理仍由用户显式触发，复用当前 Agent。
+
 ## 1. 结论
 
 Memivy 的“记一下、问一问、接着想”共用一套本地数据和模型调用基础，继续采用：
@@ -164,7 +166,7 @@ MCP 官方 Rust SDK 将 stdio 定义为本地 MCP Server 作为子进程启动�
 
 发布基线为 `migrations/memory/001_initial.sql`（schema 1），一次创建完整表、索引和触发器；后续结构变更从 schema 2 追加。发布基线使用独立 application ID `0x4d454d59`（MEMY），与 schema version 一起校验数据库身份和支持版本；初始化前在同一读快照检查表和版本信息，取得写锁后再次核对。初始化使用 `BEGIN IMMEDIATE`，提交前检查外键，保留 WAL / FULL / 750 ms busy timeout。`crates/memivy-core/src/memory/sql/rebuild_search.sql` 仅用于运行时重建派生搜索索引。原话与版本正文不允许覆盖，用户主动永久删除时才擦除正文并留下来源不可用的 ID。
 
-`memory_versions` 保存完整快照，`version_captures` 保存原话关联；编辑、恢复和撤销均追加版本。`receipts` 与 `receipt_changes` 和版本同事务提交，纠正归属记录两边的变更，撤销校验所有涉及的当前版本。撤销纠错的回执指向恢复后的归属与新版本，可继续纠正；再次纠正只处理当前归属，不重做之前已撤销的目标变更。请求以 UUID 和 SHA-256 内容摘要去重；相同文本的不同主动保存仍分别保留。SHA-256 只用于请求一致性校验，不是内容加密。
+`memory_versions` 保存完整快照，`version_captures` 保存原话关联；编辑、恢复和撤销均追加版本。`receipts` 与 `receipt_changes` 和版本同事务提交，纠正归属记录两边的变更，撤销校验所有涉及的当前版本。撤销纠错的回执指向恢复后的归属与新版本，可继续纠正；再次纠正只处理当前归属，不重做之前已撤销的目标变更。请求以 UUID 和 SHA-256 内容摘要去重；相同文本的不同普通主动保存仍分别保留，文件导入单独对仍有效的导入原文进行摘要加全文去重。SHA-256 用于请求一致性校验和导入去重，不是内容加密。
 
 永久删除原话时，在同一事务擦除关联的 `undone` 隐藏记忆及其 FTS 正文，保留其他有效或回收站中的记忆。也可通过回执中的记忆 ID 显式清空已撤销的版本，此操作保留仍有效的原话；普通撤销本身不擦除原话。新生成的备份不会携带这些已擦除的隐藏正文，已有备份仍由用户自行管理。
 
@@ -329,7 +331,7 @@ Tauri 使用系统 WebView。[Tauri 架构](https://v2.tauri.app/concept/archite
 
 ### 9.1 导航元数据与专题检索
 
-`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系。公开 schema 1 已包含导航表；未发布的 schema 2 合并 Agent 按需检索与专题变更，一次追加专题回执和成员／记忆状态变化的 revision 触发器；已发布的 schema 1 保持不变。`memory::agent_collections` 共用事务内元数据及关系规则，为内部 Agent 提供查找、详情、创建、编辑和成员批次操作。元数据不修改 capture 文本或创建正文版本；预期 revision 拒绝陈旧写入，重复成员设置不制造变化。永久擦除清理对应关系，回收站状态影响可见性。
+`memory::navigation` 在共享 MemoryStore 内负责置顶、专题与成员关系。公开 schema 1 已包含导航表；schema 2 合并 Agent 按需检索与专题变更，一次追加专题回执和成员／记忆状态变化的 revision 触发器；已发布的 schema 1／2 保持不变。`memory::agent_collections` 共用事务内元数据及关系规则，为内部 Agent 提供查找、详情、创建、编辑和成员批次操作。元数据不修改 capture 文本或创建正文版本；预期 revision 拒绝陈旧写入，重复成员设置不制造变化。永久擦除清理对应关系，回收站状态影响可见性。
 
 `LibraryQuery` 增加置顶、专题、排除专题和较早排序条件；列表仍分页限量。回顾每批三条，手动换组；不做全库客户端加载或定时模型请求。侧栏置顶与专题各最多 100 项，普通记忆库不受此限制。
 

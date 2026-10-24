@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Origin {
+    /// A local file is source material; importing it does not establish authorship.
+    Imported { file_name: String },
     User {
         app: String,
         project: Option<String>,
@@ -104,6 +106,8 @@ pub struct MemoryReceipt {
     #[serde(flatten)]
     pub receipt: Receipt,
     pub logical_input_id: Option<String>,
+    /// Version produced for the queried memory; the receipt retains its group anchor.
+    pub record_after_version: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NavigationSnapshot {

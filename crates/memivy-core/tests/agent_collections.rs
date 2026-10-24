@@ -923,6 +923,8 @@ fn collection_receipts_survive_conversation_deletion_and_remain_undoable_from_me
     let history = store.memory_receipts(&key).unwrap();
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].receipt.request_id, receipt.request_id);
+    assert_eq!(history[0].record_after_version, None);
+    assert!(serde_json::to_value(&history[0]).unwrap()["record_after_version"].is_null());
     assert_eq!(
         history[0].logical_input_id.as_deref(),
         Some(run.input_id.as_str())

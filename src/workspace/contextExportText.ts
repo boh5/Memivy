@@ -9,9 +9,9 @@ export function fullContextText(snapshot: ContextExportSnapshot): string {
 
 export function contextSourceFooter(snapshot: ContextExportSnapshot, labels: {
   sources: string; version: string; captured: string; localSource: string;
-  user: string; agent: string; conversation: string; discussion: string;
+  user: string; agent: string; conversation: string; discussion: string; imported: string;
   userMessage: string; assistantMessage: string; confirmedByUser: string;
-  application: string; source: string; attributionHelp: string;
+  application: string; file: string; importedAt: string; source: string; attributionHelp: string;
 }, formatDate: (timestamp: number) => string): string {
   return `## ${labels.sources}\n\n${labels.attributionHelp}\n\n` + snapshot.items.map((item, index) => {
     const origins = item.sources.map((source, sourceIndex) => {
@@ -24,8 +24,10 @@ export function contextSourceFooter(snapshot: ContextExportSnapshot, labels: {
       const confirmation = origin.kind === "conversation" && origin.confirmed_by === "user" ? labels.confirmedByUser : "";
       const app = origin.app && !/[\/\\]/.test(origin.app) && !origin.app.trimStart().startsWith("~")
         ? `${labels.application}: ${heading(origin.app)}` : "";
-      const attribution = [labels[origin.kind], role, confirmation, app].filter(Boolean).join(" · ");
-      return `${labels.source} ${sourceIndex + 1}: ${attribution}\n\n${web} · ${labels.captured}: ${formatDate(source.recorded_at)}`;
+      const file = origin.kind === "imported" && origin.file_name ? `${labels.file}: ${heading(origin.file_name)}` : "";
+      const attribution = [labels[origin.kind], role, confirmation, app, file].filter(Boolean).join(" · ");
+      const recorded = origin.kind === "imported" ? labels.importedAt : labels.captured;
+      return `${labels.source} ${sourceIndex + 1}: ${attribution}\n\n${web} · ${recorded}: ${formatDate(source.recorded_at)}`;
     });
     return `[S${index + 1}] ${heading(item.title)}\n\n${labels.version}: ${item.version_id} · ${formatDate(item.created_at)}${origins.length ? `\n\n${origins.join("\n\n")}` : ""}`;
   }).join("\n\n");

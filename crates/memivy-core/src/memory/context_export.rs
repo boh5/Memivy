@@ -175,6 +175,13 @@ fn public_label(value: &str) -> bool {
 /// Origin describes attribution; filesystem locations are not external context.
 fn public_origin(mut origin: Origin) -> Origin {
     match &mut origin {
+        Origin::Imported { file_name } => {
+            // Keep imported material distinct: a filename does not establish
+            // authorship. Reuse import validation before exposing its basename.
+            if super::imports::validate_file_name(file_name).is_err() {
+                *file_name = "Imported file".into();
+            }
+        }
         Origin::User { app, project, uri }
         | Origin::Agent { app, project, uri }
         | Origin::Discussion {

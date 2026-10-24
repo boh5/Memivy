@@ -12,5 +12,6 @@
   "backupOpen": "Choose a Memivy backup to validate before confirming library restoration.",
   "quickInput": "Share an idea or ask",
   "exportDefaultName": "Memory",
-  "exportMessage": "Save this note’s title and current text as Markdown."
+  "exportMessage": "Save this note’s title and current text as Markdown.",
+  "importOpen": "Choose up to 32 Markdown or plain text files to preview before importing."
 }

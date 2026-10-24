@@ -4,7 +4,7 @@ import { workspaceFixture } from './helpers/workspace.mjs';
 import { contextCopyText, contextSourceFooter, fullContextText } from '../src/workspace/contextExportText.ts';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-const labels = { sources: 'Sources', version: 'Version', captured: 'Captured', localSource: 'Local source', user: 'User input', agent: 'Agent capture', conversation: 'Conversation', discussion: 'Discussion input', userMessage: 'Written by user', assistantMessage: 'Written by AI', confirmedByUser: 'Saved with user confirmation', application: 'Application', source: 'Source', attributionHelp: 'Saving AI output does not establish a user decision.' };
+const labels = { sources: 'Sources', version: 'Version', captured: 'Captured', localSource: 'Local source', user: 'User input', agent: 'Agent capture', conversation: 'Conversation', discussion: 'Discussion input', imported: 'Imported file (authorship unknown)', userMessage: 'Written by user', assistantMessage: 'Written by AI', confirmedByUser: 'Saved with user confirmation', application: 'Application', file: 'File', importedAt: 'Imported', source: 'Source', attributionHelp: 'Saving AI output does not establish a user decision. Import time is not the writing or event date.' };
 const selection = id => ({ memory_id: id, version_id: `v-${id}`, title: id });
 const item = id => ({ ...selection(id), body: `Saved ${id}`, created_at: 10, sources: [{ capture_id: `raw-${id}`, recorded_at: 2, origin: { kind: 'user', uri: `https://example.com/${id}` } }] });
 const snapshot = ids => ({ items: ids.map(item) });
@@ -192,6 +192,41 @@ test('source footer preserves distinct authorship and confirmation even with ide
   assert.match(footer, /Source 2: Agent capture · Application: Outside AI/);
   assert.match(footer, /Source 3: Conversation · Written by AI · Saved with user confirmation/);
   assert.match(footer, /Saving AI output does not establish a user decision/);
+});
+
+test('mixed imported sources retain unknown authorship, escaped filenames and import dates', () => {
+  const value = snapshot(['a']);
+  value.items[0].sources.push({ capture_id: 'imported', recorded_at: 7, origin: { kind: 'imported', file_name: 'Interview [notes].md', uri: '/Users/private/Interview [notes].md' } });
+  const footer = contextSourceFooter(value, labels, String);
+  assert.match(footer, /Source 1: User input/);
+  assert(footer.includes('Source 2: Imported file (authorship unknown) · File: Interview \\[notes\\].md'));
+  assert.match(footer, /Captured: 2/);
+  assert.match(footer, /Imported: 7/);
+  assert(!footer.includes('Captured: 7'));
+  assert(!footer.includes('/Users/private'));
+  assert.match(footer, /Import time is not the writing or event date/);
+});
+
+test('copying an imported memory preserves source attribution in both interface languages', async t => {
+  const f = setup(t);
+  f.overrides.context_export_prepare = () => {
+    const value = snapshot(['a']);
+    value.items[0].sources.push({ capture_id: 'imported', recorded_at: 7, origin: { kind: 'imported', file_name: '采访记录.md' } });
+    return value;
+  };
+  await f.settle(); await f.click('Prepare selected memories');
+  f.editor().props.onChange('Quoted material: 我正在考虑这个计划，还没有决定。'); await f.settle();
+  await f.click('Copy text and sources');
+  assert.match(f.copied[0], /Source 2: Imported file \(authorship unknown\) · File: 采访记录.md/);
+  assert.match(f.copied[0], /Local source · Imported:/);
+  assert.match(f.copied[0], /import time is not the writing or event date/);
+  await f.language('zh-CN'); await f.click('复制正文和来源');
+  assert.match(f.copied[1], /来源 2: 导入文件（作者身份未知） · 文件: 采访记录.md/);
+  assert.match(f.copied[1], /本地来源 · 导入时间:/);
+  assert.match(f.copied[1], /导入文件不代表由用户撰写或认同；导入时间不是写作或事件时间/);
+  assert.equal(f.editor().props.value, 'Quoted material: 我正在考虑这个计划，还没有决定。');
+  assert.equal(f.db.get('context_export').context_export.snapshot.items[0].sources[1].origin.kind, 'imported');
+  assert.equal(f.calls.filter(call => call.name === 'context_export_generate').length, 0);
 });
 
 test('late background validation cannot clear a newer summary conflict', async t => {

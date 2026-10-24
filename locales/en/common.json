@@ -11,5 +11,6 @@
   "sourceConclusion": "Confirmed discussion conclusion",
   "sourceCapture": "Original capture",
   "languageChinese": "简体中文",
-  "languageEnglish": "English"
+  "languageEnglish": "English",
+  "sourceImported": "Imported file: {{name}}"
 }

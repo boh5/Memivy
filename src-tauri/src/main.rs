@@ -5,6 +5,7 @@ mod context_export;
 mod desktop;
 mod errors;
 mod i18n;
+mod imports;
 mod mcp;
 mod models;
 mod storage;

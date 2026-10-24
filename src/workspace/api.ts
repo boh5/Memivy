@@ -18,7 +18,8 @@ export type SourceEvidence = {
 };
 export type Key = { kind: "memory"; id: string };
 export type Origin = {
-  kind: "user" | "agent" | "conversation" | "discussion";
+  kind: "user" | "agent" | "conversation" | "discussion" | "imported";
+  file_name?: string;
   app?: string;
   project?: string | null;
   uri?: string | null;
@@ -118,7 +119,14 @@ export type Receipt = { reason?: string | null;
   after_version: string | null;
   action: string;
 };
-export type MemoryReceipt = Receipt & { logical_input_id: string | null };
+export type ImportFile = { id: string; file_name: string; bytes: number; error: string | null };
+export type PreparedImport = { id: string; files: ImportFile[] };
+export type ImportResult = {
+  request_id: string;
+  items: { file_name: string; status: "imported" | "duplicate"; memory_id: string; version_id: string }[];
+  receipt: Receipt | null;
+};
+export type MemoryReceipt = Receipt & { logical_input_id: string | null; record_after_version: string | null };
 export type AgentChangeGroup = { input_id: string; receipts: Receipt[] };
 export type AgentUndoResult = { receipt: Receipt | null; conflicts: string[]; collection_conflicts?: string[] };
 export type Topic = { id: string; title: string; updated_at: number; collection_id?: string | null };
@@ -143,7 +151,7 @@ export const uid = () => crypto.randomUUID();
 export const date = formatDate;
 export const fullDate = formatFullDate;
 export const sourceName = (o: Origin | null) =>
-  o?.kind === "discussion" ? i18n.t('sourceDiscussion') : o?.kind === "conversation" ? i18n.t('sourceConclusion') : o?.app || i18n.t('sourceCapture');
+  o?.kind === "imported" ? i18n.t("sourceImported", { name: o.file_name || "" }) : o?.kind === "discussion" ? i18n.t('sourceDiscussion') : o?.kind === "conversation" ? i18n.t('sourceConclusion') : o?.app || i18n.t('sourceCapture');
 export function errorText(error: unknown): UiMessage {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return message('errors', typeof code === 'string' && Object.hasOwn(errors, code) ? code as keyof typeof errors : 'operation_failed');

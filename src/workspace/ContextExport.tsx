@@ -38,9 +38,9 @@ export default function ContextExport({ collections, collectionId, initialSelect
   const snapshotKey = JSON.stringify(snapshot);
   const footer = snapshot ? contextSourceFooter(snapshot, {
     sources: t("contextExport.sources"), version: t("contextExport.version"), captured: t("contextExport.captured"), localSource: t("contextExport.localSource"),
-    user: t("contextExport.sourceUser"), agent: t("contextExport.sourceAgent"), conversation: t("contextExport.sourceConversation"), discussion: t("contextExport.sourceDiscussion"),
+    user: t("contextExport.sourceUser"), agent: t("contextExport.sourceAgent"), conversation: t("contextExport.sourceConversation"), discussion: t("contextExport.sourceDiscussion"), imported: t("contextExport.sourceImported"),
     userMessage: t("contextExport.userMessage"), assistantMessage: t("contextExport.assistantMessage"), confirmedByUser: t("contextExport.confirmedByUser"),
-    application: t("contextExport.application"), source: t("contextExport.source"), attributionHelp: t("contextExport.attributionHelp"),
+    application: t("contextExport.application"), file: t("contextExport.file"), importedAt: t("contextExport.importedAt"), source: t("contextExport.source"), attributionHelp: t("contextExport.attributionHelp"),
   }, fullDate) : "";
   const scope = snapshot ? t("contextExport.scope", { count: snapshot.items.length }) : "";
 

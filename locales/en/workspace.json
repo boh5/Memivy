@@ -398,7 +398,9 @@
     "before": "Before",
     "after": "After",
     "summaryMerge": "Memories combined",
-    "summaryUpdated": "Memory updated"
+    "summaryUpdated": "Memory updated",
+    "summaryImport": "Imported memories in this batch",
+    "undoImport": "Undo this import batch"
   },
   "saveConclusion": {
     "destinationChanged": "The save destination changed. Your review draft is preserved; review the destination and text again.",
@@ -554,6 +556,45 @@
     "memberReadFailed": "This memory could not be read. Try again.",
     "undoneHelp": "These changes were undone. The details below show the original changes."
   },
+  "import": {
+    "entry": "Import",
+    "title": "Import text files",
+    "help": "Choose Markdown (.md) or plain text (.txt) files in UTF-8. Import saves the complete text locally before any AI processing.",
+    "choose": "Choose files",
+    "choosing": "Opening file chooser…",
+    "selected": "{{selected}} of {{total}} files selected",
+    "bytes": "{{count}} bytes",
+    "previewHelp": "Each selected file becomes one memory with its original file source. Identical files already imported are skipped. Up to 32 files, 128 KiB per file and 2 MiB per batch. Linked images are not imported.",
+    "confirm": "Import selected files",
+    "importing": "Importing…",
+    "chooseAgain": "Choose different files",
+    "unconfirmed": "The import result has not been confirmed. Retry this same selection to check the original request without creating another batch.",
+    "retry": "Retry this import",
+    "complete": "Imported {{imported}} · Already imported {{duplicates}}",
+    "savedHelp": "The imported memories are saved and searchable; originals are preserved.",
+    "duplicatesHelp": "These files were already imported. No new memories were created, so there is no new batch to organize.",
+    "imported": "Saved",
+    "duplicate": "Already imported",
+    "view": "View memory",
+    "organizeTitle": "Organize when you are ready",
+    "organizeHelp": "Start a discussion with the current Agent to read and organize memories, starting with this imported batch. Changes have source references and undo receipts. Long batches may need additional turns; the discussion will show progress and anything left to process.",
+    "noModel": "Connect a model in Settings to organize this batch. The imported text is already saved.",
+    "organize": "Organize this batch",
+    "starting": "Opening discussion…",
+    "retryOrganize": "Retry opening organization",
+    "startedHelp": "Organization was started in a discussion. Open it to check progress, retry, stop, or continue processing.",
+    "openDiscussion": "Open organization discussion",
+    "discussionTitle": "Organize imported memories",
+    "chooseMore": "Import more files",
+    "undo": "Undo this import",
+    "undoing": "Undoing import…",
+    "undone": "Import undone",
+    "undoneHelp": "The newly imported memories were undone. Existing memories and the original files were left unchanged.",
+    "undoneItem": "Undone",
+    "close": "Close",
+    "closing": "Closing…",
+    "sourceFilter": "Imported files"
+  },
   "contextExport": {
     "title": "Copy for AI",
     "loadingDraft": "Loading the saved preview…",
@@ -604,11 +645,14 @@
     "sourceAgent": "Agent capture",
     "sourceConversation": "Saved conversation message",
     "sourceDiscussion": "User discussion input",
+    "sourceImported": "Imported file (authorship unknown)",
     "userMessage": "Written by the user",
     "assistantMessage": "Written by the AI",
     "confirmedByUser": "Saved with user confirmation",
     "application": "Application",
+    "file": "File",
+    "importedAt": "Imported",
     "source": "Source",
-    "attributionHelp": "Source roles identify who supplied the material. Saving an AI statement does not by itself establish a user decision or completed action."
+    "attributionHelp": "Source roles identify who supplied the material. Saving an AI statement does not by itself establish a user decision or completed action. Imported files do not establish the user's authorship or endorsement; import time is not the writing or event date."
   }
 }
