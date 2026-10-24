@@ -100,6 +100,7 @@ fn schema_one_upgrade_preserves_originals_receipts_and_both_undo_paths() {
         }
         // Preserve a real unsent draft unrelated to the note being undone.
         let draft = WorkspaceDraft {
+            context_export: None,
             key: "input".into(),
             title: "Unsent".into(),
             body: "Keep my draft".into(),

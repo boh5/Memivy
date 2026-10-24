@@ -1,6 +1,7 @@
 mod backup;
 mod capture_panel;
 mod cleanup;
+mod context_export;
 mod desktop;
 mod errors;
 mod i18n;

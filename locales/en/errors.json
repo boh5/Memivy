@@ -205,5 +205,8 @@
   "update_preferences_save_failed": "Could not save your update settings. Your previous setting is unchanged. Try again.",
   "update_download_failed": "The update could not be downloaded or its signature could not be verified. Try downloading again.",
   "update_mcp_busy": "Disconnect external Memivy MCP clients before installing the update, then retry.",
-  "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually."
+  "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually.",
+  "context_export_budget": "Choose up to 20 memories with at most 48 KiB of source text and metadata. Nothing was shortened.",
+  "context_export_unavailable": "The context preview is unavailable. Close it and try again.",
+  "context_export_clipboard": "Could not copy to the clipboard. Your preview is still here; try again."
 }

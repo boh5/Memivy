@@ -1503,6 +1503,7 @@ fn manual_save_preserves_reviewed_partial_answers_from_terminal_states() {
             .unwrap();
         let request = id();
         let draft = WorkspaceDraft {
+            context_export: None,
             key: format!("save:{}", run.assistant_message_id),
             request_id: request.clone(),
             title: "手动保留".into(),

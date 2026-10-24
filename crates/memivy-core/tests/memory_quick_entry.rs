@@ -5,6 +5,7 @@ fn id() -> String {
 }
 fn draft(key: &str, text: &str) -> WorkspaceDraft {
     WorkspaceDraft {
+        context_export: None,
         destination: None,
         key: key.into(),
         request_id: id(),

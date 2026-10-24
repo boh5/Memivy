@@ -24,6 +24,8 @@ export type Origin = {
   uri?: string | null;
   conversation_id?: string;
   message_id?: string;
+  message_role?: "user" | "assistant";
+  confirmed_by?: string;
 };
 export type Raw = {
   id: string;
@@ -75,8 +77,20 @@ export type Detail = {
   source_count?: number;
   sources: { id: string; capture: Raw | null; conversation_available: boolean | null }[];
 };
+export type ContextExportSelection = { memory_id: string; version_id: string; title: string };
+export type ContextExportSnapshot = { items: {
+  memory_id: string; version_id: string; title: string; body: string; created_at: number;
+  sources: { capture_id: string; recorded_at: number; origin: Origin }[];
+}[] };
+export type ContextExportDraft = {
+  snapshot: ContextExportSnapshot | null;
+  mode: "full" | "summary";
+  selections: ContextExportSelection[];
+  collection_id?: string;
+};
 export type ConclusionDestination = { kind: "new" } | { kind: "existing"; memory_id: string; expected_version: string };
 export type Draft = {
+  context_export?: ContextExportDraft;
   destination?: ConclusionDestination;
   key: string;
   request_id: string;
@@ -160,11 +174,28 @@ const previewVersion: Version = {
   created_at: previewRaw.created_at,
   capture_ids: [previewRaw.id],
 };
+let previewContextDraft: Draft | null = null;
 export async function call<T>(
   name: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
   if (native) return resourceCall<T>(name, args);
+  if (name === "draft_read" && args?.key === "context_export") return structuredClone(previewContextDraft) as T;
+  if (name === "draft_write" && (args?.draft as Draft)?.key === "context_export") {
+    if ((previewContextDraft?.request_id || null) !== args?.expectedRequest) return false as T;
+    previewContextDraft = structuredClone(args?.draft as Draft); return true as T;
+  }
+  if (name === "draft_clear" && args?.key === "context_export") {
+    if (previewContextDraft?.request_id !== args?.request) return false as T;
+    previewContextDraft = null; return true as T;
+  }
+  if (name === "context_export_prepare") {
+    const selections = args?.selections as ContextExportSelection[];
+    if (selections.length !== 1 || selections[0].memory_id !== previewRow.key.id || selections[0].version_id !== previewVersion.id) throw { code: "context_export_stale" };
+    return { items: [{ memory_id: previewRow.key.id, version_id: previewVersion.id, title: previewVersion.title, body: previewVersion.body, created_at: previewVersion.created_at,
+      sources: [{ capture_id: previewRaw.id, recorded_at: previewRaw.created_at, origin: previewRaw.origin }] }] } satisfies ContextExportSnapshot as T;
+  }
+  if (name === "context_export_validate" || name === "context_export_cancel") return undefined as T;
   if (name === "models_load") return {revision:"preview",llm:null,embedding:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"},voice:{source:"local",base_url:"",has_key:false,model:"",dimensions:null,disable_reasoning:false,max_output_tokens:null,output_token_parameter:"max_tokens"}} as T;
   if (name === "embedding_status") return {enabled:false,preparing:false,paused:false,state:"not_downloaded",downloaded:0,bytes:639150592,processed:0,total:1,failed:0,error:null} as T;
   if (name === "voice_status") return {source:"local",label:"voice_local",local_available:false,enabled:false,preload:false,shortcut:"Alt+KeyR",state:"unloaded",backend:null,error:null,available:false,downloaded:0,bytes:1019141728,cache:"",session:null} as T;

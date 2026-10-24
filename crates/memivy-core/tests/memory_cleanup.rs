@@ -32,6 +32,7 @@ fn prepare(store: &MemoryStore, r: &Receipt) -> CleanupSnapshot {
 }
 fn draft(snapshot: &CleanupSnapshot) -> WorkspaceDraft {
     WorkspaceDraft {
+        context_export: None,
         destination: None,
         key: format!("memory:{}", snapshot.memory_id),
         request_id: id(),

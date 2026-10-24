@@ -24,6 +24,7 @@ fn discussion_draft_keeps_materials_and_original_history_pages_across_restart() 
         .create_conversation(&topic, "Continue discussion")
         .unwrap();
     let draft = WorkspaceDraft {
+        context_export: None,
         destination: None,
         key: format!("discussion:{topic}"),
         request_id: id(),
