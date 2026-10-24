@@ -1559,3 +1559,11 @@ No UI QA, native build or app launch was performed for this review. Verification
 - PR #13、#14 已依次合并，后者 squash 提交为 `19549da4ea5c01c9ca43591288d1b116b69b769c`。该提交的 main CI 在开始产品测试前失败：runner 的 `$HOME/.cargo/bin/rustup` 不存在，日志见忽略目录 `research/pr14-integration-qa/main-ci-failure.log`。不把该失败记为产品测试失败或远端验证通过。
 - CI 与发布工作流复用同一初始化脚本；所选 Cargo 目录缺少 Rust 工具时，通过官方 HTTPS 安装器非交互初始化，不修改 shell profile，不设额外默认工具链，继续由 `rust-toolchain.toml` 选择版本及组件。没有改变产品代码、锁文件、发布触发方式或发布版本。
 - Bash 语法、diff 检查及已有工具／缺失工具／下载失败三个隔离分支检查通过；已有本机工具的真实调用确认 Rust 1.98.1。下载失败保留非零退出，不执行安装器。必要结果为 `ci-bootstrap-checks.json` 和 `ci-bootstrap-existing-toolchain.log`；全新 hosted runner 上的安装及完整远端回归仍待 CI，未重复运行已完成的产品及原生检查。
+
+## 0.1.7 发布准备（2026-10-24，尚未发布）
+
+- 从已合并并验证的 main `3095070` 准备版本号及英文更新说明，包含复制给 AI、文件导入及 schema 2→3 备份／旧版兼容说明。没有更改产品接口或迁移内容。
+- 更新兼容范围内的 DOMPurify 3.4.17、Undici 7.30.1 和 Vite 8.2.4。当前 npm audit 从 1 项 critical、2 项 high、4 项 low 降为 KaTeX／remark-math 链的 4 项 low；没有 high／critical，不据此宣称全面安全。锁文件没有其他依赖版本变更。
+- `npm ci`、`cargo fetch --locked`、发布元数据、国际化及完整 `test:core-assets` 通过：353 项 Rust 测试（3 项既有忽略）、335 项 UI 测试、7 项启动器测试、格式、workspace all-target Clippy、前端构建、存储并发、故障恢复和真实 stdio MCP。随后 `verify_restore.py` 通过，3 次实时 MCP 写入保留且完整性为 ok。证据在忽略目录 `research/release-0.1.7/`；日志 HEAD 是准备前基线，受测工作区版本和安全补丁另有源文件哈希记录。
+- 发布工作流增加默认不发布的候选预检，仍要求准确 main 提交；真正发布还要求已存在标签与该提交一致，并等待验证和打包通过。新增仅可在一次性 GitHub macOS 环境运行的正式包升级检查，验证旧版包替换、原文／版本／回执／合成草稿、设置、迁移备份、重启及旧 MCP 拒绝新 schema。YAML、发布开关、Python 语法及本地拒绝启动保护检查通过；脚本最后复核补充原文精确断言，并区分库打开拒绝和无握手退出。实际云端升级仍待执行。
+- 本机只有日常账户，没有启动正式包或替换日常安装。候选正式产物构建、签名／内容校验及云端启动／升级预检尚待完成；既有原生功能验证不等同于这些检查。本轮未新增界面行为，未重做物理 IME／全局热键、麦克风、实际外部模型或交互式 Gatekeeper／应用内更新安装验收，不把自动化资料保留检查称为上述人工验收。

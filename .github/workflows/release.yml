@@ -6,13 +6,18 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to publish
+        description: Planned tag for preflight, or existing tag to publish
         required: true
         type: string
       source-sha:
-        description: Full commit SHA of the version tag
+        description: Exact source commit on main
         required: true
         type: string
+      publish:
+        description: Publish after verification (false runs preflight only)
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -33,7 +38,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
-        run: gh workflow run release.yml --ref main -f tag="$RELEASE_TAG" -f source-sha="$RELEASE_SHA"
+        run: gh workflow run release.yml --ref main -f tag="$RELEASE_TAG" -f source-sha="$RELEASE_SHA" -f publish=true
   verify:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/ci.yml
@@ -52,15 +57,20 @@ jobs:
           ref: ${{ inputs.source-sha }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Verify tagged source is on main
+      - name: Verify release source is on main
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SHA: ${{ inputs.source-sha }}
+          PUBLISH_RELEASE: ${{ inputs.publish }}
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RELEASE_SHA"
+          if [[ "$PUBLISH_RELEASE" == true ]]; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RELEASE_SHA"
+          else
+            test -z "$(git tag --list "$RELEASE_TAG")"
+          fi
           git merge-base --is-ancestor HEAD origin/main
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -104,6 +114,15 @@ jobs:
         run: python3 scripts/verify_mcp.py --binary target/aarch64-apple-darwin/release/bundle/macos/Memivy.app/Contents/MacOS/memivy-mcp
       - name: Check packaged main application startup
         run: python3 scripts/verify_app_startup.py --app target/aarch64-apple-darwin/release/bundle/macos/Memivy.app
+      - name: Check packaged upgrade from schema 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p research/upgrade-baseline
+          gh release download v0.1.6 --pattern Memivy.app.tar.gz --pattern Memivy.app.tar.gz.sig --dir research/upgrade-baseline
+          node scripts/verify-update.mjs research/upgrade-baseline/Memivy.app.tar.gz
+          python3 scripts/verify_app_upgrade.py --previous-archive research/upgrade-baseline/Memivy.app.tar.gz --app target/aarch64-apple-darwin/release/bundle/macos/Memivy.app
       - name: Prepare assets
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -131,6 +150,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: [verify, package]
     runs-on: ubuntu-24.04
     permissions:

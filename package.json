@@ -1,6 +1,6 @@
 {
   "name": "memivy",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "scripts": {
@@ -37,7 +37,7 @@
     "esbuild": "0.28.2",
     "jsdom": "29.1.1",
     "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "vite": "8.2.4"
   },
   "license": "MIT",
   "author": "Huang Bo",
