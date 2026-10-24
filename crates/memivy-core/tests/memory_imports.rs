@@ -488,6 +488,7 @@ fn grouped_undo_preserves_unsaved_drafts_on_any_imported_memory() {
         destination: None,
         origin: None,
         context: vec![],
+        context_export: None,
     };
     store.save_workspace_draft(&draft).unwrap();
     assert_eq!(

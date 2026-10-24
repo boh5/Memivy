@@ -216,5 +216,8 @@
   "import_file_name": "The filename is empty, contains control characters, or exceeds 255 bytes. Rename the file and retry.",
   "import_file_limit": "Choose no more than 32 files for one import.",
   "import_busy": "Another import is active. Finish or close its preview before choosing more files.",
-  "import_selection_changed": "An imported memory changed or is no longer available. Review the batch before starting organization."
+  "import_selection_changed": "An imported memory changed or is no longer available. Review the batch before starting organization.",
+  "context_export_budget": "Choose up to 20 memories with at most 48 KiB of source text and metadata. Nothing was shortened.",
+  "context_export_unavailable": "The context preview is unavailable. Close it and try again.",
+  "context_export_clipboard": "Could not copy to the clipboard. Your preview is still here; try again."
 }

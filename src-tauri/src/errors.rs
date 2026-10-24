@@ -34,6 +34,7 @@ impl From<DataError> for HostError {
             DataError::Integrity => "integrity",
             DataError::DestinationExists => "destination_exists",
             DataError::SearchBudget => "search_budget",
+            DataError::ContextBudget => "context_export_budget",
         })
     }
 }
@@ -130,6 +131,9 @@ pub const KNOWN_CODES: &[&str] = &[
     "capture_window_unavailable",
     "cleanup_busy",
     "cleanup_unavailable",
+    "context_export_budget",
+    "context_export_unavailable",
+    "context_export_clipboard",
     "collection_name",
     "configuration_conflict",
     "configuration_restore_failed",

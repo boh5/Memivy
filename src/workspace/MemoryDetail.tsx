@@ -22,6 +22,7 @@ import {
   keyOf,
   uid,
   type Detail,
+  type ContextExportSelection,
   type Source,
   type Key,
   type Receipt,
@@ -169,7 +170,9 @@ export default function MemoryDetail({
   onOpenDiscussion,
   onBack,
   collectionId,
+  onCopyContext,
 }: {
+  onCopyContext?: (selection: ContextExportSelection) => void;
   collectionId?: string;
   record: Key;
   initialReceipt: Receipt | null;
@@ -364,6 +367,7 @@ export default function MemoryDetail({
                 <span className="toolbar-divider" aria-hidden="true" />
                 <RecordNavigation record={record} onChanged={() => onChanged()} />
                 <MoreMenu>
+                  {onCopyContext && <button disabled={busy || loading || editing} onClick={() => onCopyContext({ memory_id: detail.key.id, version_id: detail.current.id, title: detail.title })}>{t("contextExport.title")}</button>}
                   <button aria-label={t("detail.cleanup")} disabled={busy || loading || editing} onClick={() => setCleaning(true)}>{t("detail.cleanup")}</button>
                   <button
                     disabled={busy || loading || editing}

@@ -7,8 +7,8 @@ import { call, date, errorText, keyOf, sourceName, type Key, type Page, type Que
 import { Empty, ErrorNotice } from "./components";
 import { useNotice } from "../i18n/react";
 
-export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, collectionId, onImport }: {
-  collectionId?: string; onImport?: () => void;
+export default function MemoryList({ trash, active, selected, revision: requestedRevision = 0, onSelect, onCapture, onRefresh, collectionId, onImport, onCopyContext }: {
+  collectionId?: string; onImport?: () => void; onCopyContext?: () => void;
   trash: boolean; active: boolean; selected: Key | null; revision?: number;
   onSelect: (key: Key) => void; onCapture: () => void; onRefresh: () => void;
 }) {
@@ -102,7 +102,8 @@ export default function MemoryList({ trash, active, selected, revision: requeste
           </span>
           <h1>{trash ? t("list.trashTitle") : collectionId ? t("list.collectionTitle") : t("list.libraryTitle")}</h1>
         </div>
-        {!trash && onImport && <button className="quiet import-entry" onClick={onImport}>{t("import.entry")}</button>}
+        {!trash && onCopyContext && <button className="quiet context-export-entry" onClick={onCopyContext}>{t("contextExport.title")}</button>}
+        {!trash && onImport && <button className={onCopyContext ? "quiet" : "quiet import-entry"} onClick={onImport}>{t("import.entry")}</button>}
         <button
           className="icon-button"
           aria-label={t("list.refresh")}

@@ -6,7 +6,7 @@ import { expireQueries, useResourceBridge, useResourceVersion } from "./resource
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Icon } from "../ui";
-import { call, errorText, keyOf, native, uid, type Collection, type Page, type Row, type Detail, type Key, type Receipt, type Settings, type Source, type Topic } from "./api";
+import { call, errorText, keyOf, native, uid, type ContextExportSelection, type Collection, type Page, type Row, type Detail, type Key, type Receipt, type Settings, type Source, type Topic } from "./api";
 import { Empty, ErrorNotice } from "./components";
 import { flushDrafts, refreshDrafts } from "./useDraft";
 import { installClickRecovery } from "./clickRecovery";
@@ -14,6 +14,7 @@ import MemoryDetail from "./MemoryDetail";
 import MemoryList from "./MemoryList";
 import ImportMemories from "./ImportMemories";
 import type { ImportOrganization } from "./importMemoryBatch";
+import ContextExport from "./ContextExport";
 import Activity from "./Activity";
 import PaneResizeHandle from "./PaneResizeHandle";
 import WorkspaceQuery from "./WorkspaceQuery";
@@ -42,6 +43,7 @@ export default function App() {
   const { t } = useTranslation("workspace");
   const [importOpen, setImportOpen] = useState(false);
   const importDispatches = useRef(new Set<string>());
+  const [contextExport, setContextExport] = useState<{ collectionId?: string; selection?: ContextExportSelection } | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]), [pins, setPins] = useState<Row[]>([]);
   const [collectionId, setCollectionId] = useState<string | null>(null);
   const [collectionEditor, setCollectionEditor] = useState<Collection | "new" | null>(null);
@@ -278,7 +280,7 @@ export default function App() {
         <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1>{collection.description && <p>{collection.description}</p>}</div>
         <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) {setSettingsInitialPage("ai"); setSettingsOpen(true);} else setSuggestions(collection); }}><Icon name="spark" size={14} />{t("app.recommend")}</button>
           <button onClick={showLibrary}>{t("app.chooseMemories")}</button>
-          <MoreMenu><button onClick={() => setCollectionHistory(collection)}>{t("collectionChanges.historyTitle")}</button><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
+          <MoreMenu><button onClick={() => setContextExport({ collectionId: collection.id })}>{t("contextExport.title")}</button><button onClick={() => setCollectionHistory(collection)}>{t("collectionChanges.historyTitle")}</button><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
         </div>
       </section>}
       <Toast />
@@ -289,13 +291,16 @@ export default function App() {
         <MemoryList key={listIdentity}
           collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
           selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection"].includes(page)) setPage("library"); }}
-          onCapture={newDiscussion} onRefresh={refresh} onImport={!listCollectionId ? () => setImportOpen(true) : undefined} />
+          onCapture={newDiscussion} onRefresh={refresh}
+          onCopyContext={() => setContextExport({ collectionId: listCollectionId })}
+          onImport={!listCollectionId ? () => setImportOpen(true) : undefined} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
           <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : null}</span></div>
           <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
              configured={configured} onSettings={() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}
           collectionId={page === "collection" ? collectionId || undefined : undefined}
+          onCopyContext={selection => setContextExport({ selection })}
           initialReceipt={pendingReceipt?.key === keyOf(selected) ? pendingReceipt.receipt : null}
            query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onOpenDiscussion={async id => {
              try { const next = await call<Topic>("discussion_topic", { id }); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); }
@@ -308,6 +313,7 @@ export default function App() {
       </div>}
     </main>
     <ImportMemories open={importOpen} configured={configured} onClose={() => setImportOpen(false)} onChanged={refresh} onOpenRecord={openRecord} onOrganize={organizeImport} onOpenDiscussion={openImportDiscussion} />
+    {contextExport && <ContextExport collections={collections} collectionId={contextExport.collectionId} initialSelection={contextExport.selection} configured={configured} onClose={() => setContextExport(null)} />}
     {settingsOpen && <SettingsPanel initialPage={settingsInitialPage} onClose={() => setSettingsOpen(false)} onChanged={refresh}
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor}

@@ -80,6 +80,75 @@ pub struct WorkspaceDraft {
     pub origin: Option<Origin>,
     #[serde(default)]
     pub context: Vec<SourceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_export: Option<ContextExportDraft>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextExportDraft {
+    pub snapshot: Option<ContextSnapshot>,
+    pub mode: ContextExportMode,
+    pub selections: Vec<ContextDraftSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextExportMode {
+    Full,
+    Summary,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextDraftSelection {
+    pub memory_id: String,
+    pub version_id: String,
+    pub title: String,
+}
+
+impl ContextExportDraft {
+    fn validate(&self) -> Result<()> {
+        if self.selections.len() > CONTEXT_EXPORT_MAX_MEMORIES
+            || serde_json::to_vec(self)
+                .map_err(|_| DataError::Invalid)?
+                .len()
+                > 64 * 1024
+        {
+            return Err(DataError::ContextBudget);
+        }
+        let mut ids = std::collections::HashSet::new();
+        for selection in &self.selections {
+            valid_id(&selection.memory_id)?;
+            valid_id(&selection.version_id)?;
+            if !ids.insert(selection.memory_id.to_ascii_lowercase()) || selection.title.len() > 200
+            {
+                return Err(DataError::Invalid);
+            }
+        }
+        if let Some(id) = &self.collection_id {
+            valid_id(id)?;
+        }
+        if let Some(snapshot) = &self.snapshot {
+            if snapshot.items.len() > CONTEXT_EXPORT_MAX_MEMORIES
+                || serde_json::to_vec(snapshot)
+                    .map_err(|_| DataError::Invalid)?
+                    .len()
+                    > CONTEXT_EXPORT_MAX_BYTES
+            {
+                return Err(DataError::ContextBudget);
+            }
+            for item in &snapshot.items {
+                valid_id(&item.memory_id)?;
+                valid_id(&item.version_id)?;
+            }
+        }
+        // Drafts may preserve stale or deleted sources for recovery. Export
+        // commands revalidate their complete snapshot before use.
+        Ok(())
+    }
 }
 
 fn snippet(text: &str, query: &str) -> String {
@@ -367,6 +436,12 @@ impl MemoryStore {
         if draft.title.len() > 200 || draft.body.len() > 128 * 1024 || draft.context.len() > 32 {
             return Err(DataError::Invalid);
         }
+        if let Some(export) = &draft.context_export {
+            if draft.key != "context_export" {
+                return Err(DataError::Invalid);
+            }
+            export.validate()?;
+        }
         if let Some(destination) = &draft.destination {
             if !draft.key.starts_with("save:") {
                 return Err(DataError::Invalid);
@@ -453,7 +528,7 @@ impl MemoryStore {
     }
 }
 fn validate_draft_key(key: &str) -> Result<()> {
-    if matches!(key, "input" | "quick_input") {
+    if matches!(key, "input" | "quick_input" | "context_export") {
         return Ok(());
     }
     let (kind, id) = key.split_once(':').ok_or(DataError::Invalid)?;

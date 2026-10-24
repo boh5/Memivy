@@ -11,6 +11,7 @@ mod agent_mutations;
 mod agent_state;
 mod cleanup;
 mod collection_recommendations;
+mod context_export;
 mod conversations;
 mod db;
 mod discussion;
@@ -35,6 +36,7 @@ pub use agent_mutations::*;
 pub use agent_state::*;
 pub use cleanup::*;
 pub use collection_recommendations::*;
+pub use context_export::*;
 pub use db::MemoryStore;
 pub use discussion::AgentInputChange;
 pub use embedding::EmbeddingStatus;
@@ -84,6 +86,10 @@ pub enum DataError {
     DestinationExists,
     #[error("The query matches too much content; add keywords or narrow the time range")]
     SearchBudget,
+    #[error(
+        "The selected memories exceed the context limit; select at most 20 memories and less text"
+    )]
+    ContextBudget,
 }
 impl From<std::io::Error> for DataError {
     fn from(_: std::io::Error) -> Self {

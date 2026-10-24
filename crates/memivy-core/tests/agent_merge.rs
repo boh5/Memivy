@@ -313,6 +313,7 @@ fn stale_heads_and_drafts_reject_the_entire_merge() {
         if draft {
             store
                 .save_workspace_draft(&WorkspaceDraft {
+                    context_export: None,
                     key: format!("memory:{}", b.memory_id),
                     title: "Draft".into(),
                     body: "Unsaved words".into(),

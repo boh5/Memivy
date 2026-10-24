@@ -216,5 +216,8 @@
   "import_file_name": "文件名为空、包含控制字符或超过 255 字节，请重命名后重试。",
   "import_file_limit": "每次最多选择 32 个文件。",
   "import_busy": "已有一批导入正在处理，请完成或关闭预览后再选择文件。",
-  "import_selection_changed": "本批次有记忆已被修改或不再可用，请检查后再开始整理。"
+  "import_selection_changed": "本批次有记忆已被修改或不再可用，请检查后再开始整理。",
+  "context_export_budget": "最多选择 20 条记忆，来源正文和信息合计不超过 48 KiB。内容没有被截断。",
+  "context_export_unavailable": "背景预览暂时不可用，请关闭后重试。",
+  "context_export_clipboard": "未能复制到剪贴板，预览内容已保留，请重试。"
 }
