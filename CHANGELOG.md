@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7
+
+- Copy selected memories for AI from the library, a collection or an individual memory. Review and edit the preview, optionally organize it with your configured model, and copy it with source references.
+- Remove query parameters, fragments and obviously local addresses from exported web-source metadata while preserving the original saved material.
+- Import UTF-8 Markdown and text files with previews, exact-duplicate detection and a reversible batch receipt. Organize imported memories with AI only when you choose to.
+- Keep imported filenames and unknown authorship visible in source references. Import time does not stand for writing time, event time or your agreement with the material.
+- Apply security patches for DOMPurify, Vite and Undici.
+
+This release upgrades database schema 2 to schema 3, with a private backup before migration. Older app versions cannot open the upgraded library; returning to an older version requires a compatible backup.
+
 ## 0.1.6
 
 - Improve the desktop leaf: drag it to move, click to open the quick window, and use its native menu. Restore its saved position when reopening Memivy.

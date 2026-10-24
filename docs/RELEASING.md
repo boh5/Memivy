@@ -79,6 +79,14 @@ node scripts/verify-update.mjs target/aarch64-apple-darwin/release/bundle/macos/
 Review dependency vulnerabilities and check for accidentally included secrets.
 Commit the release changes, merge them into `main`, and wait for CI to pass.
 
+Before creating the tag, run the Release workflow manually on `main`, with the
+planned tag and exact source SHA and `publish` set to false. This preflight builds
+and verifies the packages without publishing. It also installs the signed 0.1.6
+baseline in a disposable runner directory, replaces it with the candidate and
+checks schema-2 migration, saved material, drafts, settings and restart. This
+automated check does not establish interactive Gatekeeper, permission or in-app
+updater acceptance. Keep those results separate from package verification.
+
 ## 2. Validate before publishing
 
 Test the locally built DMG and updater artifacts before pushing a tag. Follow
