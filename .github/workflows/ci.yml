@@ -38,8 +38,7 @@ jobs:
           test "$(uname -m)" = arm64
           xcrun --show-sdk-version
           cmake --version
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" show
+          bash scripts/setup-ci-rust.sh
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

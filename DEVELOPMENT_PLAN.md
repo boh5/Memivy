@@ -1553,3 +1553,9 @@ No UI QA, native build or app launch was performed for this review. Verification
 - 最终 `test:core-assets` 全部通过：353 项 Rust 测试（3 项既有忽略）、335 项 UI 测试、7 项启动器测试、格式、workspace all-target Clippy、前端构建、存储并发、故障恢复及真实 stdio MCP。定向导入／导出 21 项、国际化及 `verify_restore.py` 通过；恢复保留 4 次实时 MCP 写入，完整性为 ok。最终证据为忽略目录 `research/pr14-integration-qa/core-regression-final/` 和 `restore-final.log`；日志 HEAD 为合并前分支，受测文件是本轮已解决冲突的工作区。
 - 原生 QA 经标准启动器及共享锁核实 `com.memivy.app.dev` 和实际打开的绝对路径合成资料库。验证原生双文件导入、中英文列表双入口与来源页脚、两种语言的真实复制后粘贴、正文语言保留、预览恢复、后续批次成员回执及整批撤销；撤销后旧导出预览保留并禁止复制。导出前后记忆、原文、版本、回执和对话表哈希一致，撤销后两份原文逐字节保留，完整性为 ok。结果在 `native-results.json` 及导出前后哈希文件中。
 - 自有原生实例及启动器已停止，共享锁已释放，合成资料库和输入夹具已删除；正式应用在收尾核实时仍运行，未操作正式库、持久 Dev 草稿或共享模型缓存。本轮未重做物理 IME／全局热键、麦克风、真实外部模型或正式安装升级验收，不将有限合成样本及局部原生验证视为用户验收。
+
+### 合并后 CI 工具链初始化（2026-10-24）
+
+- PR #13、#14 已依次合并，后者 squash 提交为 `19549da4ea5c01c9ca43591288d1b116b69b769c`。该提交的 main CI 在开始产品测试前失败：runner 的 `$HOME/.cargo/bin/rustup` 不存在，日志见忽略目录 `research/pr14-integration-qa/main-ci-failure.log`。不把该失败记为产品测试失败或远端验证通过。
+- CI 与发布工作流复用同一初始化脚本；所选 Cargo 目录缺少 Rust 工具时，通过官方 HTTPS 安装器非交互初始化，不修改 shell profile，不设额外默认工具链，继续由 `rust-toolchain.toml` 选择版本及组件。没有改变产品代码、锁文件、发布触发方式或发布版本。
+- Bash 语法、diff 检查及已有工具／缺失工具／下载失败三个隔离分支检查通过；已有本机工具的真实调用确认 Rust 1.98.1。下载失败保留非零退出，不执行安装器。必要结果为 `ci-bootstrap-checks.json` 和 `ci-bootstrap-existing-toolchain.log`；全新 hosted runner 上的安装及完整远端回归仍待 CI，未重复运行已完成的产品及原生检查。
