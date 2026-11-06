@@ -1582,3 +1582,10 @@ No UI QA, native build or app launch was performed for this review. Verification
 - 发布范围为上述 MCP 指导及参数说明，更新各处版本号和英文更新说明；接口、依赖版本及 schema 3 不变。发布文档同步移除过时的独立预检要求，沿用正常 main CI 与标签发布。
 - `npm ci`、锁定 Rust 依赖、发布元数据、国际化及完整 `test:core-assets` 通过：353 项 Rust 测试、335 项 UI 测试、7 项启动器测试，3 项既有忽略测试；包含格式、workspace all-target Clippy、前端构建、存储、故障及真实 stdio MCP。`verify_restore.py` 通过，4 次实时 MCP 写入在恢复前副本保留，完整性为 ok。npm audit 仍为 KaTeX 链的 4 项 low，没有 moderate、high 或 critical；未修改依赖来扩大本次范围。
 - 证据在忽略目录 `research/release-0.1.8/`。此处记录提交前检查；正式打包、包内 MCP、CI 和公开产物核验随后执行。未替换日常安装或使用个人资料库，不把这些检查称为交互式安装、麦克风、IME、热键或更新安装验收。
+
+## 0.1.8 安全补丁追加验证
+
+- 发布前核实 GitHub 依赖告警：ZIP 的高危／严重问题仅涉及 Windows updater 依赖，不在当前 macOS 编译图；glib 同样不在 macOS 目标。实际 HTTPS 运行依赖 Rustls 0.23.43 存在中危 TLS 1.3 加密边界协议缺陷，用户明确同意一并修复后发布。
+- 仅将 Rustls 升至兼容补丁 0.23.46 并更新校验值，保留其他全部包和依赖边；没有升级 Tauri、ZIP、其他依赖或修改接口／数据库。更新说明补充 TLS 安全修复。锁定依赖、版本／国际化检查及独立复审通过。
+- 依赖变更后的最终完整回归再次通过：353 项 Rust 测试、335 项 UI 测试、7 项启动器测试，3 项既有忽略测试；格式、workspace Clippy、前端构建、存储／故障／真实 stdio MCP 与恢复检查均通过。最终产物需由该补丁候选重新生成并核验；先前仅 MCP 候选的检查单独保留为 `mcp-only-*`，不作为最终产物证据。
+- 初次打包遇到旧原生缓存指向已删除 CMake 路径，仅重新配置该缓存后构建通过，没有删除共享缓存、替换日常安装或读取个人资料库。证据及最终阶段状态保存在忽略目录 `research/release-0.1.8/`。

@@ -5,6 +5,7 @@
 - Improve MCP guidance so connected assistants can proactively save useful new or changed facts, preferences, constraints, ideas and decisions without repeated save requests.
 - Guide assistants to preserve original wording and undecided status, avoid repeated writes and respect requests not to save.
 - Clarify the calling application, source project and optional original conversation address recorded with a memory.
+- Update Rustls to 0.23.46 for TLS 1.3 security fixes.
 
 This release keeps database schema 3; no new database migration is required. After updating, reconnect Memivy's MCP server or refresh cached tool definitions to receive the new guidance.
 
