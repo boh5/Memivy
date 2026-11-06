@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8
+
+- Improve MCP guidance so connected assistants can proactively save useful new or changed facts, preferences, constraints, ideas and decisions without repeated save requests.
+- Guide assistants to preserve original wording and undecided status, avoid repeated writes and respect requests not to save.
+- Clarify the calling application, source project and optional original conversation address recorded with a memory.
+
+This release keeps database schema 3; no new database migration is required. After updating, reconnect Memivy's MCP server or refresh cached tool definitions to receive the new guidance.
+
 ## 0.1.7
 
 - Copy selected memories for AI from the library, a collection or an individual memory. Review and edit the preview, optionally organize it with your configured model, and copy it with source references.
