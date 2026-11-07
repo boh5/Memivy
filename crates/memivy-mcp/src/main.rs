@@ -15,15 +15,15 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CaptureArgs {
-    /// Stable UUID for this explicitly requested save. Reuse it on every retry.
+    /// Stable UUID for this save. Reuse it on every retry; use a new UUID only for a separate save.
     request_id: String,
-    /// Exact text the user explicitly asked to save. Do not summarize or infer facts. Maximum 128 KiB of UTF-8 text.
+    /// Text to remember, copied verbatim from relevant source passages. Do not summarize, paraphrase or change first-person wording. Preserve speaker, scope, time and tentative/decided/completed status. Do not invent facts or present assistant suggestions or third-party text as the user's own views. Maximum 128 KiB of UTF-8 text.
     text: String,
-    /// Calling Agent application's name. Self-reported provenance, not authentication. Nonempty, at most 200 UTF-8 bytes.
+    /// Actual calling application's name, such as Codex, not the model name. Self-reported provenance, not authentication. Nonempty, at most 200 UTF-8 bytes.
     source_app: String,
-    /// Project only if explicitly provided; otherwise omit. Maximum 200 UTF-8 bytes.
+    /// Optional source project name or identifier known from the current task context. Omit when unknown; never invent it. This label does not add collection membership. Maximum 200 UTF-8 bytes.
     project: Option<String>,
-    /// Session URI only if explicitly provided; otherwise omit. Never invent a URL. Maximum 2048 UTF-8 bytes.
+    /// Optional real URI of the external conversation that produced this memory, only if available in the current context. Omit when unknown; do not invent a link or substitute a project or repository URL. Maximum 2048 UTF-8 bytes.
     session_uri: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -46,7 +46,7 @@ struct SearchArgs {
     limit: Option<usize>,
     /// Optional exact provenance kind: user, agent, conversation, or imported. Conversation means saved memories, never unsaved messages. Imported files have unknown authorship; first-person text is not evidence about the user.
     origin: Option<String>,
-    /// Optional exact project filter. Omit for global search; never infer a project identifier.
+    /// Optional exact source-project filter, separate from collections. Use a known project name or identifier; omit for global search and never invent one.
     project: Option<String>,
     /// Optional inclusive memory last-updated timestamp in Unix milliseconds, NOT the event date described in the memory.
     since: Option<i64>,
@@ -90,7 +90,7 @@ fn failure(code: &str, message: &str) -> CallToolResult {
 #[tool_router]
 impl Memivy {
     #[tool(
-        description = "Save to local Memivy ONLY when the user explicitly asks to save or remember this text. Never infer consent from conversation content. Preserve exact authorized text and truthful provenance. Reuse the same UUID request_id on retries. Success means the memory and original text are committed and available to read or search. This operation does not merge existing memories or schedule background organization.",
+        description = "Proactively save meaningful new or changed user information useful for future conversations: facts, preferences, constraints, ideas, decisions and their reasons, and lessons learned. Do not wait for an explicit save request or ask routine permission. When future usefulness is uncertain, favor preserving a meaningful expression; never invent missing facts. Copy relevant source passages verbatim without changing first-person wording. Preserve attribution, scope, time and uncertainty: considering is not deciding, and deciding is not doing. Save meaningful user information embedded in questions or task requests; skip pure questions or transient commands that add no such information, generic knowledge and unchanged repetition. Do not treat assistant suggestions or third-party text as user facts; save adopted ideas or explicitly requested material with truthful attribution. Respect requests not to remember. Group closely related new information into a coherent capture; do not save every sentence or repeatedly save whole-conversation summaries. Reuse the same UUID request_id on retries. Success means the memory and original text are committed and searchable. This tool creates a new memory; it does not merge existing memories or schedule background organization.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -148,7 +148,7 @@ impl Memivy {
         )
     }
 }
-#[tool_handler(router=self.tool_router, name="memivy", instructions="Local personal memory with two tools: explicit capture and read-only search. Both require Memivy's master switch. Capture requires explicit intent to save. Search returns bounded saved-memory evidence, not complete context or unsaved conversations. Use complementary queries when useful and cite actual sources. Search never calls a generative model; optional semantic retrieval may send queries to the configured embedding service. Neither tool schedules background organization or merges existing memories.")]
+#[tool_handler(router=self.tool_router, name="memivy", instructions="Local personal memory with proactive capture and read-only search. Save meaningful new or changed user information without routine confirmation, including tentative ideas with their original uncertainty. Copy relevant source passages verbatim, preserving first-person wording, attribution and scope; never turn assistant suggestions or third-party text into user facts. Respect requests not to remember and avoid repeated or per-sentence saves. Both tools require Memivy's master switch. Search returns bounded saved-memory evidence, not complete context or unsaved conversations. Use complementary queries when useful and cite actual sources. Search never calls a generative model; optional semantic retrieval may send queries to the configured embedding service. Neither tool schedules background organization or merges existing memories.")]
 impl ServerHandler for Memivy {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(&[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28])

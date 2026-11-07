@@ -88,8 +88,16 @@ frameworks or speculative abstractions.
   preserve recoverable input on failure. Stopping recording must not send it.
 - MCP uses local stdio and exposes only `memory_capture` and `memory_search`.
   It starts enabled; users can disable it, and invalid configuration disables it.
-  Capture requires explicit intent to save; search returns
-  bounded saved-memory results with sources, never unsaved conversations.
+  Capture proactively saves meaningful new or changed user expressions without
+  routine confirmation, copying relevant passages verbatim without changing
+  first-person wording, attribution or tentative, decided or completed status.
+  Favor keeping meaningful expressions when future usefulness is uncertain.
+  Respect requests not to save; retain meaningful user
+  information within questions or task requests, while skipping repetition and
+  pure questions or transient commands that add no such information.
+  AI suggestions and third-party material are not user facts unless adopted;
+  requested reference material retains its attribution. Search returns bounded
+  saved-memory results with sources, never unsaved conversations.
 - Test actual model requests, raw tool arguments and storage effects when changing
   prompts or agent behavior. Fix controllable defects; report remaining model
   quality observations without claiming every semantic outcome is guaranteed.
