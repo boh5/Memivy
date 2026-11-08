@@ -85,7 +85,7 @@ function load(file) {
   const code=compileFixture(file);
   const req = name => {
     if (Object.hasOwn(modules, name)) return {__esModule:true,...modules[name]};
-    if(name==='./resources')return {useResourceVersion:()=>0,useResourceBridge:()=>{},expireQueries:async()=>{}};
+    if(name==='./resources')return {useResourceVersion:()=>0,useResourceBridge:()=>{},expireQueries:async()=>{},invalidateResources:async()=>{}};
     if(name==='./Select')return {__esModule:true,default:'select'}; // Shared control is exercised separately with real React.
     if(name==='react')return hooks;
     if(name==='react-i18next')return {useTranslation:ns=>({t:translation.getFixedT(null,ns),i18n:translation})};
@@ -108,8 +108,9 @@ function load(file) {
     for(const ext of ['','.tsx','.ts'])if(fs.existsSync(p+ext))return load(p+ext);
     throw Error(name);
   };
-  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,...timers,performance,crypto:{randomUUID},window:{
+  vm.runInNewContext(code,{require:req,module,exports:module.exports,console,...timers,performance,Event,crypto:{randomUUID},window:{
     addEventListener(name,fn){if(!windowEvents.has(name))windowEvents.set(name,new Set());windowEvents.get(name).add(fn);},
+    dispatchEvent(event){windowEvents.get(event.type)?.forEach(fn=>fn(event));},
     removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}
   },navigator:{clipboard},document:{body:{inert:false},addEventListener(){},removeEventListener(){},querySelector(){return null}},requestAnimationFrame:fn=>fn()},{filename:file});
   cache.set(file,module.exports);

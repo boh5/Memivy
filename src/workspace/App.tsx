@@ -20,9 +20,10 @@ import PaneResizeHandle from "./PaneResizeHandle";
 import WorkspaceQuery from "./WorkspaceQuery";
 import WorkspaceSidebar, { type WorkspacePage } from "./WorkspaceSidebar";
 import SettingsPanel from "./Settings";
-import Discussion from "./Discussion";
+import Discussion, { type DiscussionComposerControls } from "./Discussion";
 import type { InputSubmission } from "./CaptureForm";
 import CollectionEditor from "./CollectionEditor";
+import CollectionPicker from "./CollectionPicker";
 import { CollectionChangeHistory } from "./MemoryChanges";
 import CollectionSuggestions from "./CollectionSuggestions";
 import { Modal, MoreMenu } from "./components";
@@ -47,13 +48,16 @@ export default function App() {
   const [collections, setCollections] = useState<Collection[]>([]), [pins, setPins] = useState<Row[]>([]);
   const [collectionId, setCollectionId] = useState<string | null>(null);
   const [collectionEditor, setCollectionEditor] = useState<Collection | "new" | null>(null);
+  const [collectionPicker, setCollectionPicker] = useState<Collection | null>(null);
   const [suggestions, setSuggestions] = useState<Collection | null>(null), [archiveConfirm, setArchiveConfirm] = useState<Collection | null>(null);
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [collectionHistory, setCollectionHistory] = useState<Collection | null>(null);
   const collectionLock = useRef(false);
   const [page, setPage] = useState<WorkspacePage>("library");
   const [selected, setSelected] = useState<Key | null>(null);
+  const [selectedQuery, setSelectedQuery] = useState("");
   const [topic, setTopic] = useState<Topic | null>(null), [topics, setTopics] = useState<Topic[]>([]);
+  const [discussionControls, setDiscussionControls] = useState<DiscussionComposerControls | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false), [configured, setConfigured] = useState(false);
   const [settingsInitialPage, setSettingsInitialPage] = useState<"general"|"ai"|"voice">("general");
   useEffect(() => { if (!settingsOpen) setSettingsInitialPage("general"); }, [settingsOpen]);
@@ -75,6 +79,8 @@ export default function App() {
   const [handoff, setHandoff] = useState<Handoff | null>(null), handoffRef = useRef<Handoff | null>(null);
   const [restoreId, setRestoreId] = useState<string | null>(null), [restoreNotice, setRestoreNotice] = useNotice();
   const pageRef = useRef(page); pageRef.current = page;
+  const recallRoute = useRef({ topicId: topic?.id, focus: recallFocus });
+  recallRoute.current = { topicId: topic?.id, focus: recallFocus };
   const desktop = useDesktop();
   useWindowLifecycle(setWindowError);
   const refresh = useCallback((key?: Key, receipt?: Receipt) => {
@@ -193,6 +199,13 @@ export default function App() {
     return () => window.removeEventListener("keydown", keyboard);
   }, [newDiscussion, openRecall]);
   async function submit(input: InputSubmission) {
+    if (currentDiscussionControls) {
+      await currentDiscussionControls.submit(input);
+      if (pageRef.current === "topic" && recallRoute.current.topicId === currentDiscussionControls.topicId && recallRoute.current.focus === recallFocus) {
+        setRecallOpen(false); setTopicFocus(value => value + 1);
+      }
+      return;
+    }
     const currentTopic = page === "topic" ? topic?.id : undefined;
     const next = await call<Topic>("discussion_submit", { ...input, topicId: currentTopic, collectionId: queryScope, quick: recallQuick });
     if (recallQuick) await desktop.update({ topic_id: next.id });
@@ -226,7 +239,7 @@ export default function App() {
     const next = await call<Topic>("discussion_topic", { id });
     setImportOpen(false); setRecallOpen(false); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1);
   }
-  function openRecord(key: Key) { setRecallQuick(false); setSelected(key); setPage("library"); setCollectionId(null); }
+  function openRecord(key: Key) { setRecallQuick(false); setSelected(key); setSelectedQuery(""); setPage("library"); setCollectionId(null); }
   function showLibrary() { setRecallQuick(false); if (page === "trash") setSelected(null); setPage("library"); setCollectionId(null); }
   function showCollection(id: string) { setRecallQuick(false); setCollectionId(id); setSelected(null); setPage("collection"); }
   async function archiveCollection(value: Collection, undo = false) {
@@ -249,9 +262,11 @@ export default function App() {
     } catch (e) { setWindowError(errorText(e)); }
   }
   const collection = collections.find(c => c.id === collectionId);
+  const currentDiscussionControls = page === "topic" && discussionControls?.topicId === topic?.id ? discussionControls : null;
   const queryScope = page === "collection" ? collectionId : page === "topic" ? topic?.collection_id || null : null;
   const scopeName = collections.find(c => c.id === queryScope)?.name || t("app.removedCollection");
-  const listCollectionId = page === "collection" ? collectionId || undefined : page === "topic" ? topic?.collection_id || undefined : undefined;
+  const topicCollection = page === "topic" ? collections.find(c => c.id === topic?.collection_id) : undefined;
+  const listCollectionId = page === "collection" ? collectionId || undefined : topicCollection?.id;
   const listIdentity = page === "trash" ? "trash" : listCollectionId ? `collection:${listCollectionId}` : "library";
   const reading = page === "topic" || !!selected;
   return <div className={`app-shell memory-app recall-workspace${sidebarHidden ? " sidebar-hidden" : ""}`}>
@@ -262,6 +277,7 @@ export default function App() {
     }} form={{ quick:recallQuick, sourceApp:recallQuick ? desktop.state?.source_app : "Memivy", draftKey:page === "topic" && topic ? `discussion:${topic.id}` : undefined, presentation:"query", focus:recallOpen ? recallFocus : 0,
       onReady:handoff?.target === "query" ? handoffReady : undefined,
       configured, onSettings:() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}, onSubmit:submit,
+      controls: page === "topic" ? currentDiscussionControls : undefined,
     }} />
     <WorkspaceSidebar page={page} topic={topic} topics={topics}
       selected={selected} pins={pins} collections={collections} collectionId={collectionId}
@@ -279,7 +295,7 @@ export default function App() {
       {page === "collection" && collection && <section className="collection-header">
         <div><span className="eyebrow">{t("app.collectionCount", { count: collection.count })}</span><h1>{collection.name}</h1>{collection.description && <p>{collection.description}</p>}</div>
         <div className="toolbar-actions collection-header-actions"><button onClick={() => { if (!configured) {setSettingsInitialPage("ai"); setSettingsOpen(true);} else setSuggestions(collection); }}><Icon name="spark" size={14} />{t("app.recommend")}</button>
-          <button onClick={showLibrary}>{t("app.chooseMemories")}</button>
+          <button onClick={() => setCollectionPicker(collection)}>{t("app.chooseMemories")}</button>
           <MoreMenu><button onClick={() => setContextExport({ collectionId: collection.id })}>{t("contextExport.title")}</button><button onClick={() => setCollectionHistory(collection)}>{t("collectionChanges.historyTitle")}</button><button onClick={() => setCollectionEditor(collection)}>{t("app.editCollection")}</button><button className="danger-text" onClick={() => setArchiveConfirm(collection)}>{t("app.removeCollection")}</button></MoreMenu>
         </div>
       </section>}
@@ -290,22 +306,22 @@ export default function App() {
         <PaneResizeHandle pane="list" targetKey={listIdentity} />
         <MemoryList key={listIdentity}
           collectionId={listCollectionId} trash={page === "trash"} active={page !== "topic"}
-          selected={selected}  onSelect={key => { setRecallQuick(false); setSelected(key); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection"].includes(page)) setPage("library"); }}
+          selected={selected} onSelect={(key, query) => { setRecallQuick(false); setSelected(key); setSelectedQuery(query); if (page === "topic" && listCollectionId) { setCollectionId(listCollectionId); setPage("collection"); } else if (!["trash", "collection"].includes(page)) setPage("library"); }}
           onCapture={newDiscussion} onRefresh={refresh}
           onCopyContext={() => setContextExport({ collectionId: listCollectionId })}
           onImport={!listCollectionId ? () => setImportOpen(true) : undefined} />
         {page === "topic" && topic ? <div className="workspace-answer-pane">
-          <div className="answer-navigation"><button onClick={() => topic.collection_id ? showCollection(topic.collection_id) : showLibrary()}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: collections.find(c => c.id === topic.collection_id)?.name || t("app.removedCollection") }) : null}</span></div>
-          <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined}
+          <div className="answer-navigation"><button onClick={() => { if (topicCollection) showCollection(topicCollection.id); else { setSelected(null); setSelectedQuery(""); showLibrary(); } }}><Icon name="chevron" size={13} />{t("app.backToMemories")}</button><span>{topic.collection_id ? t("app.topicScoped", { name: topicCollection?.name || t("app.removedCollection") }) : null}</span></div>
+          <Discussion composerVisible={!recallOpen} key={topic.id} topic={topic} quick={recallQuick} sourceApp={recallQuick ? desktop.state?.source_app : "Memivy"} focus={topicFocus} onReady={handoff?.target === "topic" ? handoffReady : undefined} onComposerControls={setDiscussionControls}
              configured={configured} onSettings={() => {setSettingsInitialPage("ai"); setSettingsOpen(true);}} onRefresh={refresh} onOpenRecord={openRecord} />
         </div> : selected ? <MemoryDetail key={keyOf(selected)} record={selected}
           collectionId={page === "collection" ? collectionId || undefined : undefined}
           onCopyContext={selection => setContextExport({ selection })}
           initialReceipt={pendingReceipt?.key === keyOf(selected) ? pendingReceipt.receipt : null}
-           query="" onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); } refresh(key, receipt); }} onDiscuss={discuss} onOpenDiscussion={async id => {
+           query={selectedQuery} onChanged={(key, receipt) => { if (key && keyOf(key) !== keyOf(selected)) { setPage("library"); setCollectionId(null); setSelectedQuery(""); } refresh(key, receipt); }} onDiscuss={discuss} onOpenDiscussion={async id => {
              try { const next = await call<Topic>("discussion_topic", { id }); setRecallQuick(false); setTopic(next); setPage("topic"); setTopicFocus(value => value + 1); }
              catch (e) { setWindowError(errorText(e)); }
-           }} onBack={() => setSelected(null)} />
+           }} onBack={() => setSelected(current => current && keyOf(current) === keyOf(selected) ? null : current)} />
           : <section className="memory-detail-pane unselected">
             <Empty title={page === "trash" ? t("app.emptyTrashTitle") : page === "collection" ? t("app.emptyCollectionTitle") : t("app.emptyLibraryTitle")}
               text={page === "trash" ? t("app.emptyTrashText") : t("app.emptyDefaultText")} />
@@ -318,6 +334,7 @@ export default function App() {
       onRestore={id => { setSettingsOpen(false); setRestoreId(id); }} />}
     {collectionEditor && <CollectionEditor value={collectionEditor === "new" ? undefined : collectionEditor}
       onSaved={id => { setCollectionEditor(null); showCollection(id); refresh(); }} onClose={() => setCollectionEditor(null)} />}
+    {collectionPicker && <CollectionPicker key={collectionPicker.id} collection={collectionPicker} onClose={() => setCollectionPicker(null)} />}
     {collectionHistory && <Modal title={t("collectionChanges.historyFor", { name: collections.find(collection => collection.id === collectionHistory.id)?.name ?? collectionHistory.name })} onClose={() => setCollectionHistory(null)}>
       <CollectionChangeHistory key={collectionHistory.id} collectionId={collectionHistory.id} onOpenRecord={key => { setCollectionHistory(null); openRecord(key); }} onRefresh={refresh} />
     </Modal>}

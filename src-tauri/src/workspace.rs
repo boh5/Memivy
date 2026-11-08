@@ -816,6 +816,11 @@ enum Action {
     Restore {
         key: RecordKey,
     },
+    UndoTrash {
+        key: RecordKey,
+        version: String,
+        revision: i64,
+    },
     Purge {
         key: RecordKey,
     },
@@ -836,23 +841,41 @@ enum Action {
         original_request: String,
     },
 }
+#[derive(Serialize)]
+#[serde(untagged)]
+enum LibraryActionResult {
+    Receipt(Box<Receipt>),
+    Trash { revision: i64 },
+}
 #[tauri::command]
 async fn library_action(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Workspace>,
     action: Action,
-) -> HostResult<Option<Receipt>> {
+) -> HostResult<Option<LibraryActionResult>> {
     let _update_work = crate::updates::work()?;
     require(&window)?;
     let s = state.store.clone();
     blocking(move || {
         match action {
             Action::Trash { key, expected } if key.kind == "memory" => {
-                s.trash_memory(&key.id, &expected)?
+                return s
+                    .trash_memory_with_revision(&key.id, &expected)
+                    .map(|revision| {
+                        revision.map(|revision| LibraryActionResult::Trash { revision })
+                    });
             }
             Action::Restore { key } if key.kind == "memory" => s.restore_memory(&key.id)?,
+            Action::UndoTrash {
+                key,
+                version,
+                revision,
+            } if key.kind == "memory" => s.undo_trash_memory(&key.id, &version, revision)?,
             Action::Purge { key } if key.kind == "memory" => s.purge_memory(&key.id)?,
-            Action::Trash { .. } | Action::Restore { .. } | Action::Purge { .. } => {
+            Action::Trash { .. }
+            | Action::Restore { .. }
+            | Action::UndoTrash { .. }
+            | Action::Purge { .. } => {
                 return Err(DataError::Invalid);
             }
             Action::RestoreArchive {
@@ -863,7 +886,7 @@ async fn library_action(
             } => {
                 return s
                     .restore_archive(&request_id, &memory_id, &expected, &capture_id)
-                    .map(Some);
+                    .map(|receipt| Some(LibraryActionResult::Receipt(Box::new(receipt))));
             }
             Action::RestoreVersion {
                 request_id,
@@ -873,12 +896,16 @@ async fn library_action(
             } => {
                 return s
                     .restore_version(&request_id, &memory_id, &expected, &version_id)
-                    .map(Some);
+                    .map(|receipt| Some(LibraryActionResult::Receipt(Box::new(receipt))));
             }
             Action::Undo {
                 request_id,
                 original_request,
-            } => return s.undo(&request_id, &original_request).map(Some),
+            } => {
+                return s
+                    .undo(&request_id, &original_request)
+                    .map(|receipt| Some(LibraryActionResult::Receipt(Box::new(receipt))));
+            }
         }
         Ok(None)
     })
@@ -1228,6 +1255,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             crate::models::models_test,
             crate::models::models_apply,
             crate::mcp::mcp_settings,
+            crate::mcp::mcp_copy_setup,
             crate::mcp::mcp_set_enabled,
             crate::mcp::mcp_diagnose,
             crate::desktop::desktop_state,

@@ -156,28 +156,7 @@ pub(crate) async fn context_export_copy(
     }
     let store = state.store.clone();
     blocking(move || store.check_context_export(&snapshot)).await?;
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.run_on_main_thread(move || {
-        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-        use objc2_foundation::NSString;
-        let clipboard = NSPasteboard::generalPasteboard();
-        clipboard.clearContents();
-        // The AppKit constant has process lifetime; clipboard access stays on
-        // the main thread and does not depend on WebView gesture activation.
-        let copied = clipboard.setString_forType(&NSString::from_str(&body), unsafe {
-            NSPasteboardTypeString
-        });
-        let _ = tx.send(copied);
-    })
-    .map_err(|_| HostError::new("context_export_clipboard"))?;
-    if rx
-        .await
-        .map_err(|_| HostError::new("context_export_clipboard"))?
-    {
-        Ok(())
-    } else {
-        Err(HostError::new("context_export_clipboard"))
-    }
+    crate::clipboard::write_text(&app, body, "context_export_clipboard").await
 }
 
 #[cfg(test)]

@@ -115,7 +115,7 @@ test('streamed Markdown stays visible during execution and after cancellation',a
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text==="Review the **budget**"));
  current={...current,text:"Review the **budget**, then the schedule."};f.emit('discussion-updated',{topicId:'topic-a',inputId:'logical-input'});await f.settle();
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text===current.text));
- const composer=f.composer(view);composer.props.onCancel();await f.settle();
+ const composer=f.composer(view);f.find(composer,n=>n.type==='button'&&f.text(n)==='Stop').props.onClick();await f.settle();
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text==="Review the **budget**, then the schedule."));
  assert(f.text(view.tree).includes("Stopped"));
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {workspaceFixture} from './helpers/workspace.mjs';
 const wait = () => new Promise(resolve => setTimeout(resolve,200));
 
-test('background list refresh retains full-opacity rows; filters still show loading',async t=>{
+test('background list refresh retains visible rows while filter changes show loading instead',async t=>{
  const f=workspaceFixture(t),List=f.load('src/workspace/MemoryList.tsx').default;
  const props={trash:false,active:true,selected:null,revision:0,onSelect(){},onCapture(){},onRefresh(){}};
  const view=f.mount(List,props);await f.settle();let finish;
@@ -11,11 +11,13 @@ test('background list refresh retains full-opacity rows; filters still show load
  f.render(view,{...props,revision:1});await f.settle();
  const rows=()=>f.find(view,n=>n.props.className?.startsWith('library-rows'));
  assert.equal(rows().props['aria-busy'],true);
- assert(!rows().props.className.includes('is-loading'));
+ assert(!f.nodes(view.tree).some(n=>n.props.role==='status'));
  assert(f.nodes(view.tree).some(n=>n.props.className?.startsWith('library-row ')));
  finish({items:[],next_offset:null});await f.settle();
  f.render(view,{...props,revision:1,collectionId:'different'});await f.settle();
- assert(rows().props.className.includes('is-loading'));
+ assert.equal(rows().props['aria-busy'],true);
+ assert(f.nodes(view.tree).some(n=>n.props.role==='status'));
+ assert(!f.nodes(view.tree).some(n=>n.props['data-record']));
 });
 
 test('background detail refresh keeps the reading toolbar enabled',async t=>{
@@ -89,11 +91,11 @@ test('a background head change preserves the displayed version until explicitly 
  assert(f.nodes(view.tree).some(n=>n.type==='Markdown'&&n.props.text==='body v2'));
 });
 
-test('the explicit list refresh button still retries after global revision removal',async t=>{
+test('the list refresh menu action still retries after global revision removal',async t=>{
  const f=workspaceFixture(t),List=f.load('src/workspace/MemoryList.tsx').default;
  const view=f.mount(List,{trash:false,active:true,selected:null,onSelect(){},onCapture(){},onRefresh(){}});await f.settle();
  const before=f.calls.filter(call=>call.name==='library_query').length;
- f.find(view,n=>n.props['aria-label']==="Refresh memory list").props.onClick();await f.settle();
+ f.find(view,n=>n.type==='button'&&f.text(n)==="Refresh memory list").props.onClick();await f.settle();
  assert.equal(f.calls.filter(call=>call.name==='library_query').length,before+1);
 });
 

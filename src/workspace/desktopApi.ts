@@ -12,7 +12,7 @@ export type DesktopState = {
   shortcut: string; topic: Topic | null;
   source_app: string; last_memory: string | null; error: string | null;
   configured: boolean; ready_ms: number | null;
-  receipt: boolean;
+  receipt: boolean; receipt_on_right?: boolean;
 };
 export type DesktopPatch = Partial<Pick<DesktopState, "visible" | "shortcut" | "pinned">> & { topic_id?: string; clear_topic?: boolean };
 export type MainRoute = { generation: number; topic: Topic | null; quick: boolean; record: Key | null; settings: boolean };

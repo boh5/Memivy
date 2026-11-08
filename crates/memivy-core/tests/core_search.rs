@@ -5,6 +5,36 @@ use memivy_core::memory::*;
 use std::collections::BTreeSet;
 
 #[test]
+fn keyword_only_library_search_does_not_open_embedding_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = MemoryStore::open(temp.path()).unwrap();
+    let memory = store
+        .capture(&CaptureRequest {
+            request_id: id(),
+            text: "Test budget estimate".into(),
+            origin: Origin::User {
+                app: "QA".into(),
+                project: None,
+                uri: None,
+            },
+        })
+        .unwrap();
+    std::fs::write(temp.path().join("embedding.json"), b"{").unwrap();
+    let mut query = LibraryQuery {
+        query: "budget".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        store.library(&query).unwrap().degraded_reason.as_deref(),
+        Some("embedding_settings_invalid")
+    );
+    query.keyword_only = true;
+    let page = store.library(&query).unwrap();
+    assert!(page.degraded_reason.is_none());
+    assert_eq!(page.items[0].key.id, memory.memory_id);
+}
+
+#[test]
 fn fixed_search_corpus_matches_library_and_mcp_before_and_after_rebuild() {
     let fixture: Corpus = serde_json::from_str(SEARCH).unwrap();
     assert_eq!(fixture.version, 2);

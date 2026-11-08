@@ -131,6 +131,7 @@
   "question_model_required": "Connect a model so AI can find and answer from your memories. Your question is preserved.",
   "desktop_model_required": "Connect a model in the main window first. Your question draft is preserved.",
   "mcp_settings_failed": "MCP settings could not be saved. Review and retry.",
+  "mcp_clipboard": "Could not copy MCP setup text to the clipboard.",
   "mcp_diagnostic_failed": "The local MCP diagnostic could not communicate with the process. Retry.",
   "mcp_invalid_response": "The local MCP process returned an invalid response. Check the installation.",
   "mcp_protocol_failed": "The MCP protocol check failed. Install the matching application components.",

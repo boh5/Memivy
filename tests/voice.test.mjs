@@ -80,6 +80,19 @@ function voiceHook(f, key='input', base="Original text", flush=async()=>{}) {
 function formVoice(f,form) {
  return f.find(form,n=>n.type===f.load('src/workspace/VoiceInput.tsx').VoiceButton).props.voice;
 }
+
+test('opening voice from a composer with invalid model settings leads to the voice settings page',async t=>{
+ const f=workspaceFixture(t,{native:true});
+ f.overrides.backup_result=async()=>null;
+ f.overrides.desktop_state=async()=>null;
+ f.overrides.voice_status=async()=>{throw {code:'model_configuration_read'};};
+ const app=f.mount(f.load('src/workspace/App.tsx').default);
+ const {hook}=voiceHook(f);
+ await f.settle();await hook.tree.toggle();await f.settle();
+ const settings=f.load('src/workspace/Settings.tsx').default;
+ assert.equal(f.find(app,n=>n.type===settings).props.initialPage,'voice');
+ assert(!f.calls.some(c=>c.name==='voice_start'));
+});
 function controlledTimers() {
  const timers=[];
  return {

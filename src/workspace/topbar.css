@@ -40,7 +40,7 @@
 .titlebar-query { position: relative; width: 100%; max-width: 560px; min-width: 0; }
 .recall-trigger {
   display: flex; align-items: center; gap: 9px; width: 100%; height: 34px;
-  padding: 0 11px; text-align: left; color: #93959e;
+  padding: 0 11px; text-align: left; color: #656773;
   border: 1px solid #e7e7eb; border-radius: 9px; background: #f9f9fb;
   transition: border-color .15s, background .15s;
 }
@@ -49,7 +49,7 @@
 .recall-trigger > svg { flex-shrink: 0; }
 .recall-trigger-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .recall-trigger:has(.recall-draft-label) .recall-trigger-text { color: #53545c; }
-.recall-trigger kbd, .new-capture-button kbd { font: 10px -apple-system, sans-serif; white-space: nowrap; color: #9b9ca4; }
+.recall-trigger kbd, .new-capture-button kbd { font: 10px -apple-system, sans-serif; white-space: nowrap; color: #656773; }
 .recall-draft-label { font-size: 10px; color: #a3904a; flex-shrink: 0; }
 .recall-scope-badge { font-size: 10px; color: #8b742c; background: #f4eed8; border-radius: 4px; padding: 2px 5px; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar-actions { display: flex; align-items: center; padding: 0 22px 0 0; }

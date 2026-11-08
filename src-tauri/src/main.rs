@@ -1,6 +1,7 @@
 mod backup;
 mod capture_panel;
 mod cleanup;
+mod clipboard;
 mod context_export;
 mod desktop;
 mod errors;

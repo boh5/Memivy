@@ -2,6 +2,7 @@
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 pub(super) const LEAF_SIZE: NSSize = NSSize::new(72.0, 76.0);
+const RECEIPT_WIDTH: f64 = 230.0;
 
 #[derive(Clone, Copy)]
 pub(super) enum Placement {
@@ -65,6 +66,28 @@ pub(super) fn panel_frame(
             )),
     };
     fit_and_clamp(NSRect::new(origin, size), area)
+}
+
+pub(super) fn receipt_frame(leaf: NSRect, area: NSRect) -> (NSRect, bool) {
+    let right_edge = leaf.origin.x + leaf.size.width;
+    let space_left = right_edge - (area.origin.x + 8.0);
+    let space_right = area.origin.x + area.size.width - 8.0 - leaf.origin.x;
+    let on_right = space_left < RECEIPT_WIDTH && space_right > space_left;
+    let width = RECEIPT_WIDTH.min(if on_right { space_right } else { space_left });
+    let mut frame = leaf;
+    frame.size.width = width.max(leaf.size.width);
+    if !on_right {
+        frame.origin.x = right_edge - frame.size.width;
+    }
+    (frame, on_right)
+}
+
+pub(super) fn leaf_anchor_frame(panel: NSRect, receipt_on_right: bool) -> NSRect {
+    if receipt_on_right {
+        NSRect::new(panel.origin, LEAF_SIZE)
+    } else {
+        panel
+    }
 }
 
 /// Stored coordinates retain their existing top-left physical representation.
@@ -296,6 +319,35 @@ mod tests {
         assert!(drag.finish(1));
         let saved = save_leaf(released, 2.0, 900.0);
         assert_eq!(saved_leaf(saved, 2.0, 900.0), released.origin);
+    }
+
+    #[test]
+    fn receipt_growth_and_expiry_keep_the_leaf_and_expanded_panel_anchors() {
+        let area = rect(-1440.0, 0.0, 1440.0, 900.0);
+        for (x, right) in [(-1432.0, true), (-400.0, false)] {
+            let leaf = rect(x, 200.0, LEAF_SIZE.width, LEAF_SIZE.height);
+            let (receipt, on_right) = receipt_frame(leaf, area);
+            assert_eq!(on_right, right);
+            assert_eq!(receipt.size.width, RECEIPT_WIDTH);
+            assert_eq!(
+                if right {
+                    receipt.origin.x
+                } else {
+                    receipt.origin.x + receipt.size.width - LEAF_SIZE.width
+                },
+                leaf.origin.x
+            );
+            let anchor = leaf_anchor_frame(receipt, on_right);
+            assert_eq!(
+                panel_frame(LEAF_SIZE, Placement::KeepAnchor, anchor, None, area),
+                leaf
+            );
+            let expanded_size = NSSize::new(500.0, 620.0);
+            assert_eq!(
+                panel_frame(expanded_size, Placement::KeepAnchor, anchor, None, area),
+                panel_frame(expanded_size, Placement::KeepAnchor, leaf, None, area),
+            );
+        }
     }
 
     #[test]

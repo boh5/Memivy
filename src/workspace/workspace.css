@@ -115,6 +115,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .library-list-heading .eyebrow {
   font-size: 10px;
@@ -126,19 +128,30 @@
   margin-top: 5px;
 }
 .memory-app .library-search {
+  display: flex;
+  align-items: center;
   margin: 0 18px;
   padding: 0 10px;
-  height: 40px;
+  min-height: 36px;
   gap: 7px;
+  border: 1px solid var(--line);
   border-radius: 10px;
   flex-shrink: 0;
+  color: var(--muted);
+  background: var(--soft);
 }
 .memory-app .library-search input {
-  font-size: 12px;
+  background: transparent;
+  border: 0;
+  padding: 7px 0;
+  font-size: 13px;
   width: 0;
   min-width: 0;
   flex: 1;
 }
+.library-search input::placeholder { color: var(--muted); }
+.library-search input::-webkit-search-cancel-button { display: none; }
+.library-search > button { width: 24px; height: 24px; padding: 0; flex-shrink: 0; }
 .library-search kbd {
   font: 10px inherit;
   color: #a3a4aa;
@@ -149,14 +162,14 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: #989ba2;
+  color: var(--muted);
   font-size: 11px;
 }
 .filter-bar button {
   display: flex;
   align-items: center;
   gap: 3px;
-  color: #777981;
+  color: var(--muted);
   padding: 4px 0 4px 10px;
 }
 .filter-bar button[aria-expanded="true"] svg {
@@ -281,7 +294,7 @@ mark {
   text-align: center;
   padding: 16px;
   font-size: 12px;
-  color: #898b92;
+  color: var(--muted);
 }
 .memory-detail-pane {
   flex: 1;

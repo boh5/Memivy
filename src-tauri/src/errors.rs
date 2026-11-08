@@ -162,6 +162,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "login_update_failed",
     "main_window_required",
     "main_window_unavailable",
+    "mcp_clipboard",
     "mcp_diagnostic_failed",
     "mcp_disabled",
     "mcp_invalid_response",

@@ -46,6 +46,9 @@
 .memory-change-receipt + .memory-evidence { margin-top: 12px; }
 .memory-reading-content > .organization-inline-state { margin-top: 22px; }
 .memory-detail-scroll .related-memories { margin-top: 28px; }
+.edit-conflict-dialog.workspace-dialog { width: min(820px, calc(100vw - 40px)); }
+.edit-conflict-dialog .change-comparison { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 14px 0; gap: 12px; }
+.edit-conflict-dialog .change-comparison section > strong { overflow-wrap: anywhere; }
 @media (max-width: 1050px) {
   .memory-detail-toolbar { padding-left: 16px; padding-right: 16px; }
   .memory-detail-scroll { padding: 24px 24px 40px; }
