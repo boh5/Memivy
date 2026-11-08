@@ -102,6 +102,7 @@ function load(file) {
     if(name==='./MarkdownEditor')return {__esModule:true,default:'MarkdownEditor'};
     if(name==='./Markdown')return {__esModule:true,default:'Markdown'};
     if(name==='../ui')return {Icon:'Icon'};
+    if(name==='@tauri-apps/api/webviewWindow')return {getCurrentWebviewWindow:()=>({label:'main'})};
     if(name.startsWith('@tauri'))return {listen:(event,fn)=>{if(!nativeEvents.has(event))nativeEvents.set(event,new Set());nativeEvents.get(event).add(fn);return Promise.resolve(()=>nativeEvents.get(event)?.delete(fn));}};
     if(name.endsWith('.css')||name.endsWith('.svg'))return {};
     let p=path.resolve(path.dirname(file),name);

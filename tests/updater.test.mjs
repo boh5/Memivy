@@ -83,6 +83,68 @@ test('a timed-out flush cannot unfreeze a later installation attempt',async t=>{
  const acks=f.calls.filter(c=>c.name==='desktop_exit_ready');
  assert.equal(acks.length,1);assert.equal(acks[0].args.id,2);assert.equal(acks[0].args.error,false);
 });
+
+test('a canceled update cannot freeze a window again through a late or duplicate event',async t=>{
+ const pending=[];let frozen=false,freezes=0;
+ const f=workspaceFixture(t,{native:true,modules:{
+  '../nativeIpc':{freezeForUpdate:async()=>{frozen=true;freezes++},resumeUpdate:()=>{frozen=false}},
+  './useDraft':{flushDrafts:()=>new Promise(resolve=>pending.push(resolve)),refreshDrafts:async()=>{}},
+  './useVoice':{finishVoiceInputs:async()=>{}},
+ }});
+ f.overrides.desktop_ready=async()=>{};f.overrides.desktop_exit_ready=async()=>{};
+ const {useWindowLifecycle}=f.load('src/workspace/desktopApi.ts');
+ f.mount(()=>{useWindowLifecycle(()=>{});return null});await f.settle();
+ f.emit('update-resumed',1);f.emit('update-exit-request',1);
+ await f.settle();assert.equal(freezes,0);
+
+ f.emit('update-exit-request',2);f.emit('update-exit-request',2);await f.settle();
+ assert.equal(freezes,1);assert.equal(pending.length,1);
+ f.emit('update-resumed',2);f.emit('update-exit-request',2);
+ pending.shift()();await f.settle();
+ assert.equal(frozen,false);assert.equal(freezes,1);
+ assert(!f.calls.some(c=>c.name==='desktop_exit_ready'));
+});
+
+test('native exit requests reach only their targeted WebView and each draft queue flushes once',async t=>{
+ const listeners=new Map();
+ function emit(event,payload,target) {
+  for(const listener of listeners.get(event)||[]) {
+   if(!target||!listener.target||listener.target===target)listener.handler({payload});
+  }
+ }
+ const surfaces=['main','capture'].map(label=>{
+  let flushes=0,finishedVoice=0;
+  const f=workspaceFixture(t,{native:true,modules:{
+   '@tauri-apps/api/event':{listen:async (event,handler,options)=>{
+    const entries=listeners.get(event)||new Set();listeners.set(event,entries);
+    const listener={handler,target:options?.target};entries.add(listener);
+    return ()=>entries.delete(listener);
+   }},
+   '@tauri-apps/api/webviewWindow':{getCurrentWebviewWindow:()=>({label})},
+   '../nativeIpc':{freezeForUpdate:async()=>{},resumeUpdate(){}},
+   './useDraft':{flushDrafts:async()=>{flushes++},refreshDrafts:async()=>{}},
+   './useVoice':{finishVoiceInputs:async()=>{finishedVoice++}},
+  }});
+  f.overrides.desktop_ready=async()=>{};f.overrides.desktop_exit_ready=async()=>{};
+  const {useWindowLifecycle}=f.load('src/workspace/desktopApi.ts');
+  f.mount(()=>{useWindowLifecycle(()=>{});return null});
+  return {f,flushes:()=>flushes,finishedVoice:()=>finishedVoice};
+ });
+ const [main,capture]=surfaces;
+ const settle=()=>Promise.all(surfaces.map(({f})=>f.settle()));
+ await settle();
+ emit('update-exit-request',1,'main');await settle();
+ assert.equal(main.flushes(),1);assert.equal(capture.flushes(),0);
+ emit('update-exit-request',1,'capture');await settle();
+ assert.equal(main.flushes(),1);assert.equal(capture.flushes(),1);
+ emit('update-resumed',1);
+
+ emit('desktop-exit-request',2,'capture');emit('desktop-exit-request',2,'capture');await settle();
+ assert.equal(main.flushes(),1);assert.equal(main.finishedVoice(),0);
+ assert.equal(capture.flushes(),2);assert.equal(capture.finishedVoice(),1);
+ const acknowledgements=surface=>surface.f.calls.filter(call=>call.name==='desktop_exit_ready').map(call=>call.args.id);
+ assert.deepEqual(acknowledgements(main),[1]);assert.deepEqual(acknowledgements(capture),[1,2]);
+});
 test('update UI separates download from installation and preserves status on reopening',async t=>{
  let phase='available',closed=0;
  const f=workspaceFixture(t,{native:true,modules:{'react-dom':{flushSync:fn=>fn()}}});
@@ -164,8 +226,87 @@ test('the ready notice waits for a click and dismisses only its own version',asy
  const button=f.find(view,n=>n.type==='button'&&f.text(n)==='Restart and update');
  button.props.onClick();button.props.onClick();await f.settle();
  assert.equal(f.calls.filter(c=>c.name==='update_install').length,1);
- assert.equal(f.find(view,n=>n.type==='button'&&f.text(n)==='Restart and update').props.disabled,true);
+ assert.match(f.text(view.tree),/Requesting installation/);
+ assert.equal(f.find(view,n=>n.type==='button'&&f.text(n)==='Restart and update').props['aria-disabled'],true);
  finish();await f.settle();
+});
+
+test('installation from Settings reopens a dismissed notice, shows native progress and lets the user retry',async t=>{
+ const f=workspaceFixture(t,{native:true,modules:{'react-dom':{flushSync:fn=>fn()}}});
+ const ready={revision:1,automatic:true,phase:'ready',currentVersion:'0.1.8',version:'0.1.9',notes:null,downloaded:10,total:10,error:null};
+ f.overrides.update_status=async()=>ready;
+ let resolveInstall;
+ f.overrides.update_install=()=>new Promise(resolve=>{resolveInstall=resolve});
+ const {ErrorNotice}=f.load('src/workspace/components.tsx');
+ const Notice=f.load('src/workspace/UpdateNotice.tsx').default;
+ const Settings=f.load('src/workspace/UpdateSettings.tsx').default;
+ const notice=f.mount(Notice);
+ const settings=f.mount(Settings,{onClose(){
+  assert.equal(f.calls.filter(c=>c.name==='update_install').length,0);
+  f.unmount(settings);
+ }});
+ await f.settle();
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Later').props.onClick();await f.settle();
+ assert.equal(notice.tree,null);
+ f.find(settings,n=>n.type==='button'&&f.text(n)==='Restart and update').props.onClick();await f.settle();
+ assert.match(f.text(notice.tree),/Requesting installation/);
+ f.emit('update-status',{...ready,revision:2,phase:'preparing'});await f.settle();
+ assert.match(f.text(notice.tree),/Saving drafts and preparing/);
+ resolveInstall();await f.settle();
+ const reopened=f.mount(Settings,{onClose(){}});await f.settle();
+ f.emit('update-status',{...ready,revision:3,phase:'closing_mcp'});await f.settle();
+ assert.match(f.text(notice.tree),/Closing Memivy MCP connections/);
+ assert.match(f.text(reopened.tree),/Closing Memivy MCP connections/);
+ assert.equal(f.find(notice,n=>n.type==='button'&&f.text(n)==='Restart and update').props['aria-disabled'],true);
+ assert.equal(f.find(reopened,n=>n.props.role==='switch').props.disabled,true);
+ assert(!f.nodes(reopened.tree).some(n=>n.type==='button'&&f.text(n)==='Restart and update'));
+ f.emit('update-status',{...ready,revision:4,phase:'installing'});await f.settle();
+ assert.match(f.text(notice.tree),/Installing update/);
+ f.emit('update-status',{...ready,revision:5,error:'update_mcp_busy'});await f.settle();
+ assert.match(f.find(notice,n=>n.type===ErrorNotice).props.text,/MCP connections.*retry/i);
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Retry update').props.onClick();await f.settle();
+ assert.equal(f.calls.filter(c=>c.name==='update_install').length,2);
+ assert.match(f.text(notice.tree),/Requesting installation/);
+ assert.equal(f.find(notice,n=>n.type===ErrorNotice).props.text,'');
+ resolveInstall();await f.settle();
+});
+
+test('an immediate installation IPC rejection remains next to its retry control',async t=>{
+ const f=workspaceFixture(t,{native:true});
+ f.overrides.update_status=async()=>({revision:1,automatic:true,phase:'ready',currentVersion:'0.1.8',version:'0.1.9',notes:null,downloaded:10,total:10,error:null});
+ f.overrides.update_install=async()=>{throw {code:'update_busy'}};
+ const {ErrorNotice}=f.load('src/workspace/components.tsx');
+ const notice=f.mount(f.load('src/workspace/UpdateNotice.tsx').default);await f.settle();
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Restart and update').props.onClick();await f.settle();
+ assert.match(f.find(notice,n=>n.type===ErrorNotice).props.text,/close other dialogs/i);
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Retry update');
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Later').props.onClick();await f.settle();
+ assert.equal(notice.tree,null);
+});
+
+test('a new check clears a failed install retry and a preference warning stays in Settings',async t=>{
+ const f=workspaceFixture(t,{native:true});
+ const ready={revision:1,automatic:false,phase:'ready',currentVersion:'0.1.8',version:'0.1.9',notes:null,downloaded:10,total:10,error:'update_preferences_unavailable'};
+ f.overrides.update_status=async()=>ready;
+ f.overrides.update_install=async()=>{throw {code:'update_busy'}};
+ const {ErrorNotice}=f.load('src/workspace/components.tsx');
+ const notice=f.mount(f.load('src/workspace/UpdateNotice.tsx').default);
+ const settings=f.mount(f.load('src/workspace/UpdateSettings.tsx').default,{onClose(){}});
+ await f.settle();
+ const errorText=view=>f.find(view,n=>n.type===ErrorNotice).props.text;
+ assert.equal(errorText(notice),'');
+ assert.match(errorText(settings),/Could not read your update settings/);
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Restart and update').props.onClick();await f.settle();
+ assert.match(errorText(notice),/close other dialogs/i);
+ f.emit('update-status',{...ready,revision:2,phase:'checking',version:null,error:null});await f.settle();
+ assert.equal(notice.tree,null);
+ f.emit('update-status',{...ready,revision:3,phase:'available',error:'update_download_failed'});await f.settle();
+ assert.equal(notice.tree,null);
+ assert.match(errorText(settings),/could not be downloaded/);
+ f.emit('update-status',{...ready,revision:4});await f.settle();
+ assert.equal(errorText(notice),'');
+ assert.match(errorText(settings),/Could not read your update settings/);
+ f.find(notice,n=>n.type==='button'&&f.text(n)==='Restart and update');
 });
 
 test('disabled development updates expose neither automation controls nor a ready notice',async t=>{

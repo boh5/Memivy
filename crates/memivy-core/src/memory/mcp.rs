@@ -1,10 +1,12 @@
 //! Local MCP policy and bounded evidence live beside MemoryStore rules.
+pub use super::access::{AppUpdateGuard, McpSession};
 use super::{db::*, *};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
     io::Write,
+    time::Duration,
 };
 
 #[derive(Debug, Serialize)]
@@ -90,20 +92,17 @@ fn provenance(
 }
 
 impl MemoryStore {
-    /// Keep the returned lock alive for the entire external MCP process session.
-    pub fn open_mcp_environment() -> Result<(Self, File)> {
+    /// Keep the session guard alive through the end of the MCP transport.
+    pub fn open_mcp_environment() -> Result<(Self, McpSession)> {
         let root = Self::environment_root()?;
         private_dir(&root)?;
-        let session = super::access::session_lock(&root, false)?;
+        let session = super::access::open_mcp_session(&root)?;
         Ok((Self::open(root)?, session))
     }
 
-    /// Prevent MCP sessions and tool calls until the updater releases these locks.
-    pub fn lock_for_app_update(&self) -> Result<(File, File)> {
-        let sessions = super::access::session_lock(&self.root, true)?;
-        let requests = super::access::root_lock(&self.root, true)?;
-        super::access::available(&self.root)?;
-        Ok((sessions, requests))
+    /// Stop admitting MCP work, drain requests and ask existing sessions to close.
+    pub fn prepare_app_update(&self) -> Result<AppUpdateGuard> {
+        super::access::prepare_app_update(&self.root, Duration::from_secs(15))
     }
     pub fn environment_root() -> Result<std::path::PathBuf> {
         if let Some(path) = std::env::var_os("MEMIVY_DATA_DIR") {

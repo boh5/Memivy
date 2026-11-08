@@ -3,11 +3,14 @@ use crate::{
     errors::HostError,
     workspace::{HostResult, Workspace},
 };
+use memivy_core::memory::{AppUpdateGuard, DataError};
 use serde::{Deserialize, Serialize};
 use std::{
-    path::PathBuf,
+    fs::File,
+    io,
+    path::{Path, PathBuf},
     sync::{Mutex, atomic::Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -71,6 +74,22 @@ struct Pending {
     preference_error: Option<&'static str>,
     update: Option<Update>,
     bytes: Option<Vec<u8>>,
+}
+impl Pending {
+    fn prepare_install(&mut self, gate: &mut Activity, restoring: bool) -> HostResult<()> {
+        if self.status.phase != "ready" || gate.preparing {
+            return Err(HostError::new("update_busy"));
+        }
+        if restoring || gate.active != 0 {
+            self.status.error = Some("update_busy");
+            return Err(HostError::new("update_busy"));
+        }
+        gate.preparing = true;
+        self.attempt = None;
+        self.status.phase = "preparing";
+        self.status.error = None;
+        Ok(())
+    }
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -208,7 +227,7 @@ async fn check<R: tauri::Runtime>(app: &tauri::AppHandle<R>, automatic: bool) ->
         }
         if matches!(
             p.status.phase,
-            "checking" | "downloading" | "ready" | "preparing" | "installing"
+            "checking" | "downloading" | "ready" | "preparing" | "closing_mcp" | "installing"
         ) {
             return Err(HostError::new("update_busy"));
         }
@@ -327,21 +346,19 @@ pub(crate) async fn update_install(
     require(&app, &window)?;
     let state = app.state::<Workspace>();
     // Use the same ordering as restore reservation; never hold this guard across await.
-    {
+    let admission = {
         let restore = state.restore_request.lock().unwrap();
         let mut gate = ACTIVITY.lock().unwrap();
         let updates = app.state::<Updates>();
         let mut p = updates.inner.lock().unwrap();
-        if restore.is_some() || gate.preparing || gate.active != 0 || p.status.phase != "ready" {
-            return Err(HostError::new("update_busy"));
-        }
-        gate.preparing = true;
-        p.attempt = None;
-        p.status.phase = "preparing";
-        p.status.error = None;
+        p.prepare_install(&mut gate, restore.is_some())
+    };
+    if let Err(error) = admission {
+        emit(&app);
+        return Err(error);
     }
     if app.state::<crate::voice::Voice>().0.update_busy() {
-        cancel_restart(&app);
+        cancel_restart(&app, "update_busy");
         return Err(HostError::new("update_busy"));
     }
     let result = crate::desktop::on_main(&app, |h| {
@@ -352,10 +369,11 @@ pub(crate) async fn update_install(
         Ok(())
     })
     .await;
-    if result.is_err() {
-        cancel_restart(&app);
+    if let Err(error) = &result {
+        cancel_restart(&app, error.code);
+    } else {
+        emit(&app);
     }
-    emit(&app);
     result
 }
 pub(crate) fn quit_requested(app: &tauri::AppHandle, id: u64) {
@@ -365,36 +383,196 @@ pub(crate) fn quit_requested(app: &tauri::AppHandle, id: u64) {
         p.attempt = Some(id);
     }
 }
-pub(crate) fn cancel_restart(app: &tauri::AppHandle) {
-    let state = app.state::<Updates>();
-    let mut p = state.inner.lock().unwrap();
-    if p.status.phase != "preparing" {
-        return;
-    }
-    p.status.phase = "ready";
-    p.status.error = Some("update_busy");
-    let attempt = p.attempt.take();
-    drop(p);
-    ACTIVITY.lock().unwrap().preparing = false;
+pub(crate) fn cancel_restart(app: &tauri::AppHandle, reason: &'static str) {
+    let attempt = {
+        let mut gate = ACTIVITY.lock().unwrap();
+        let state = app.state::<Updates>();
+        let mut pending = state.inner.lock().unwrap();
+        if pending.status.phase != "preparing" {
+            return;
+        }
+        pending.status.phase = "ready";
+        pending.status.error = Some(reason);
+        gate.preparing = false;
+        pending.attempt.take()
+    };
     if let Some(id) = attempt {
         let _ = app.emit("update-resumed", id);
     }
     emit(app);
 }
 pub(crate) fn installing(app: &tauri::AppHandle) -> bool {
-    app.state::<Updates>().inner.lock().unwrap().status.phase == "installing"
+    matches!(
+        app.state::<Updates>().inner.lock().unwrap().status.phase,
+        "closing_mcp" | "installing"
+    )
 }
+
+fn bundled_mcp_path(executable: &Path) -> io::Result<PathBuf> {
+    let executable = executable.canonicalize()?;
+    let directory = executable
+        .parent()
+        .filter(|directory| {
+            directory.ends_with("Contents/MacOS")
+                && directory
+                    .ancestors()
+                    .nth(2)
+                    .and_then(Path::extension)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+        })
+        .ok_or_else(|| io::Error::other("Could not locate the installed app bundle"))?;
+    Ok(directory.join("memivy-mcp"))
+}
+
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, buffer_size: u32) -> i32;
+}
+
+unsafe extern "C" {
+    fn geteuid() -> u32;
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+fn process_executable(pid: i32) -> io::Result<PathBuf> {
+    use std::{ffi::CStr, os::unix::ffi::OsStrExt};
+
+    // PROC_PIDPATHINFO_MAXSIZE from the macOS SDK. Use the kernel path, since
+    // `ps comm` can report a relative or caller-supplied argv[0].
+    const MAX_PATH: u32 = 4096;
+    let mut buffer = [0u8; MAX_PATH as usize];
+    // The writable buffer has the advertised size and lives through the call.
+    if unsafe { proc_pidpath(pid, buffer.as_mut_ptr().cast(), MAX_PATH) } <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let path = CStr::from_bytes_until_nul(&buffer).map_err(io::Error::other)?;
+    let path = Path::new(std::ffi::OsStr::from_bytes(path.to_bytes()));
+    if !path.is_absolute() {
+        return Err(io::Error::other("Process executable path is not absolute"));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn session_processes(lock: &Path, pid: Option<i32>, deadline: Instant) -> io::Result<Vec<i32>> {
+    use std::process::{Command, Stdio};
+
+    // Match the actual open lifetime lock file and the effective user. An
+    // installed helper configured to serve another library is out of scope.
+    if Instant::now() >= deadline {
+        return Err(io::ErrorKind::TimedOut.into());
+    }
+    let uid = unsafe { geteuid() }.to_string();
+    let mut command = Command::new("/usr/sbin/lsof");
+    command.args(["-nP", "-t", "-a", "-u", &uid]);
+    if let Some(pid) = pid {
+        command.arg("-p").arg(pid.to_string());
+    }
+    let mut child = command
+        .arg("--")
+        .arg(lock)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    while child.try_wait()?.is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output()?;
+    if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !output.status.success() {
+        return Err(io::Error::other("Could not list MCP sessions"));
+    }
+    std::str::from_utf8(&output.stdout)
+        .map_err(io::Error::other)?
+        .lines()
+        .map(|line| {
+            line.parse::<i32>()
+                .ok()
+                .filter(|pid| *pid > 0)
+                .ok_or_else(|| io::Error::other("Invalid MCP process ID"))
+        })
+        .collect()
+}
+
+fn stop_legacy_sessions(executable: &Path, guard: &AppUpdateGuard) -> io::Result<()> {
+    const ESRCH: i32 = 3;
+    const SIGTERM: i32 = 15;
+    let sidecar = bundled_mcp_path(executable)?;
+    let lock = guard.session_lock_path().canonicalize()?;
+    let update_lock = guard.update_lock_path().canonicalize()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    for pid in session_processes(&lock, None, deadline)? {
+        // Check the binary both before and immediately after checking the open
+        // file to avoid signaling an unrelated process after a PID is reused.
+        let is_sidecar = || match process_executable(pid) {
+            Ok(path) => Ok(path == sidecar),
+            Err(error) if error.raw_os_error() == Some(ESRCH) => Ok(false),
+            Err(error) => Err(error),
+        };
+        if is_sidecar()?
+            && !session_processes(&update_lock, Some(pid), deadline)?.contains(&pid)
+            && session_processes(&lock, Some(pid), deadline)?.contains(&pid)
+            && is_sidecar()?
+        {
+            // The update guard has drained database work and closed admission.
+            // This is only for older sidecars that do not observe that guard.
+            if unsafe { kill(pid, SIGTERM) } != 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(ESRCH) {
+                    return Err(error);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn update_gate_error(error: DataError) -> HostError {
+    match error {
+        DataError::Busy => HostError::new("update_mcp_busy"),
+        _ => HostError::new("update_install_failed"),
+    }
+}
+
+pub(super) fn close_mcp_sessions(guard: &AppUpdateGuard, executable: &Path) -> HostResult<File> {
+    // Give cooperative sidecars time to flush replies before falling back to
+    // SIGTERM for old sessions whose database work has already finished.
+    let started = Instant::now();
+    loop {
+        match guard.wait_for_sessions() {
+            Ok(sessions) => return Ok(sessions),
+            Err(DataError::Busy) if started.elapsed() < Duration::from_secs(3) => continue,
+            Err(DataError::Busy) => break,
+            Err(error) => return Err(update_gate_error(error)),
+        }
+    }
+    stop_legacy_sessions(executable, guard).map_err(|_| HostError::new("update_install_failed"))?;
+    let started = Instant::now();
+    loop {
+        match guard.wait_for_sessions() {
+            Err(DataError::Busy) if started.elapsed() < Duration::from_secs(2) => continue,
+            result => return result.map_err(update_gate_error),
+        }
+    }
+}
+
 pub(crate) fn finish_restart(app: &tauri::AppHandle) -> bool {
     let payload = {
         let state = app.state::<Updates>();
         let mut p = state.inner.lock().unwrap();
-        if p.status.phase == "installing" {
+        if matches!(p.status.phase, "closing_mcp" | "installing") {
             return true;
         }
         if p.status.phase != "preparing" {
             return false;
         }
-        p.status.phase = "installing";
+        p.status.phase = "closing_mcp";
         (p.update.clone().unwrap(), p.bytes.take().unwrap())
     };
     emit(app);
@@ -402,25 +580,16 @@ pub(crate) fn finish_restart(app: &tauri::AppHandle) -> bool {
     tauri::async_runtime::spawn_blocking(move || {
         let (update, bytes) = payload;
         let result = (|| -> HostResult<()> {
-            let _locks = app
+            let guard = app
                 .state::<Workspace>()
                 .store
-                .lock_for_app_update()
-                .map_err(|_| HostError::new("update_mcp_busy"))?;
-            // Lifetime locks cover new MCP clients; the process check also covers older clients.
-            let output = std::process::Command::new("/bin/ps")
-                .args(["-axo", "comm="])
-                .output()
-                .map_err(|_| HostError::new("update_mcp_busy"))?;
-            if !output.status.success()
-                || String::from_utf8_lossy(&output.stdout).lines().any(|line| {
-                    std::path::Path::new(line.trim())
-                        .file_name()
-                        .is_some_and(|s| s.to_string_lossy().starts_with("memivy-mcp"))
-                })
-            {
-                return Err(HostError::new("update_mcp_busy"));
-            }
+                .prepare_app_update()
+                .map_err(update_gate_error)?;
+            let executable =
+                std::env::current_exe().map_err(|_| HostError::new("update_install_failed"))?;
+            let sessions = close_mcp_sessions(&guard, &executable)?;
+            app.state::<Updates>().inner.lock().unwrap().status.phase = "installing";
+            emit(&app);
 
             update
                 .install(&bytes)
@@ -429,20 +598,21 @@ pub(crate) fn finish_restart(app: &tauri::AppHandle) -> bool {
                 .exiting
                 .store(true, Ordering::SeqCst);
             app.request_restart();
-            // Keep both cross-process locks until the process actually exits.
-            std::mem::forget(_locks);
+            // Keep admission closed through replacement and until this process exits.
+            std::mem::forget((guard, sessions));
             Ok(())
         })();
         if let Err(error) = result {
             let attempt = {
+                let mut gate = ACTIVITY.lock().unwrap();
                 let state = app.state::<Updates>();
                 let mut p = state.inner.lock().unwrap();
                 p.bytes = Some(bytes);
                 p.status.phase = "ready";
                 p.status.error = Some(error.code);
+                gate.preparing = false;
                 p.attempt.take()
             };
-            ACTIVITY.lock().unwrap().preparing = false;
             if let Some(id) = attempt {
                 let _ = app.emit("update-resumed", id);
             }
@@ -451,6 +621,41 @@ pub(crate) fn finish_restart(app: &tauri::AppHandle) -> bool {
         }
     });
     true
+}
+
+#[cfg(test)]
+mod legacy_process_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn resolves_the_sidecar_slot_in_the_running_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let release_dir = dir.path().join("Memivy 测试.app/Contents/MacOS");
+        fs::create_dir_all(&release_dir).unwrap();
+        let executable = release_dir.join("memivy");
+        fs::write(&executable, b"").unwrap();
+        let alias = dir.path().join("Installed.app");
+        std::os::unix::fs::symlink(dir.path().join("Memivy 测试.app"), &alias).unwrap();
+        let sidecar = bundled_mcp_path(&alias.join("Contents/MacOS/memivy")).unwrap();
+        assert_eq!(
+            sidecar,
+            executable
+                .canonicalize()
+                .unwrap()
+                .with_file_name("memivy-mcp")
+        );
+        assert!(bundled_mcp_path(&dir.path().join("missing/memivy")).is_err());
+    }
+
+    #[test]
+    fn kernel_process_path_resolves_the_current_executable() {
+        let pid = i32::try_from(std::process::id()).unwrap();
+        assert_eq!(
+            process_executable(pid).unwrap(),
+            std::env::current_exe().unwrap().canonicalize().unwrap()
+        );
+    }
 }
 
 #[cfg(test)]

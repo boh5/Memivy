@@ -205,7 +205,7 @@
   "update_preferences_unavailable": "Could not read your update settings. Automatic updates are paused. Set your automatic update preference again to continue.",
   "update_preferences_save_failed": "Could not save your update settings. Your previous setting is unchanged. Try again.",
   "update_download_failed": "The update could not be downloaded or its signature could not be verified. Try downloading again.",
-  "update_mcp_busy": "Disconnect external Memivy MCP clients before installing the update, then retry.",
+  "update_mcp_busy": "Memivy couldn't finish closing its MCP connections. Wait for the current requests to finish, then retry.",
   "update_install_failed": "Could not install the update. Ensure Memivy is in Applications and the directory is writable. You can also install the latest DMG manually.",
   "import_file_type": "Only Markdown (.md) and plain text (.txt) files are supported.",
   "import_file_read": "This file could not be read. Check its permissions and try again.",
