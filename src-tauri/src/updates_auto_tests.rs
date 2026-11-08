@@ -363,6 +363,30 @@ async fn disabling_during_check_prevents_download_and_manual_control_still_works
 }
 
 #[test]
+fn install_admission_reports_retryable_deferral_without_replacing_the_download() {
+    let updates = Updates::new("0.1.8".into(), PathBuf::new());
+    let mut pending = updates.inner.lock().unwrap();
+    pending.status.phase = "ready";
+    pending.bytes = Some(vec![1, 2, 3]);
+    let mut gate = Activity::default();
+
+    assert!(pending.prepare_install(&mut gate, true).is_err());
+    assert_eq!(pending.status.error, Some("update_busy"));
+    gate.active = 1;
+    assert!(pending.prepare_install(&mut gate, false).is_err());
+    assert_eq!(pending.status.phase, "ready");
+    assert_eq!(pending.bytes.as_deref(), Some([1, 2, 3].as_slice()));
+    assert!(!gate.preparing);
+
+    gate.active = 0;
+    pending.prepare_install(&mut gate, false).unwrap();
+    assert_eq!(pending.status.phase, "preparing");
+    assert!(gate.preparing);
+    assert!(pending.prepare_install(&mut gate, false).is_err());
+    assert_eq!(pending.status.error, None);
+}
+
+#[test]
 fn status_revisions_order_concurrent_events_and_reads() {
     use std::sync::{Arc, mpsc};
     use tauri::Listener;

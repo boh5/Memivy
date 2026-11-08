@@ -3,6 +3,7 @@ import { message, type UiMessage } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { call, errorText, native, type Key, type Topic } from "./api";
 import { finishVoiceInputs } from "./useVoice";
 import { flushDrafts, refreshDrafts } from "./useDraft";
@@ -53,50 +54,78 @@ export function useWindowLifecycle(onError: (error: UiMessage) => void) {
   const errorRef = useRef(onError); errorRef.current = onError;
   useEffect(() => {
     if (!native) return;
+    const target = getCurrentWebviewWindow().label;
+    let live = true;
     let composing = false;
+    let latestExit = 0;
     let updateRequest: number | null = null;
+    function claimExit(id: number) {
+      if (!live || id <= latestExit) return false;
+      latestExit = id;
+      return true;
+    }
+    function resumeThrough(id: number) {
+      if (updateRequest === null || updateRequest > id) return;
+      updateRequest = null;
+      resumeUpdate();
+    }
     const startComposition = () => { composing = true; };
     const endComposition = () => { composing = false; };
-    const installError = (event: Event) => errorRef.current(errorText((event as CustomEvent).detail));
     document.addEventListener('compositionstart', startComposition);
     document.addEventListener('compositionend', endComposition);
-    window.addEventListener('update-install-error', installError);
     const events = [
-      listen<number>('update-resumed', e => { if(updateRequest===e.payload) { updateRequest=null; resumeUpdate(); } }),
-      listen<number>('update-exit-request', e => {
-        updateRequest=e.payload;
+      listen<number>('update-resumed', ({ payload: id }) => {
+        // Resumption may arrive before the corresponding prepare event.
+        latestExit = Math.max(latestExit, id);
+        resumeThrough(id);
+      }),
+      listen<number>('update-exit-request', ({ payload: id }) => {
+        if (!claimExit(id)) return;
+        updateRequest = id;
         if (composing || document.querySelector('dialog[open]')) {
-          void call('desktop_exit_ready', {id:e.payload,error:true});
+          void call('desktop_exit_ready', { id, error: true });
           return;
         }
-        void freezeForUpdate().then(()=>flushDrafts())
-          .then(()=>updateRequest===e.payload ? call('desktop_exit_ready', {id:e.payload,error:false}) : undefined)
-          .catch(error=>{
-            if(updateRequest!==e.payload)return;
-            updateRequest=null;
-            resumeUpdate();
+        void freezeForUpdate()
+          .then(() => updateRequest === id ? flushDrafts() : undefined)
+          .then(() => updateRequest === id ? call('desktop_exit_ready', { id, error: false }) : undefined)
+          .catch(error => {
+            if (updateRequest !== id) return;
+            resumeThrough(id);
             errorRef.current(errorText(error));
-            void call('desktop_exit_ready',{id:e.payload,error:true});
+            void call('desktop_exit_ready', { id, error: true });
           });
-      }),
+      }, { target }),
       listen<string>("draft-changed", e => void refreshDrafts(e.payload).catch(e => errorRef.current(errorText(e)))),
-      listen<number>("desktop-exit-request", e => {
+      listen<number>("desktop-exit-request", ({ payload: id }) => {
+        if (!claimExit(id)) return;
+        // A newer quit may overtake the resumption from a canceled update.
+        resumeThrough(id);
         // An unconfirmed conclusion or settings form must remain reviewable.
         if (document.querySelector("dialog[open]")) {
           errorRef.current(message("errors", "quit_dialog_active"));
-          void call("desktop_exit_ready", { id: e.payload, error: true });
+          void call("desktop_exit_ready", { id, error: true });
           return;
         }
-        void finishVoiceInputs().then(() => flushDrafts()).then(() => call("desktop_exit_ready", { id: e.payload, error: false }))
-          .catch(error => { errorRef.current(message("errors", "window_draft_preserved", { error: errorText(error) })); void call("desktop_exit_ready", { id: e.payload, error: true }); });
-      }),
+        const current = () => live && latestExit === id;
+        void finishVoiceInputs()
+          .then(() => current() ? flushDrafts() : undefined)
+          .then(() => current() ? call("desktop_exit_ready", { id, error: false }) : undefined)
+          .catch(error => {
+            if (!current()) return;
+            errorRef.current(message("errors", "window_draft_preserved", { error: errorText(error) }));
+            void call("desktop_exit_ready", { id, error: true });
+          });
+      }, { target }),
     ];
-    void Promise.all(events).then(() => call("desktop_ready", { generation: null })).catch(e => errorRef.current(errorText(e)));
+    void Promise.all(events).then(() => live ? call("desktop_ready", { generation: null }) : undefined)
+      .catch(e => { if (live) errorRef.current(errorText(e)); });
     return () => {
-      events.forEach(x => void x.then(stop => stop()));
+      live = false;
+      updateRequest = null;
+      events.forEach(x => void x.then(stop => stop()).catch(() => {}));
       document.removeEventListener('compositionstart', startComposition);
       document.removeEventListener('compositionend', endComposition);
-      window.removeEventListener('update-install-error', installError);
       resumeUpdate();
     };
   }, []);

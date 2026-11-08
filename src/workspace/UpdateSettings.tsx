@@ -10,7 +10,7 @@ import Markdown from './Markdown';
 import {Icon} from '../ui';
 export default function UpdateSettings({onClose,disabled=false,onBusyChange}:{onClose:()=>void;disabled?:boolean;onBusyChange?:(busy:boolean)=>void}) {
   const {t}=useTranslation('settings');
-  const {status,error,setError,retry}=useUpdates();
+  const {status,error,setError,retry,installProgress,installError,readyToInstall}=useUpdates();
   const acting=useRef(false);
   const [requesting,setRequesting]=useState(false);
   async function act(command:string,args?:Record<string,unknown>) {
@@ -21,7 +21,7 @@ export default function UpdateSettings({onClose,disabled=false,onBusyChange}:{on
     finally {acting.current=false;setRequesting(false);if(saving)onBusyChange?.(false)}
   }
   function install() {
-    if(acting.current||disabled)return;
+    if(acting.current||disabled||installProgress||!readyToInstall)return;
     flushSync(onClose);
     void installUpdate();
   }
@@ -31,6 +31,8 @@ export default function UpdateSettings({onClose,disabled=false,onBusyChange}:{on
     <button className="outline-button" onClick={retry}>{t('actions.retry')}</button>
   </section>:null;
   const phase=status.phase;
+  const installFailure=renderMessage(installError,translateCatalog);
+  const statusError=status.error?renderMessage(errorText({code:status.error}),translateCatalog):'';
   // Omit the repeated version heading and build footer added by our release workflow.
   const notes=status.notes?.replace(/^## (\d+\.\d+\.\d+)\r?\n+/, (heading,version)=>version===status.version?'':heading)
     .replace(/\n+Source commit: [a-f0-9]{40}\s*$/i,'').trim();
@@ -40,18 +42,19 @@ export default function UpdateSettings({onClose,disabled=false,onBusyChange}:{on
         <h3>{t('updates.title')}</h3>
         <p className="update-version">{t('updates.currentVersion',{version:status.currentVersion})}</p>
       </div>
-      {phase!=='disabled'&&(phase==='ready'?<button className="send-button" disabled={disabled||requesting} onClick={install}><Icon name="refresh" size={15}/>{t('updates.install')}</button>:
+      {phase!=='disabled'&&!installProgress&&(readyToInstall?<button className="send-button" disabled={disabled||requesting} onClick={install}><Icon name="refresh" size={15}/>{t(installFailure?'updates.retryInstall':'updates.install')}</button>:
         phase==='available'?<button className="send-button" disabled={disabled||requesting} onClick={()=>void act('update_download')}><Icon name="download" size={15}/>{t('updates.download')}</button>:
         <button className="outline-button" disabled={disabled||requesting||!['idle','current'].includes(phase)} onClick={()=>void act('update_check')}>{t('updates.check')}</button>)}
     </div>
     {phase==='disabled'?<p className="update-status">{t('updates.disabled')}</p>:<>
       <div className="setting-line update-automatic">
         <div><strong>{t('updates.automatic')}</strong><p>{t('updates.automaticDescription')}</p></div>
-        <input type="checkbox" role="switch" className="settings-switch" aria-label={t('updates.automatic')} checked={status.automatic} disabled={disabled||requesting||['preparing','installing'].includes(phase)} onChange={e=>void act('update_set_automatic',{automatic:e.target.checked})}/>
+        <input type="checkbox" role="switch" className="settings-switch" aria-label={t('updates.automatic')} checked={status.automatic} disabled={disabled||requesting||!!installProgress} onChange={e=>void act('update_set_automatic',{automatic:e.target.checked})}/>
       </div>
       {phase==='current'&&<p className="update-status update-current" role="status"><Icon name="check" size={15}/>{t('updates.current')}</p>}
       {phase==='downloading'&&<div className="update-download"><p className="update-status" role="status">{t('updates.downloading')}</p><progress aria-label={t('updates.downloading')} max={status.total||undefined} value={status.total?status.downloaded:undefined}/></div>}
       {phase==='checking'&&<p className="update-status" role="status">{t('updates.checking')}</p>}
+      {installProgress&&<p className="update-status" role="status">{t(installProgress)}</p>}
       {(status.version||notes)&&<div className="update-release">
         <div className="update-release-heading">
           <h4>{t('updates.releaseNotes')}</h4>
@@ -60,6 +63,6 @@ export default function UpdateSettings({onClose,disabled=false,onBusyChange}:{on
         {notes&&<div className="update-notes" role="region" aria-label={t('updates.releaseNotes')} tabIndex={0}><Markdown text={notes}/></div>}
       </div>}
     </>}
-    <ErrorNotice text={error||(status.error?renderMessage(errorText({code:status.error}),translateCatalog):'')}/>
+    <ErrorNotice text={error||(installProgress?'':installFailure||statusError)}/>
   </section>;
 }

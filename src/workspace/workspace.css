@@ -15,6 +15,8 @@
 }
 .update-notice > span { flex: 1 1 180px; }
 .update-notice > button { flex-shrink: 0; font-size: 12px; }
+.update-notice > button[aria-disabled="true"] { opacity: .55; cursor: default; }
+.update-notice > .workspace-error { flex: 1 0 100%; margin: 0; }
 .memory-app .home-page[hidden] {
   display: none;
 }

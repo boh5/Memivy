@@ -111,7 +111,14 @@ artifacts, never by changing the production latest release or replacing your
 daily installation. Verify:
 
 - Both windows' drafts, notes, settings and cached models survive.
-- Active recording, transcription, background work and external MCP sessions defer installation.
+- Active recording, transcription and background work defer installation.
+- Start the update with an MCP client still connected. Verify Memivy pauses new
+  MCP requests to its library, lets active requests finish and closes its MCP
+  sessions, then installs the update and restarts.
+- Verify the client stays open and its MCP settings are preserved. If the client
+  supports automatic reconnect, verify the connection resumes and both Memivy
+  tools work. Otherwise reconnect in the client using its existing settings and
+  verify both tools.
 - Network or signature failure leaves the running app usable and supports retry.
 - A read-only installation or an app launched from a DMG reports installation failure.
 - Gatekeeper prompts, administrator authorization and microphone permissions are

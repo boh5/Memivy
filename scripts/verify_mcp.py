@@ -5,6 +5,7 @@ points at the actual bundled sidecar. No model or client credentials required.
 """
 import argparse
 import concurrent.futures
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientCapabilities": {}}
 
 class Client:
-    def __init__(self, binary, data, latest=False):
+    def __init__(self, binary, data, latest=False, finish_handshake=True):
         self.latest, self.serial = latest, 0
         self.process = subprocess.Popen([str(binary)], env={**os.environ, "MEMIVY_DATA_DIR": str(data)},
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -40,8 +41,9 @@ class Client:
                                             "clientInfo":{"name":"memivy-synthetic-check","version":"1"}})
             assert info["serverInfo"]["name"] == "memivy"
             assert info["protocolVersion"] == "2025-11-25"
-            self.process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
-            self.process.stdin.flush()
+            if finish_handshake:
+                self.process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
+                self.process.stdin.flush()
     def call(self, method, params=None, error=False):
         self.serial += 1
         params = dict(params or {})
@@ -68,6 +70,54 @@ class Client:
         if not kill: assert self.process.returncode == 0
         stderr = self.process.stderr.read()
         assert not stderr, stderr
+
+def check_update_shutdown(binary, data, connected, args, receipt):
+    preference = (data/'mcp.json').read_bytes()
+    initializing = Client(binary, data, finish_handshake=False)
+    sessions = (connected, initializing)
+    in_flight = {**args, 'request_id': str(uuid.uuid4()), 'text': 'Capture in progress during update'}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as worker, \
+                sqlite3.connect(data/'memivy.db') as db, \
+                (data/'mcp-admission.lock').open('r+b') as admission, \
+                (data/'mcp.lock').open('r+b') as requests, \
+                (data/'mcp-update.lock').open('r+b') as update:
+            db.execute('BEGIN IMMEDIATE')
+            reply = worker.submit(connected.tool, 'memory_capture', in_flight)
+            deadline = time.monotonic() + 4
+            while True:
+                try:
+                    fcntl.flock(requests, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    break
+                fcntl.flock(requests, fcntl.LOCK_UN)
+                assert time.monotonic() < deadline, "MCP capture did not enter the request gate"
+                time.sleep(.01)
+            # Close admission and drain the actual in-flight request before notifying sessions.
+            fcntl.flock(admission, fcntl.LOCK_EX)
+            db.rollback()
+            fcntl.flock(requests, fcntl.LOCK_EX)
+            fcntl.flock(update, fcntl.LOCK_EX)
+            updated_receipt = reply.result(timeout=6)
+            for client in sessions:
+                assert client.process.wait(timeout=6) == 0
+                assert not client.process.stdin.closed, "Update must close without client EOF"
+                client.close()
+            raced = subprocess.run([str(binary)], env={**os.environ, "MEMIVY_DATA_DIR": str(data)},
+                                   input='', capture_output=True, text=True, timeout=4)
+            assert raced.returncode == 1 and not raced.stdout
+            assert raced.stderr.strip() == 'Cannot open the memory library', raced.stderr
+    finally:
+        for client in sessions:
+            if client.process.poll() is None:
+                client.close(kill=True)
+    assert (data/'mcp.json').read_bytes() == preference
+    reconnected = Client(binary, data, latest=True)
+    try:
+        assert reconnected.tool('memory_capture', args)['capture_id'] == receipt['capture_id']
+        assert reconnected.tool('memory_capture', in_flight)['capture_id'] == updated_receipt['capture_id']
+    finally:
+        reconnected.close()
 
 def check(binary):
     with tempfile.TemporaryDirectory(prefix="memivy-mcp-") as tmp:
@@ -120,7 +170,7 @@ def check(binary):
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert db.execute('SELECT COUNT(*) FROM captures WHERE request_id=?',[shared['request_id']]).fetchone()[0] == 1
         assert db.execute('SELECT text FROM captures WHERE request_id=?',[args['request_id']]).fetchone()[0] == args['text']
-        client.close()
+        check_update_shutdown(binary, data, client, args, receipt)
         # Protocol metadata works while disabled, but no data is returned.
         switch(False)
         client = Client(binary,data,latest=True)
@@ -131,7 +181,7 @@ def check(binary):
         p = subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(data)},input='x'*(1024*1024+2)+'\n',capture_output=True,text=True,timeout=10)
         assert 'xxxxx' not in p.stderr and not p.stdout
         assert len(p.stderr) < 200
-    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "isolated data", "bounded input frames", "clean EOF", "SQLite integrity"]}
+    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "isolated data", "bounded input frames", "clean EOF", "update closes live and initializing stdio sessions while preserving settings and data", "SQLite integrity"]}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

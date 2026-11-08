@@ -1311,7 +1311,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
             if let Some(waiting) = waiting {
                 termination::reply(false);
                 crate::backup::cancel_restart(&app);
-                crate::updates::cancel_restart(&app);
+                crate::updates::cancel_restart(&app, "quit_draft_unconfirmed");
                 set_error(&app, "quit_draft_unconfirmed".into());
                 if waiting.contains("capture") {
                     open(&app, true)?;
@@ -1584,7 +1584,7 @@ pub async fn desktop_exit_ready(
         if error {
             termination::reply(false);
             crate::backup::cancel_restart(&h);
-            crate::updates::cancel_restart(&h);
+            crate::updates::cancel_restart(&h, "update_busy");
             set_error(&h, "quit_dialog_active".into());
             if window.label() == "capture" {
                 open(&h, true)?;

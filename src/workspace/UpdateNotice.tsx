@@ -1,23 +1,30 @@
-import {useRef, useState} from 'react';
-import {useTranslation} from 'react-i18next';
-import {useUpdates, installUpdate} from './useUpdates';
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { translateCatalog } from "../i18n";
+import { renderMessage } from "../i18n/messages";
+import { ErrorNotice } from "./components";
+import { useUpdates, installUpdate } from "./useUpdates";
 
 export default function UpdateNotice() {
-  const {t}=useTranslation('settings');
-  const {status}=useUpdates();
-  const [dismissed,setDismissed]=useState<string|null>(null);
-  const [requesting,setRequesting]=useState(false);
-  const acting=useRef(false);
-  if(status?.phase!=='ready'||!status.version||dismissed===status.version)return null;
-  async function install() {
-    if(acting.current)return;
-    acting.current=true;setRequesting(true);
-    try {await installUpdate()}
-    finally {acting.current=false;setRequesting(false)}
-  }
-  return <aside className="update-notice" aria-label={t('updates.title')}>
-    <span role="status">{t('updates.ready',{version:status.version})}</span>
-    <button className="outline-button" disabled={requesting} onClick={()=>void install()}>{t('updates.install')}</button>
-    <button className="quiet-button" disabled={requesting} onClick={()=>setDismissed(status.version)}>{t('updates.later')}</button>
+  const { t } = useTranslation("settings");
+  const { status, installation, installProgress, installError, readyToInstall } = useUpdates();
+  const [dismissed, setDismissed] = useState<{ version: string | null; failedAttempt?: number } | null>(null);
+  const version = status?.version ?? null;
+  const failure = renderMessage(installError, translateCatalog);
+  const hidden = dismissed?.version === version && (!failure || dismissed.failedAttempt === installation.attempt);
+  if (!installProgress && (!readyToInstall || hidden)) return null;
+  const canInstall = readyToInstall && !installProgress;
+
+  return <aside className="update-notice" aria-label={t("updates.title")}>
+    <span role="status">{installProgress ? t(installProgress) : version ? t("updates.ready", { version }) : t("updates.title")}</span>
+    <button className="outline-button" aria-disabled={!canInstall} onClick={() => { if (canInstall) void installUpdate(); }}>
+      {t(failure ? "updates.retryInstall" : "updates.install")}
+    </button>
+    {!installProgress &&
+      <button className="quiet-button" onClick={() => setDismissed({ version, failedAttempt: failure ? installation.attempt : undefined })}>
+        {t("updates.later")}
+      </button>
+    }
+    <ErrorNotice text={failure} />
   </aside>;
 }
