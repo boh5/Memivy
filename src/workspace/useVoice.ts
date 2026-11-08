@@ -140,7 +140,12 @@ export function useVoice(key:string, body:string, update:(body:string)=>void, fl
   }
   async function toggle(){await run(async()=>{
     if(!native)throw { code: "native_required" };
-    const s=await refresh(),v=s.session;
+    const s=await refresh().catch(error=>{
+      if(usable()&&error&&typeof error==="object"&&"code" in error&&typeof error.code==="string"&&error.code.startsWith("model_configuration_")){
+        window.dispatchEvent(new Event("voice-settings-request"));
+      }
+      throw error;
+    }),v=s.session;
     if(v?.key===key&&activeSession(v)){await finish();return;}
     if(!s.enabled||!s.available){window.dispatchEvent(new Event("voice-settings-request"));throw { code: "voice_disabled" };}
     if(v){

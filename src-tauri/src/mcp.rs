@@ -1,8 +1,13 @@
 use crate::errors::HostError;
 use crate::workspace::{HostResult, Workspace};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Stdio, sync::atomic::Ordering, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::atomic::Ordering,
+    time::Duration,
+};
 use tauri::{Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
@@ -24,7 +29,36 @@ pub(crate) struct McpSettings {
     enabled: bool,
     executable_available: bool,
     configuration: Option<String>,
+    setup_prompt: Option<String>,
 }
+
+fn configuration(path: &Path, data: Option<&Path>) -> String {
+    serde_json::to_string_pretty(&json!({
+        "mcpServers": { "memivy": { "command": path, "args": [], "env": {
+            "MEMIVY_DATA_DIR": data
+        } } }
+    }))
+    .expect("fixed JSON serializes")
+}
+
+fn setup_prompt(configuration: &str) -> String {
+    format!(
+        r#"Set up Memivy, my personal memory app, as a local MCP server for this agent on my Mac.
+
+Memivy is already installed. Use its bundled stdio server with the configuration below.
+
+1. Find the MCP configuration method and location supported by this agent. Adapt the JSON to its required format, keeping the command, arguments, and environment values unchanged.
+2. Back up the existing configuration, then add or update only the "memivy" entry. Preserve all other servers and settings. If an existing Memivy entry uses a different executable or memory library, ask me which to keep before replacing it.
+3. Reload or reconnect the MCP server and verify that this agent can access both "memory_capture" and "memory_search". Do not create memories just to test the connection. Only report success after verifying the tools are available. If a restart, permission, or manual step is needed, tell me exactly what to do. If memory access is disabled, ask me to enable it in Memivy under Settings > External access.
+4. Tell me what you changed and the verification result, using the language of our conversation. If you cannot configure MCP in this environment, explain what is missing.
+
+Configuration:
+```json
+{configuration}
+```"#
+    )
+}
+
 #[tauri::command]
 pub(crate) fn mcp_settings(
     window: tauri::WebviewWindow,
@@ -33,20 +67,44 @@ pub(crate) fn mcp_settings(
     let _update_work = crate::updates::work()?;
     require_main(&window)?;
     let binary = executable();
-    let configuration = binary.as_ref().map(|path| {
-        serde_json::to_string_pretty(&json!({
-            "mcpServers": { "memivy": { "command": path, "args": [], "env": {
-                "MEMIVY_DATA_DIR": state.store.database_path().parent()
-            } } }
-        }))
-        .expect("fixed JSON serializes")
-    });
+    let configuration = binary
+        .as_deref()
+        .map(|path| configuration(path, state.store.database_path().parent()));
     Ok(McpSettings {
         enabled: state.store.mcp_enabled(),
         executable_available: binary.is_some(),
+        setup_prompt: configuration.as_deref().map(setup_prompt),
         configuration,
     })
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum McpCopyKind {
+    Prompt,
+    Configuration,
+}
+
+#[tauri::command]
+pub(crate) async fn mcp_copy_setup(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Workspace>,
+    kind: McpCopyKind,
+) -> HostResult<()> {
+    let _update_work = crate::updates::work()?;
+    require_main(&window)?;
+    let binary = executable().ok_or(HostError::new("mcp_missing"))?;
+    let configuration = configuration(&binary, state.store.database_path().parent());
+    let text = match kind {
+        McpCopyKind::Prompt if !state.store.mcp_enabled() => {
+            return Err(HostError::new("mcp_disabled"));
+        }
+        McpCopyKind::Prompt => setup_prompt(&configuration),
+        McpCopyKind::Configuration => configuration,
+    };
+    crate::clipboard::write_text(window.app_handle(), text, "mcp_clipboard").await
+}
+
 #[tauri::command]
 pub(crate) async fn mcp_set_enabled(
     window: tauri::WebviewWindow,
@@ -169,4 +227,35 @@ pub(crate) fn watch_library(app: tauri::AppHandle) {
             std::thread::sleep(Duration::from_millis(750));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_prompt_embeds_the_exact_library_configuration() {
+        let executable = "/Users/test/Applications/Memory 测试.app/Contents/MacOS/memivy-mcp";
+        let library = "/private/tmp/memivy test/记忆库";
+        let config = configuration(Path::new(executable), Some(Path::new(library)));
+        let prompt = setup_prompt(&config);
+        let embedded = prompt
+            .split_once("```json\n")
+            .and_then(|(_, suffix)| suffix.strip_suffix("\n```"))
+            .expect("prompt includes a complete JSON code block");
+        assert_eq!(embedded, config);
+        let json: Value = serde_json::from_str(embedded).expect("valid MCP configuration");
+        assert_eq!(
+            json,
+            json!({
+                "mcpServers": { "memivy": { "command": executable, "args": [], "env": {
+                    "MEMIVY_DATA_DIR": library
+                } } }
+            })
+        );
+        assert!(prompt.contains("memory_capture"));
+        assert!(prompt.contains("memory_search"));
+        assert!(prompt.contains("Preserve all other servers and settings"));
+        assert!(prompt.contains("Only report success after verifying"));
+    }
 }

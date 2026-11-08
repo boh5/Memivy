@@ -45,6 +45,7 @@ export type Page = { items: Row[]; next_offset: number | null; degraded_reason?:
 export type Query = {
   query: string;
   trash: boolean;
+  keyword_only?: boolean;
   origin?: string;
   project?: string;
   since?: number;

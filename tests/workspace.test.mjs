@@ -69,9 +69,10 @@ test('a receipt is shown only for its record and undo targets that record', asyn
   const f=workspaceFixture(t), App=f.load('src/workspace/App.tsx').default, Detail=f.load('src/workspace/MemoryDetail.tsx').default;
   const app=f.mount(App);await f.settle();
   const List=f.load('src/workspace/MemoryList.tsx').default;
-  const select=async id=>{f.find(app,n=>n.type===List).props.onSelect({kind:'memory',id});await f.settle();};
+  const select=async id=>{f.find(app,n=>n.type===List).props.onSelect({kind:'memory',id},'');await f.settle();};
   await select('a');
   const receipt={request_id:'edit-a',memory_id:'a',capture_id:'raw-a',before_version:'v-a0',after_version:'v-a',action:'edit',status:'applied'};
+  f.overrides.library_action=({action})=>({...receipt,request_id:action.request_id,action:'undo'});
   f.find(app,n=>n.type===Detail).props.onChanged(f.keyA,receipt);await f.settle();
   await select('b');
   const b=f.mount(Detail,f.find(app,n=>n.type===Detail).props);await f.settle();
@@ -91,6 +92,111 @@ test('loading older messages preserves the visible message and new replies still
   f.find(view,n=>n.type==='button'&&f.text(n)==="View earlier discussion").props.onClick();await f.settle();
   assert.equal(view.dom.scrolls,0);assert.equal(anchor.getBoundingClientRect().top,top);assert.equal(view.dom.list.scrollTop,1500);
   f.messages(()=>[msg(51)]);f.render(view,{...props(f),revision:1});await f.settle();assert.equal(view.dom.scrolls,1);
+});
+
+test('the same discussion can stop an answer from either composer while keeping the next draft', async t => {
+  const f=workspaceFixture(t), App=f.load('src/workspace/App.tsx').default;
+  const Sidebar=f.load('src/workspace/WorkspaceSidebar.tsx').default;
+  const Discussion=f.load('src/workspace/Discussion.tsx').default;
+  const app=f.mount(App);await f.settle();
+  f.find(app,n=>n.type===Sidebar).props.onTopic(f.topic);await f.settle();
+  f.query(app).props.bar.onOpen();await f.settle();
+  const query=()=>f.composer(f.query(app));
+  const button=(view,label)=>f.find(view,n=>n.type==='button'&&(f.text(n)===label||n.props['aria-label']===label));
+  textarea(f,query()).props.onChange({target:{value:'Next draft'}});await f.settle();
+  assert.equal(button(query(),'Send').props.disabled,true);
+
+  const assistant={id:'answer',seq:2,turn_id:'turn',role:'assistant',status:'processing',text:'',citations:[]};
+  f.messages(()=>[assistant]);
+  const discussion=f.mount(Discussion,f.find(app,n=>n.type===Discussion).props);await f.settle();
+  const inline=()=>f.composer(discussion);
+  inline();await f.settle();
+  assert.equal(button(query(),'Stop').props.disabled,false);
+  assert.equal(button(inline(),'Stop').props.disabled,false);
+  assert.equal(textarea(f,query()).props.readOnly,false);
+  assert.equal(textarea(f,inline()).props.value,'Next draft');
+  send(f,query());await f.settle();
+  assert(!f.calls.some(c=>c.name==='discussion_submit'));
+
+  let finish;
+  f.overrides.discussion_cancel=()=>new Promise(resolve=>{finish=()=>{assistant.status='cancelled';resolve();};});
+  button(query(),'Stop').props.onClick();
+  button(inline(),'Stop').props.onClick();
+  await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='discussion_cancel').length,1);
+  assert.equal(button(query(),'Stopping…').props.disabled,true);
+  assert.equal(button(inline(),'Stopping…').props.disabled,true);
+  finish();await f.settle();
+  assert.equal(button(query(),'Send').props.disabled,false);
+  assert.equal(textarea(f,query()).props.value,'Next draft');
+
+  let acknowledge;
+  f.overrides.discussion_submit=({id,text})=>new Promise(resolve=>{
+    assert.equal(text,'Next draft');
+    acknowledge=()=>{
+      f.messages(()=>[{...assistant,id:'next-answer',seq:4,turn_id:id,status:'processing'}]);
+      resolve(f.topic);
+    };
+  });
+  button(query(),'Send').props.onClick();
+  button(inline(),'Send').props.onClick();
+  await f.settle();
+  assert.equal(f.calls.filter(c=>c.name==='discussion_submit').length,1);
+  assert.equal(button(inline(),'Sending…').props.disabled,true);
+  f.query(app).props.bar.onClose();await f.settle();
+  f.render(discussion,f.find(app,n=>n.type===Discussion).props);
+  assert.equal(textarea(f,inline()).props.readOnly,false);
+  textarea(f,inline()).props.onChange({target:{value:'Draft after submit'}});await f.settle();
+  acknowledge();await f.settle();
+  assert.equal(button(inline(),'Stop').props.disabled,false);
+  assert.equal(textarea(f,inline()).props.value,'Draft after submit');
+});
+
+test('retry shows sending until a real turn can be stopped', async t => {
+  const f=workspaceFixture(t), Discussion=f.load('src/workspace/Discussion.tsx').default;
+  const failed={id:'answer',seq:2,turn_id:'turn',role:'assistant',status:'failed',text:'',error_code:'network',citations:[]};
+  f.messages(()=>[failed]);
+  const view=f.mount(Discussion,props(f));await f.settle();
+  let finishRetry;
+  f.overrides.discussion_retry=()=>new Promise(resolve=>{finishRetry=resolve;});
+  f.find(view,n=>n.type==='button'&&f.text(n)==='Retry').props.onClick();await f.settle();
+  const form=f.composer(view);
+  assert(f.nodes(form.tree).some(n=>n.type==='button'&&n.props['aria-label']==='Sending…'&&n.props.disabled));
+  assert(!f.nodes(form.tree).some(n=>n.type==='button'&&f.text(n)==='Stop'));
+
+  const reads=[];
+  f.overrides.discussion_messages=()=>new Promise(resolve=>{reads.push(resolve);});
+  finishRetry();await f.settle();
+  f.overrides.discussion_cancel=async args=>{assert.equal(args.id,'turn');};
+  f.find(f.composer(view),n=>n.type==='button'&&f.text(n)==='Stop').props.onClick();await f.settle();
+  assert(f.calls.some(c=>c.name==='discussion_cancel'));
+  const message={...failed,followups:[],receipts:[]};
+  reads.shift()([{...message,status:'processing'}]);await f.settle();
+  assert(!f.nodes(f.composer(view).tree).some(n=>n.type==='button'&&f.text(n)==='Stop'));
+  reads.shift()([{...message,status:'cancelled'}]);await f.settle();
+});
+
+test('the memory picker clears stale results and ignores a selection from an earlier search', async t => {
+  const f=workspaceFixture(t,{timers:{setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,1)),clearTimeout}});
+  const form=f.mount(f.load('src/workspace/CaptureForm.tsx').default,{onSubmit:async()=>{}});await f.settle();
+  f.find(form,n=>n.type==='button'&&n.props.className==='quiet add-memory').props.onClick();await f.settle();
+  const node=f.find(form,n=>n.type?.name==='MemoryPicker');
+  const picker=f.mount(node.type,node.props);await f.settle();
+  let finishDetail;
+  f.overrides.library_detail=()=>new Promise(resolve=>{finishDetail=resolve;});
+  f.find(picker,n=>n.type==='button'&&f.text(n)==='atest').props.onClick();await f.settle();
+  f.overrides.library_query=async ({query})=>{
+    if(query.query==='Failed search')throw {code:'operation_failed'};
+    return {items:[],next_offset:null};
+  };
+  const search=value=>f.find(picker,n=>n.type==='input').props.onChange({target:{value}});
+  search('Failed search');await f.settle();
+  assert(!f.nodes(picker.tree).some(n=>n.type==='button'&&f.text(n)==='atest'));
+  assert(f.nodes(picker.tree).some(n=>n.props.text));
+  finishDetail({state:'active',current:{id:'old-version'}});await f.settle();
+  assert(!f.db.get('input')?.context?.length);
+  search('Successful search');await f.settle();
+  assert(!f.nodes(picker.tree).some(n=>n.props.text));
 });
 
 test('an invalid editor draft does not prevent submitting another valid input', async t => {

@@ -132,6 +132,7 @@
   "question_model_required": "连接模型后，AI 就能从记忆中查找并回答。你的问题已保留。",
   "desktop_model_required": "先在主窗口连接一个模型。问题草稿会保留。",
   "mcp_settings_failed": "MCP 设置任务未完成",
+  "mcp_clipboard": "未能将 MCP 安装文本复制到剪贴板。",
   "mcp_diagnostic_failed": "MCP 诊断读取失败",
   "mcp_invalid_response": "MCP 诊断响应无效",
   "mcp_protocol_failed": "MCP 协议检查未通过",

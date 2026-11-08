@@ -195,6 +195,35 @@ fn trash_hides_history_and_exclusive_raw_but_can_restore_everything() {
 }
 
 #[test]
+fn undo_trash_only_restores_the_matching_deletion() {
+    let (_dir, store) = setup();
+    let (_, saved) = new_memory(&store, "Keep the original text");
+    let memory = saved.memory_id.as_deref().unwrap();
+    let version = saved.after_version.as_deref().unwrap();
+    let first = store
+        .trash_memory_with_revision(memory, version)
+        .unwrap()
+        .unwrap();
+    store.restore_memory(memory).unwrap();
+    let second = store
+        .trash_memory_with_revision(memory, version)
+        .unwrap()
+        .unwrap();
+    assert_ne!(first, second);
+    assert_eq!(
+        store.trash_memory_with_revision(memory, version).unwrap(),
+        None
+    );
+    assert_eq!(
+        store.undo_trash_memory(memory, version, first).unwrap_err(),
+        DataError::Conflict
+    );
+    assert_eq!(store.memories(true, 50).unwrap()[0].state, "trashed");
+    store.undo_trash_memory(memory, version, second).unwrap();
+    assert_eq!(store.memory(memory).unwrap().current.id, version);
+}
+
+#[test]
 fn undoing_a_capture_keeps_its_archive_outside_search() {
     let (_dir, store) = setup();
     let (capture, r) = new_memory(&store, "撤销后仅供恢复的原话");

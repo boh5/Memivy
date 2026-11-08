@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 pub struct LibraryQuery {
     pub query: String,
     pub trash: bool,
+    pub keyword_only: bool,
     pub origin: Option<String>,
     pub project: Option<String>,
     pub since: Option<i64>,
@@ -190,7 +191,7 @@ impl MemoryStore {
     /// Search terms match only the active current Memory.
     pub fn library(&self, q: &LibraryQuery) -> Result<LibraryPage> {
         if !q.trash && !q.query.trim().is_empty() {
-            let result = self.search(&SearchRequest {
+            let request = SearchRequest {
                 scope: SearchScope {
                     project: q.project.clone(),
                     origin: q.origin.clone(),
@@ -205,7 +206,12 @@ impl MemoryStore {
                 offset: q.offset,
                 excerpt_chars: 160,
                 ..SearchRequest::text(q.query.clone(), 8)
-            })?;
+            };
+            let result = if q.keyword_only {
+                self.search_keywords(&request)?
+            } else {
+                self.search(&request)?
+            };
             return Ok(LibraryPage {
                 degraded_reason: result.degraded_reason,
                 items: result

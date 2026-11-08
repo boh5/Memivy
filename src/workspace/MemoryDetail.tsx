@@ -2,7 +2,7 @@ import { message } from "../i18n/messages";
 import { useNotice } from "../i18n/react";
 import { useTranslation } from "react-i18next";
 import { unavailable } from "./api";
-import { useResourceVersion } from "./resources";
+import { expireQueries, useResourceVersion } from "./resources";
 import "./cleanup.css";
 import MemoryCleanup from "./MemoryCleanup";
 import RecordNavigation from "./RecordNavigation";
@@ -12,6 +12,7 @@ import RelatedMemories from "./RelatedMemories";
 import MemoryReceipts from "./MemoryReceipts";
 import MemoryCollections from "./MemoryCollections";
 import MemoryEvidence from "./MemoryEvidence";
+import DraftConflict from "./DraftConflict";
 import { notify } from "./Toast";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui";
@@ -35,10 +36,12 @@ function Editor({
   detail,
   onSaved,
   onClose,
+  onRefreshHead,
 }: {
   detail: Detail;
   onSaved: (r: Receipt) => void;
   onClose: () => void;
+  onRefreshHead: () => Promise<void>;
 }) {
   const { t } = useTranslation("workspace");
   const draft = useDraft(keyOf(detail.key), {
@@ -49,13 +52,13 @@ function Editor({
   const [busy, setBusy] = useState(false),
     [error, setError] = useNotice(),
     [discard, setDiscard] = useState(false),
-    [latest, setLatest] = useState(false);
+    [latest, setLatest] = useState<Detail | null>(null);
   const lock = useRef(false);
   const conflict =
     draft.ready &&
     draft.value.expected_version !== detail.current.id;
   async function save() {
-    if (lock.current || !draft.ready || conflict || !draft.value.body.trim() || !draft.value.title.trim()) return;
+    if (lock.current || !draft.ready || conflict || draft.conflicted || !draft.value.body.trim() || !draft.value.title.trim()) return;
     lock.current = true;
     setBusy(true);
     setError("");
@@ -64,6 +67,23 @@ function Editor({
       const r = await call<Receipt>("library_edit", { draft: value });
       await draft.clear(value.request_id);
       onSaved(r);
+    } catch (e) {
+      setError(errorText(e));
+      if (e && typeof e === "object" && "code" in e && e.code === "conflict") await onRefreshHead();
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  async function continueWithDraft() {
+    if (lock.current || !latest || latest.current.id !== detail.current.id || draft.conflicted) return;
+    lock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      draft.update({ expected_version: latest.current.id });
+      await draft.flush();
+      setLatest(null);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -82,10 +102,11 @@ function Editor({
         </span>
       </div>
       <ErrorNotice text={draft.error || error} />
+      <DraftConflict draft={draft} />
       {conflict && (
         <div className="workspace-warning">
           {t("detail.editConflict")}
-          <button onClick={() => setLatest(true)}>{t("detail.viewLatest")}</button>
+          <button disabled={busy} onClick={() => { setError(""); setLatest(detail); }}>{t("detail.viewLatest")}</button>
         </div>
       )}
       <label>
@@ -95,6 +116,11 @@ function Editor({
           value={draft.value.title}
           disabled={!draft.ready || busy}
           onChange={(e) => draft.update({ title: e.target.value })}
+          onKeyDown={e => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              e.preventDefault(); void save();
+            }
+          }}
         />
       </label>
       {draft.ready && <MarkdownEditor label={t("detail.bodyLabel")} value={draft.value.body} disabled={busy} autoFocus
@@ -108,6 +134,7 @@ function Editor({
             busy ||
             !draft.ready ||
             conflict ||
+            draft.conflicted ||
             !draft.value.body.trim() ||
             !draft.value.title.trim()
           }
@@ -151,9 +178,19 @@ function Editor({
         </Modal>
       )}
       {latest && (
-        <Modal title={t("detail.latestTitle")} onClose={() => setLatest(false)}>
-          <h3>{detail.title}</h3>
-          <Markdown text={detail.body} />
+        <Modal title={t("detail.latestTitle")} onClose={() => { if (!busy) setLatest(null); }} className="edit-conflict-dialog">
+          <p>{t("detail.rebaseHelp")}</p>
+          <div className="change-comparison">
+            <section><h3>{t("detail.latestTitle")}</h3><strong>{latest.title}</strong><Markdown text={latest.body} /></section>
+            <section><h3>{t("detail.yourDraft")}</h3><strong>{draft.value.title}</strong><Markdown text={draft.value.body} /></section>
+          </div>
+          <ErrorNotice text={draft.error || error} />
+          <div className="action-row">
+            <button className="outline-button" data-modal-autofocus disabled={busy} onClick={() => setLatest(null)}>{t("detail.cancel")}</button>
+            {latest.current.id !== detail.current.id
+              ? <button className="send-button" disabled={busy} onClick={() => setLatest(detail)}>{t("detail.viewLatest")}</button>
+              : <button className="send-button" disabled={busy || draft.conflicted} onClick={() => void continueWithDraft()}>{busy ? t("detail.saving") : t("detail.rebaseDraft")}</button>}
+          </div>
         </Modal>
       )}
     </div>
@@ -184,7 +221,8 @@ export default function MemoryDetail({
   onOpenDiscussion: (id: string) => Promise<void>;
 }) {
   const { t } = useTranslation("workspace");
-  const revision = useResourceVersion([{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision;
+  const [headRefresh, setHeadRefresh] = useState(0);
+  const revision = useResourceVersion([{domain:"memory",entity:`${record.kind}:${record.id}`}]) + requestedRevision + headRefresh;
   const [cleaning, setCleaning] = useState(false);
   const [cleanupToolbar, setCleanupToolbar] = useState<HTMLDivElement | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null),
@@ -280,16 +318,28 @@ export default function MemoryDetail({
                 key: record,
                 ...(kind === "trash" ? { expected: detail.current.id } : {}),
               };
-      const r = await call<Receipt | null>("library_action", {
+      const result = await call<Receipt | { revision: number } | null>("library_action", {
         action: payload,
       });
       actionId.current = uid();
       undoId.current = uid();
       setConfirmation(null);
       if (kind === "trash" || kind === "purge" || kind === "restore") {
+        if (kind === "trash" && result && "revision" in result) {
+          const version = detail.current.id, { revision } = result;
+          notify(message("workspace", "detail.trashedNotice"), message("workspace", "collection.undo"), () => {
+            notify(message("workspace", "detail.restoringNotice"));
+            void call("library_action", { action: { action: "undo_trash", key: record, version, revision } })
+              .then(() => notify(message("workspace", "detail.restoredNotice")))
+              .catch(e => notify(message("workspace", "detail.undoTrashFailed", { error: errorText(e) })));
+          }, 8000);
+        } else {
+          notify(message("workspace", kind === "restore" ? "detail.restoredNotice" : kind === "purge" ? "detail.purgedNotice" : "detail.trashedNotice"));
+        }
         onChanged();
         onBack();
       } else {
+        const r = result && "request_id" in result ? result : null;
         setReceipt(kind === "undo" ? null : r);
         setNotice(
           kind === "undo" ? message("workspace", "detail.undoNotice") : message("workspace", "detail.restoredVersion"),
@@ -357,7 +407,10 @@ export default function MemoryDetail({
               </>
             ) : (
               <>
-                <button className="detail-edit-action" aria-label={t("detail.edit")} disabled={busy || loading || editing} onClick={() => setEditing(true)}>
+                <button className="detail-edit-action" aria-label={t("detail.edit")} disabled={busy || loading || editing} onClick={() => {
+                  if (pendingDetail) { setDetail(pendingDetail); setPendingDetail(null); }
+                  setEditing(true);
+                }}>
                   <Icon name="pencil" size={15} />{t("detail.edit")}
                 </button>
                 <button className="detail-discuss-action" disabled={busy || loading || editing} onClick={() => {
@@ -420,6 +473,10 @@ export default function MemoryDetail({
                   <Editor
                     detail={detail}
                     onClose={() => setEditing(false)}
+                    onRefreshHead={async () => {
+                      try { await expireQueries(["library_detail"]); setHeadRefresh(value => value + 1); }
+                      catch (e) { setError(errorText(e)); }
+                    }}
                     onSaved={(r) => {
                       setEditing(false);
                       setReceipt(r);

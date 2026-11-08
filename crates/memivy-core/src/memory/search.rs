@@ -156,6 +156,18 @@ pub struct SearchResult {
 
 impl MemoryStore {
     pub fn search(&self, request: &SearchRequest) -> Result<SearchResult> {
+        self.search_with_semantic(request, true)
+    }
+
+    pub(super) fn search_keywords(&self, request: &SearchRequest) -> Result<SearchResult> {
+        self.search_with_semantic(request, false)
+    }
+
+    fn search_with_semantic(
+        &self,
+        request: &SearchRequest,
+        semantic: bool,
+    ) -> Result<SearchResult> {
         request.validate()?;
         let mut resolved = request.clone();
         if let Some(memory) = &request.reference_memory_id {
@@ -186,7 +198,11 @@ impl MemoryStore {
             query.keywords.sort();
             query.keywords.dedup();
         }
-        let vectors = self.query_vectors(&resolved.queries);
+        let vectors = if semantic {
+            self.query_vectors(&resolved.queries)
+        } else {
+            vec![QueryVector::default(); resolved.queries.len()]
+        };
 
         let mut db = self.connection()?;
         let started = Instant::now();

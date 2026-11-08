@@ -97,7 +97,9 @@ struct State {
     quit: Option<(u64, HashSet<String>)>,
     next_quit: u64,
     shortcut_down: bool,
-    receipt: Option<String>,
+    receipt: Option<u64>,
+    next_receipt: u64,
+    receipt_on_right: bool,
     handoff: Option<u64>,
     modal_open: bool,
 }
@@ -116,6 +118,7 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub ready_ms: Option<u128>,
     pub receipt: bool,
+    pub receipt_on_right: bool,
 }
 impl Desktop {
     fn remember_topic(&self, topic: Conversation) -> bool {
@@ -183,6 +186,8 @@ impl Desktop {
                 next_quit: 0,
                 shortcut_down: false,
                 receipt: None,
+                next_receipt: 0,
+                receipt_on_right: false,
                 handoff: None,
                 modal_open: false,
             }),
@@ -284,6 +289,7 @@ fn snapshot(app: &tauri::AppHandle) -> Snapshot {
         error: s.error.clone(),
         ready_ms: s.ready_ms,
         receipt: s.receipt.is_some(),
+        receipt_on_right: s.receipt_on_right,
     };
     diagnostic("snapshot_ms", started.elapsed().as_millis());
     result
@@ -367,6 +373,19 @@ fn screens() -> HostResult<Vec<objc2::rc::Retained<objc2_app_kit::NSScreen>>> {
     Ok(screens)
 }
 fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement) -> HostResult<()> {
+    layout_panel(app, NSSize::new(width, height), placement, false)
+}
+
+fn layout_leaf(app: &tauri::AppHandle, placement: Placement, receipt: bool) -> HostResult<()> {
+    layout_panel(app, geometry::LEAF_SIZE, placement, receipt)
+}
+
+fn layout_panel(
+    app: &tauri::AppHandle,
+    size: NSSize,
+    placement: Placement,
+    receipt: bool,
+) -> HostResult<()> {
     let panel = app
         .get_webview_panel("capture")
         .map_err(|_| "capture_window_unavailable")?;
@@ -374,10 +393,10 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
     let displays = screens()?;
     let display_frames: Vec<_> = displays.iter().map(|screen| screen.frame()).collect();
     let primary_top = display_frames[0].origin.y + display_frames[0].size.height;
-    let saved = {
-        let desktop = app.state::<Desktop>();
+    let desktop = app.state::<Desktop>();
+    let (saved, receipt_on_right) = {
         let state = desktop.inner.lock().unwrap();
-        state.prefs.position.map(|position| {
+        let saved = state.prefs.position.map(|position| {
             let scale = state
                 .prefs
                 .position_scale
@@ -390,31 +409,34 @@ fn layout(app: &tauri::AppHandle, width: f64, height: f64, placement: Placement)
                     geometry::legacy_position_scale(position, primary_top, &geometry)
                 });
             geometry::saved_leaf(position, scale, primary_top)
-        })
+        });
+        (saved, state.receipt_on_right)
     };
     let previous = native.frame();
+    let anchor = geometry::leaf_anchor_frame(previous, receipt_on_right);
     let destination = match placement {
         Placement::Cursor => objc2_app_kit::NSEvent::mouseLocation(),
         Placement::SavedLeaf => saved
             .map(|point| geometry::center(NSRect::new(point, geometry::LEAF_SIZE)))
-            .unwrap_or_else(|| geometry::center(previous)),
-        Placement::KeepAnchor | Placement::KeepTop => geometry::center(previous),
+            .unwrap_or_else(|| geometry::center(anchor)),
+        Placement::KeepAnchor | Placement::KeepTop => geometry::center(anchor),
     };
     let display = &displays[geometry::screen_for_point(&display_frames, destination)];
-    let next = geometry::panel_frame(
-        NSSize::new(width, height),
-        placement,
-        previous,
-        saved,
-        display.visibleFrame(),
-    );
+    let area = display.visibleFrame();
+    let frame = geometry::panel_frame(size, placement, anchor, saved, area);
+    let (next, on_right) = if receipt {
+        geometry::receipt_frame(frame, area)
+    } else {
+        (frame, false)
+    };
+    {
+        let mut state = desktop.inner.lock().unwrap();
+        state.receipt_on_right = on_right;
+        if next != previous {
+            state.drag.relayout(previous, next);
+        }
+    }
     if next != previous {
-        app.state::<Desktop>()
-            .inner
-            .lock()
-            .unwrap()
-            .drag
-            .relayout(previous, next);
         native.setFrame_display_animate(next, true, false);
     }
     Ok(())
@@ -500,12 +522,7 @@ fn collapse(app: &tauri::AppHandle, restore: bool) -> HostResult<()> {
     };
     panel.hide();
     capture_panel::set_accepts_keyboard(false);
-    layout(
-        app,
-        if receipt { 230.0 } else { 72.0 },
-        76.0,
-        Placement::SavedLeaf,
-    )?;
+    layout_leaf(app, Placement::SavedLeaf, receipt)?;
     if visible {
         panel.order_front_regardless();
     }
@@ -655,7 +672,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    layout(app.handle(), 72.0, 76.0, Placement::SavedLeaf)?;
+    layout_leaf(app.handle(), Placement::SavedLeaf, false)?;
     if p.visible {
         app.get_webview_panel("capture")
             .unwrap()
@@ -754,12 +771,7 @@ fn change(app: &tauri::AppHandle, patch: Patch) -> HostResult<()> {
         collapse(app, false)?;
     } else if !snapshot(app).expanded {
         let receipt = desktop.inner.lock().unwrap().receipt.is_some();
-        layout(
-            app,
-            if receipt { 230.0 } else { 72.0 },
-            76.0,
-            Placement::SavedLeaf,
-        )?;
+        layout_leaf(app, Placement::SavedLeaf, receipt)?;
         app.get_webview_panel("capture")
             .map_err(|_| "capture_window_unavailable")?
             .order_front_regardless();
@@ -956,38 +968,43 @@ pub(crate) async fn record_completed(
     memory_id: String,
 ) -> HostResult<()> {
     let topic_id = topic_id.to_owned();
-    let receipt_id = memory_id.clone();
     let accepted = on_main(app, move |h| {
         let desktop = h.state::<Desktop>();
         let mut state = desktop.inner.lock().unwrap();
         if state.prefs.topic_id.as_deref() != Some(&topic_id) {
-            return Ok(false);
+            return Ok(None);
         }
-        state.receipt = Some(memory_id.clone());
+        state.next_receipt += 1;
+        let receipt_id = state.next_receipt;
+        state.receipt = Some(receipt_id);
         state.prefs.last_memory = Some(memory_id);
         if let Err(error) = desktop.persist(&state.prefs) {
             state.error = Some(error.to_string());
         }
+        let show = !state.expanded && state.prefs.visible;
         drop(state);
+        if show && let Err(error) = layout_leaf(&h, Placement::KeepAnchor, true) {
+            desktop.inner.lock().unwrap().error = Some(error.to_string());
+        }
         publish(&h);
-        Ok(true)
+        Ok(Some(receipt_id))
     })
     .await?;
-    if accepted {
+    if let Some(receipt_id) = accepted {
         let timer_app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(2800)).await;
             let _ = on_main(&timer_app, move |h| {
                 let desktop = h.state::<Desktop>();
                 let mut state = desktop.inner.lock().unwrap();
-                if state.receipt.as_ref() != Some(&receipt_id) {
+                if state.receipt != Some(receipt_id) {
                     return Ok(());
                 }
                 state.receipt = None;
                 let expanded = state.expanded;
                 drop(state);
-                if !expanded {
-                    layout(&h, 72.0, 76.0, Placement::KeepAnchor)?;
+                if !expanded && let Err(error) = layout_leaf(&h, Placement::KeepAnchor, false) {
+                    desktop.inner.lock().unwrap().error = Some(error.to_string());
                 }
                 publish(&h);
                 Ok(())
@@ -1163,7 +1180,8 @@ pub async fn desktop_drag(
             let primary_top = display_frames[0].origin.y + display_frames[0].size.height;
             let scale = display.backingScaleFactor();
             let mut state = desktop.inner.lock().unwrap();
-            state.prefs.position = Some(geometry::save_leaf(native.frame(), scale, primary_top));
+            let anchor = geometry::leaf_anchor_frame(native.frame(), state.receipt_on_right);
+            state.prefs.position = Some(geometry::save_leaf(anchor, scale, primary_top));
             state.prefs.position_scale = Some(scale);
             desktop.persist(&state.prefs)?;
         }

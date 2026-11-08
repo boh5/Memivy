@@ -11,60 +11,83 @@ import DraftConflict from "./DraftConflict";
 import { useNotice } from "../i18n/react";
 
 export type InputSubmission = { id: string; text: string; context: Source[]; origin?: Origin };
+export type ComposerControls = {
+  phase: "loading" | "idle" | "sending" | "answering" | "stopping";
+  beginSend: () => (() => void) | null;
+  stop: () => void;
+};
 
 function MemoryPicker({ selected, onSelect, onClose }: { selected: Source[]; onSelect: (source: Source) => void; onClose: () => void }) {
   const { t } = useTranslation("workspace");
-  const [query, setQuery] = useState(""), [page, setPage] = useState<Page | null>(null), [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState({ query: "" }), [page, setPage] = useState<Page | null>(null), [busy, setBusy] = useState(false);
   const [error, setError] = useNotice();
   const [loading, setLoading] = useState(true);
-  const generation = useRef(0), locked = useRef(false);
+  const current = useRef<typeof search | null>(null), locked = useRef(false);
   useEffect(() => {
-    const run = ++generation.current;
-    setLoading(true);
+    current.current = search;
+    let active = true;
     const timer = setTimeout(() => {
-      void call<Page>("library_query", { query: { query, trash: false, limit: 30 } })
-        .then(value => { if (generation.current === run) setPage(value); })
-        .catch(e => { if (generation.current === run) setError(errorText(e)); })
-        .finally(() => { if (generation.current === run) setLoading(false); });
-    }, query ? 120 : 0);
-    return () => { generation.current++; clearTimeout(timer); };
-  }, [query]);
-  async function select(row: Page["items"][number]) {
-    if (locked.current) return;
+      const isCurrent = () => active && current.current === search;
+      void call<Page>("library_query", { query: { query: search.query, trash: false, limit: 30 } })
+        .then(value => { if (isCurrent()) setPage(value); })
+        .catch(e => { if (isCurrent()) setError(errorText(e)); })
+        .finally(() => { if (isCurrent()) setLoading(false); });
+    }, search.query ? 120 : 0);
+    return () => {
+      active = false;
+      if (current.current === search) current.current = null;
+      clearTimeout(timer);
+    };
+  }, [search]);
+  function changeQuery(query: string) {
+    current.current = null; locked.current = false;
+    setPage(null); setError(""); setLoading(true); setBusy(false); setSearch({ query });
+  }
+  function close() {
+    current.current = null;
+    onClose();
+  }
+  async function run(work: () => Promise<void>) {
+    if (current.current !== search || loading || locked.current) return;
     locked.current = true; setBusy(true); setError("");
     try {
+      await work();
+    } catch (e) { if (current.current === search) setError(errorText(e)); }
+    finally { if (current.current === search) { locked.current = false; setBusy(false); } }
+  }
+  function select(row: Page["items"][number]) {
+    return run(async () => {
       const detail = await call<Detail>("library_detail", { key: row.key });
+      if (current.current !== search) return;
+      if (detail.state !== "active") throw { code: "unavailable" };
       const source: Source = { kind: "version", id: detail.current.id };
       if (!selected.some(s => s.kind === source.kind && s.id === source.id)) onSelect(source);
-      onClose();
-    } catch (e) { setError(errorText(e)); }
-    finally { locked.current = false; setBusy(false); }
+      close();
+    });
   }
-  async function more() {
-    if (locked.current || page?.next_offset == null) return;
-    const run = generation.current;
-    locked.current = true; setBusy(true);
-    try {
-      const value = await call<Page>("library_query", { query: { query, trash: false, limit: 30, offset: page.next_offset } });
-      if (run === generation.current) setPage({ ...value, items: [...page.items, ...value.items] });
-    } catch (e) { setError(errorText(e)); }
-    finally { locked.current = false; setBusy(false); }
+  function more() {
+    if (page?.next_offset == null) return;
+    return run(async () => {
+      const value = await call<Page>("library_query", { query: { query: search.query, trash: false, limit: 30, offset: page.next_offset } });
+      if (current.current === search) setPage({ ...value, items: [...page.items, ...value.items] });
+    });
   }
-  return <Modal title={t("input.addMemory")} onClose={onClose}>
+  return <Modal title={t("input.addMemory")} onClose={close}>
     <p className="field-help">{t("input.memoryFocusHelp")}</p>
-    <input className="memory-picker-query" data-modal-autofocus aria-label={t("input.searchMemory")} value={query} onChange={e => setQuery(e.target.value)} />
-    <div className="memory-picker-list" aria-busy={loading}>
-      {loading && !page ? <p className="field-help" role="status">{t("list.loading")}</p> : page?.items.map(row => <button key={`${row.key.kind}:${row.key.id}`} disabled={busy || loading} onClick={() => void select(row)}><strong>{row.title}</strong><span>{row.snippet}</span></button>)}
+    <input className="memory-picker-query" data-modal-autofocus aria-label={t("input.searchMemory")} value={search.query} onChange={e => changeQuery(e.target.value)} />
+    <div className="memory-picker-list" aria-busy={loading || busy}>
+      {loading ? <p className="field-help" role="status">{t("list.loading")}</p> : page?.items.map(row => <button key={`${row.key.kind}:${row.key.id}`} disabled={busy} onClick={() => void select(row)}><strong>{row.title}</strong><span>{row.snippet}</span></button>)}
       {!loading && page?.items.length === 0 && <p className="field-help" role="status">{t("list.emptyFilteredTitle")}</p>}
       {page?.next_offset != null && <button className="quiet" disabled={busy || loading} onClick={() => void more()}>{t("input.moreMemories")}</button>}
     </div>
     <ErrorNotice text={error} />
+    {error && !page && <button className="quiet" onClick={() => changeQuery(search.query)}>{t("discussion.retry")}</button>}
   </Modal>;
 }
 
 export default function CaptureForm({
   onSubmit, onEdit, focus = 0, quick = false, sourceApp = "Memivy", onBusy, onReady,
-  presentation = "panel", onDraftChange, visible = true, draftKey, pending = false, onCancel,
+  presentation = "panel", onDraftChange, visible = true, draftKey, controls,
   configured = true, onSettings, onSource,
 }: {
   onSubmit: (input: InputSubmission) => Promise<void>;
@@ -78,8 +101,7 @@ export default function CaptureForm({
   onDraftChange?: (body: string) => void;
   visible?: boolean;
   draftKey?: string;
-  pending?: boolean;
-  onCancel?: () => void;
+  controls?: ComposerControls | null;
   configured?: boolean;
   onSettings?: () => void;
   onSource?: (source: Source) => void;
@@ -90,6 +112,9 @@ export default function CaptureForm({
     origin: { kind: "user", app: sourceApp, project: null, uri: null },
   });
   const [busy, setBusy] = useState(false), [picker, setPicker] = useState(false), [error, setError] = useNotice();
+  const phase = controls === null ? "loading" : controls?.phase ?? "idle";
+  const sending = busy || phase === "sending";
+  const sendLabel = t(sending ? "discussion.sending" : "input.send");
   const [titles, setTitles] = useState<Record<string, string>>({});
   const input = useRef<HTMLTextAreaElement>(null), lock = useRef(false), composing = useRef(false);
   const voice = useVoice(draft.value.key, draft.value.body, body => { draft.update({ body }); onEdit?.(); }, () => draft.flush(), draft.ready,
@@ -107,7 +132,9 @@ export default function CaptureForm({
   useEffect(() => { if (draft.ready) onDraftChange?.(draft.value.body); }, [draft.ready, draft.value.body, onDraftChange]);
   useEffect(() => { if (visible && focus && draft.ready) { input.current?.focus(); onReady?.(); } }, [focus, draft.ready, visible]);
   async function send() {
-    if (lock.current || pending || !draft.ready) return;
+    if (lock.current || phase !== "idle" || !draft.ready) return;
+    const release = controls?.beginSend();
+    if (controls && !release) return;
     lock.current = true; setBusy(true); onBusy?.(true); setError("");
     try {
       const voiceSessionId = await voice.finish();
@@ -118,7 +145,7 @@ export default function CaptureForm({
       await draft.clear(value.request_id, value.key.startsWith("discussion:"));
       await voice.consumed(voiceSessionId);
     } catch (e) { setError(errorText(e)); }
-    finally { lock.current = false; setBusy(false); onBusy?.(false); }
+    finally { lock.current = false; setBusy(false); onBusy?.(false); release?.(); }
   }
   return <>
     <div hidden={!visible} className={presentation === "query" ? "recall-input" : presentation === "discussion" ? "discussion-composer" : "workspace-composer"}>
@@ -127,7 +154,7 @@ export default function CaptureForm({
         <button aria-label={t("discussion.removeEvidence")} disabled={!draft.ready || busy} onClick={() => draft.update({ context: context.filter(s => s !== source) })}>×</button>
       </span>)}</div>}
       <textarea ref={input} aria-label={t("input.aria")} placeholder={t("input.placeholder")} value={draft.value.body}
-        disabled={!draft.ready || busy} readOnly={voice.active}
+        disabled={!draft.ready} readOnly={busy || voice.active}
         onChange={e => { draft.update({ body: e.target.value }); onEdit?.(); }}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
         onKeyDown={e => { if (isSubmitKey({ ...e, isComposing: e.nativeEvent.isComposing }, composing.current)) { e.preventDefault(); void send(); } }} />
@@ -135,9 +162,12 @@ export default function CaptureForm({
       <div className={presentation === "query" ? "recall-panel-footer" : "composer-bottom"}>
         <div className="composer-tools"><button className="quiet add-memory" disabled={!draft.ready || busy} onClick={() => setPicker(true)} aria-label={t("input.addMemory")}><Icon name="plus" size={14} />{t("input.memory")}</button><span>{t("input.keyboardHint")}</span></div>
         <div className="voice-submit-actions"><VoiceButton voice={voice} disabled={!draft.ready || busy} />
-          {pending ? <button className="outline-button" onClick={onCancel}><Icon name="stop" size={13} />{t("discussion.stop")}</button> :
-            <button className={presentation === "query" ? "recall-submit" : "send-button"} aria-label={t("input.send")} disabled={!draft.ready || busy || (!draft.value.body.trim() && !voice.active)} onClick={() => void send()}>
-              {presentation !== "query" && (busy ? t("discussion.sending") : t("input.send"))}<Icon name={busy ? "refresh" : "arrow"} size={16} />
+          {phase === "answering" || phase === "stopping" ? <button className="outline-button" disabled={phase === "stopping"} onClick={() => {
+            controls?.stop();
+            input.current?.focus({ preventScroll: true });
+          }}><Icon name="stop" size={13} />{t(phase === "stopping" ? "discussion.stopping" : "discussion.stop")}</button> :
+            <button className={presentation === "query" ? (sending ? "outline-button" : "recall-submit") : "send-button"} aria-label={sendLabel} disabled={!draft.ready || sending || phase !== "idle" || (!draft.value.body.trim() && !voice.active)} onClick={() => void send()}>
+              {(presentation !== "query" || sending) && sendLabel}<Icon name={sending ? "refresh" : "arrow"} size={16} />
             </button>}
         </div>
       </div>

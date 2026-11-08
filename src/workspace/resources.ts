@@ -20,7 +20,9 @@ export function dependencies(name: string, args: Record<string, unknown> = {}): 
   switch (name) {
     case "activity_summary": case "activity_records": return [{domain:"memory"}];
     case "library_detail": return [{domain:"memory",entity:record}];
-    case "library_query": case "library_projects":
+    case "library_query":
+      return [{domain:"memory"},{domain:"navigation"},{domain:"collection"},{domain:"search"}];
+    case "library_projects":
       return [{domain:"memory"},{domain:"navigation"},{domain:"collection"}];
     case "library_topics": return [{domain:"discussion"},{domain:"collection"}];
     case "discussion_messages":

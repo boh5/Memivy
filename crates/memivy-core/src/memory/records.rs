@@ -802,30 +802,51 @@ impl MemoryStore {
         ids.iter().map(|id| version(&db, id)).collect()
     }
     pub fn trash_memory(&self, memory: &str, expected: &str) -> Result<()> {
+        self.trash_memory_with_revision(memory, expected)
+            .map(|_| ())
+    }
+    pub fn trash_memory_with_revision(&self, memory: &str, expected: &str) -> Result<Option<i64>> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let already:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM memories WHERE id=?1 AND current_version_id=?2 AND state='trashed')",params![memory,expected],|r|r.get(0))?;
+        let already: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM memories WHERE id=?1 AND current_version_id=?2 AND state='trashed')",
+            params![memory, expected], |r| r.get(0),
+        )?;
         if already {
-            return Ok(());
+            return Ok(None);
         }
         head(&tx, memory, expected)?;
-        tx.execute(
-            "UPDATE memories SET state='trashed',updated_at=?2 WHERE id=?1",
+        // Even two transitions in the same millisecond must have distinct undo tokens.
+        let revision = tx.query_row(
+            "UPDATE memories SET state='trashed',updated_at=max(updated_at+1,?2) WHERE id=?1 RETURNING updated_at",
             params![memory, now()?],
+            |r| r.get(0),
         )?;
         // Include historical sources of every effective hidden merge source.
         // Shared sources and independently trashed sources retain their own state.
         trash_memory_sources(&tx, memory, &memory_and_merged_sources(&tx, memory)?)?;
         tx.commit()?;
-        Ok(())
+        Ok(Some(revision))
     }
     pub fn restore_memory(&self, memory: &str) -> Result<()> {
+        self.restore_memory_checked(memory, None)
+    }
+    pub fn undo_trash_memory(&self, memory: &str, version: &str, revision: i64) -> Result<()> {
+        self.restore_memory_checked(memory, Some((version, revision)))
+    }
+    fn restore_memory_checked(&self, memory: &str, expected: Option<(&str, i64)>) -> Result<()> {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let state: String =
-            tx.query_row("SELECT state FROM memories WHERE id=?", [memory], |r| {
-                r.get(0)
-            })?;
+        let (state, version, revision): (String, Option<String>, i64) = tx.query_row(
+            "SELECT state,current_version_id,updated_at FROM memories WHERE id=?",
+            [memory],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        if expected.is_some_and(|(v, r)| {
+            state != "trashed" || version.as_deref() != Some(v) || revision != r
+        }) {
+            return Err(DataError::Conflict);
+        }
         if state == "active" {
             return Ok(());
         }
@@ -833,7 +854,7 @@ impl MemoryStore {
             return Err(DataError::Unavailable);
         }
         tx.execute(
-            "UPDATE memories SET state='active',updated_at=?2 WHERE id=?1",
+            "UPDATE memories SET state='active',updated_at=max(updated_at+1,?2) WHERE id=?1",
             params![memory, now()?],
         )?;
         // A shared source may have entered trash with a different memory later.
