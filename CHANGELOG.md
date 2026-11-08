@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9
+
+- Search saved memories directly by keyword without a model, including within collections and Trash. Add memories from inside a collection and open list actions from the More menu.
+- Compare a retained draft with a newer version before continuing to edit. See when memories move to or return from Trash, and undo the most recent deletion from its notification.
+- See consistent send and stop controls in both discussion inputs. When a save finishes after the quick window collapses, open the saved memory from the receipt beside the leaf.
+- Copy MCP setup prompts and configuration with immediate feedback. Check the local MCP service separately from the connection in your AI app.
+- Retry keyword-index repair in place and recover the voice settings form after a configuration read error.
+
+This release keeps database schema 3.
+
 ## 0.1.8
 
 - Improve MCP guidance so connected assistants can proactively save useful new or changed facts, preferences, constraints, ideas and decisions without repeated save requests.
