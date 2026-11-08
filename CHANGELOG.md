@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- When you choose **Restart and update**, Memivy waits for active MCP work to finish and closes the affected local sessions before installing and restarting.
+- See progress in the main window. If the update stops, Memivy shows the problem and keeps the download so you can retry.
+
+If an older version stays open after you choose **Restart and update**, install 0.1.10 once from the DMG. This release keeps database schema 3.
+
 ## 0.1.9
 
 - Search saved memories directly by keyword without a model, including within collections and Trash. Add memories from inside a collection and open list actions from the More menu.
