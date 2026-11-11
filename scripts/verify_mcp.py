@@ -75,7 +75,8 @@ def check_update_shutdown(binary, data, connected, args, receipt):
     preference = (data/'mcp.json').read_bytes()
     initializing = Client(binary, data, finish_handshake=False)
     sessions = (connected, initializing)
-    in_flight = {**args, 'request_id': str(uuid.uuid4()), 'text': 'Capture in progress during update'}
+    in_flight = {**args, 'request_id': str(uuid.uuid4()), 'text': 'Capture in progress during update',
+                 'title': 'In-flight capture', 'body': 'This capture started before the update.'}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as worker, \
                 sqlite3.connect(data/'memivy.db') as db, \
@@ -128,19 +129,43 @@ def check(binary):
             temp.write_text(json.dumps({"enabled":enabled}))
             temp.chmod(0o600)
             temp.replace(data/"mcp.json")
-        args = {"request_id":str(uuid.uuid4()),"text":"Explicitly authorized MCP synthetic evidence\nOriginal words must not be rewritten.", "source_app":"Synthetic Agent","project":"Test project","session_uri":"https://example.test/session"}
-        names = sorted(t["name"] for t in client.call("tools/list")["tools"])
-        assert names == ["memory_capture", "memory_search"]
+        args = {
+            "request_id": str(uuid.uuid4()),
+            "text": "I set the field kit budget to 750.\nRun the temporary receipt check.",
+            "title": "Field kit budget",
+            "body": "The user set the field kit budget to 750. This is synthetic evidence.",
+            "source_app": "Synthetic Agent",
+            "project": "Test project",
+            "session_uri": "https://example.test/session",
+        }
+        tools = {tool["name"]: tool for tool in client.call("tools/list")["tools"]}
+        assert sorted(tools) == ["memory_capture", "memory_search"]
+        assert set(tools["memory_capture"]["inputSchema"]["required"]) == {"request_id", "text", "title", "body", "source_app"}
         switch(False)
         for name, payload in [("memory_capture",args),("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]})]:
             assert client.tool(name,payload,failed=True)["code"] == "mcp_disabled"
         switch(True)
+        missing_content = {key: value for key, value in args.items() if key not in {"title", "body"}}
+        missing_content["request_id"] = str(uuid.uuid4())
+        assert client.call("tools/call", {"name": "memory_capture", "arguments": missing_content})["isError"]
         receipt = client.tool("memory_capture",args)
+        assert receipt["action"] == "memory_saved"
         assert client.tool("memory_capture",args)["capture_id"] == receipt["capture_id"]
-        assert client.tool("memory_capture",{**args,"text":"Conflicting retry"},failed=True)["code"] == "request_conflict"
+        for field in ("text", "title", "body"):
+            assert client.tool("memory_capture", {**args, field: "Conflicting retry"}, failed=True)["code"] == "request_conflict"
         hit = client.tool("memory_search",{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}]})["items"][0]
         assert hit["record"]["id"] == receipt["memory_id"]
+        assert hit["title"] == args["title"] and hit["snippet"] == args["body"]
         assert hit["origin"]["project"] == "Test project"
+        assert not client.tool("memory_search", {"queries":[{"text":"temporary receipt check","keywords":["temporary receipt check"]}]})["items"]
+        # Both permitted fields can expand to six bytes per character on the wire.
+        escaped = {
+            **args, "request_id": str(uuid.uuid4()), "title": "Escaped field limits",
+            "text": "Original " + "\x0b" * (128 * 1024 - len("Original ")),
+            "body": "Organized " + "\x0b" * (128 * 1024 - len("Organized ")),
+        }
+        assert len(json.dumps(escaped).encode()) > 1024 * 1024
+        assert client.tool("memory_capture", escaped)["action"] == "memory_saved"
         assert client.call("tools/call", {"name":"memory_search","arguments":{"queries":[{"text":"synthetic evidence","keywords":["synthetic", "evidence"]}],"trash":True}})["isError"]
         client.call("tools/call", {"name":"memory_delete","arguments":{}},error=True)
         for payload in [{"queries":[{"text":"","keywords":[]}]},{"queries":[{"text":"synthetic","keywords":["synthetic"]}],"limit":9},{"queries":[{"text":"synthetic","keywords":["synthetic"]}],"limit":0}]:
@@ -154,7 +179,8 @@ def check(binary):
         switch(True)
         # Independent MCP processes and native core write concurrently. Identical
         # retries across processes must still produce a single durable capture.
-        shared = {**args,"request_id":str(uuid.uuid4()),"text":"Concurrent idempotent synthetic evidence"}
+        shared = {**args, "request_id": str(uuid.uuid4()), "text": "Concurrent idempotent synthetic evidence",
+                  "title": "Concurrent capture", "body": "A single memory survives concurrent retries."}
         def writer(n):
             if n % 3 == 0:
                 probe = Path(os.environ.get('MEMIVY_TEST_PROBE', ROOT/'target/debug/examples/memory_probe'))
@@ -170,6 +196,7 @@ def check(binary):
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert db.execute('SELECT COUNT(*) FROM captures WHERE request_id=?',[shared['request_id']]).fetchone()[0] == 1
         assert db.execute('SELECT text FROM captures WHERE request_id=?',[args['request_id']]).fetchone()[0] == args['text']
+        assert db.execute('SELECT count(*) FROM captures WHERE request_id=?', [missing_content['request_id']]).fetchone()[0] == 0
         check_update_shutdown(binary, data, client, args, receipt)
         # Protocol metadata works while disabled, but no data is returned.
         switch(False)
@@ -178,10 +205,11 @@ def check(binary):
         assert client.tool('memory_capture',args,failed=True)['code'] == 'mcp_disabled'
         client.close()
         # Oversized frames terminate without content appearing on stderr/stdout.
-        p = subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(data)},input='x'*(1024*1024+2)+'\n',capture_output=True,text=True,timeout=10)
+        p = subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(data)},input='x'*(2*1024*1024+2)+'\n',capture_output=True,text=True,timeout=10)
         assert 'xxxxx' not in p.stderr and not p.stdout
+        assert 'Invalid or oversized MCP request frame' in p.stderr
         assert len(p.stderr) < 200
-    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "exact text and provenance", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "isolated data", "bounded input frames", "clean EOF", "update closes live and initializing stdio sessions while preserving settings and data", "SQLite integrity"]}
+    return {"status":"passed","protocols":["2025-11-25","2026-07-28"],"checks":["real stdio discovery/list/call", "explicit disable and live disable", "searchable organized content and separate verbatim source", "retry and conflict", "bounded arguments and tool surface", "12 concurrent native/MCP writers", "SIGKILL durability", "isolated data", "bounded input frames", "clean EOF", "update closes live and initializing stdio sessions while preserving settings and data", "SQLite integrity"]}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

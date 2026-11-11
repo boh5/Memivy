@@ -114,27 +114,18 @@ MCP 追加说明：
 >
 > While using memory, correct or merge only when read evidence supports a durable change. Reading does not require rewriting. Topic similarity, newer recording time, or stylistic preference alone is insufficient. Check the underlying sources if facts conflict; ask the user when a consequential ambiguity cannot be resolved. Preserve distinct events and useful historical context. Do not pursue unrelated cleanup. Report only committed changes, and do not automatically redo an undone change.
 
-保存时利用已经知道的上下文写清对象和范围，避免把“那个改成两千”孤立保存成不可检索的事实；未知内容不补猜。MCP 主动保存有意义的新增或变化表达，无需等待明确的保存指令或逐次确认；逐字摘录相关原话，不改第一人称，保留归属以及考虑／决定／执行状态，不能把查询改写、AI 建议或外部 Agent 推断冒充用户原话。提问或任务请求中有意义的用户信息仍可提取；不含这类信息的纯问题、临时指令、通用知识与重复内容通常不保存。尊重用户不保存的要求，不逐句或反复保存整段会话摘要。
+保存时利用已有上下文写清对象和范围，未知内容不补猜。外部 Agent 主动把有意义的新增或变化表达整理为标题和独立正文，并逐字附上实际依据。整理稿保留归属、时间、否定、范围以及考虑／决定／执行状态。提问或任务中有意义的信息可以提取，跳过纯问题、临时指令、通用知识和重复内容。尊重不保存的要求。
 
-MCP `memory_capture` 描述（英文）：
-
-> Proactively save meaningful new or changed user information useful for future conversations: facts, preferences, constraints, ideas, decisions and their reasons, and lessons learned. Do not wait for an explicit save request or ask routine permission. When future usefulness is uncertain, favor preserving a meaningful expression; never invent missing facts. Copy relevant source passages verbatim without changing first-person wording. Preserve attribution, scope, time and uncertainty: considering is not deciding, and deciding is not doing. Save meaningful user information embedded in questions or task requests; skip pure questions or transient commands that add no such information, generic knowledge and unchanged repetition. Do not treat assistant suggestions or third-party text as user facts; save adopted ideas or explicitly requested material with truthful attribution. Respect requests not to remember. Group closely related new information into a coherent capture; do not save every sentence or repeatedly save whole-conversation summaries. Reuse the same UUID request_id on retries. Success means the memory and original text are committed and searchable. This tool creates a new memory; it does not merge existing memories or schedule background organization.
-
-保存参数描述（英文）：
-
-| 参数 | 参数描述 |
+| `memory_capture` 参数 | 用途 |
 | --- | --- |
-| `request_id` | `Stable UUID for this save. Reuse it on every retry; use a new UUID only for a separate save.` |
-| `text` | `Text to remember, copied verbatim from relevant source passages. Do not summarize, paraphrase or change first-person wording. Preserve speaker, scope, time and tentative/decided/completed status. Do not invent facts or present assistant suggestions or third-party text as the user's own views. Maximum 128 KiB of UTF-8 text.` |
-| `source_app` | `Actual calling application's name, such as Codex, not the model name. Self-reported provenance, not authentication. Nonempty, at most 200 UTF-8 bytes.` |
-| `project` | `Optional source project name or identifier known from the current task context. Omit when unknown; never invent it. This label does not add collection membership. Maximum 200 UTF-8 bytes.` |
-| `session_uri` | `Optional real URI of the external conversation that produced this memory, only if available in the current context. Omit when unknown; do not invent a link or substitute a project or repository URL. Maximum 2048 UTF-8 bytes.` |
+| `request_id` | 保存使用稳定 UUID，重试传回同一组参数 |
+| `title` | 明确的记忆标题，最多 200 UTF-8 字节 |
+| `body` | 整理后的正文，最多 128 KiB |
+| `text` | 支持正文的逐字原话，最多 128 KiB |
+| `source_app` | 实际调用应用 |
+| `project`、`session_uri` | 上下文中已知的项目和真实会话地址 |
 
-MCP 服务说明（英文）：
-
-> Local personal memory with proactive capture and read-only search. Save meaningful new or changed user information without routine confirmation, including tentative ideas with their original uncertainty. Copy relevant source passages verbatim, preserving first-person wording, attribution and scope; never turn assistant suggestions or third-party text into user facts. Respect requests not to remember and avoid repeated or per-sentence saves. Both tools require Memivy's master switch. Search returns bounded saved-memory evidence, not complete context or unsaved conversations. Use complementary queries when useful and cite actual sources. Search never calls a generative model; optional semantic retrieval may send queries to the configured embedding service. Neither tool schedules background organization or merges existing memories.
-
-保存回执使用准确文案 `Memory saved. The original text is preserved and the memory is available to read or search.`，移除 `pending` 理解状态和后台整理承诺。不保留旧调用适配，不新增版本协商机制。
+工具和参数说明以 [stdio 实现](../../crates/memivy-mcp/src/main.rs) 为准。Memivy 保存原话、AI 初始版本及回执，整理稿立即可搜索。标题、正文、原话和来源任一变化都需要新的请求 ID。
 
 专题推荐是独立的小功能：由用户主动触发，直接进行一次有界模型调用，推荐已有专题；用户明确选择后才添加。它不依赖整理任务、整理回执或聊天 Agent，不在打开记忆时自动调用模型，不增加推荐任务队列或独立缓存平台。
 

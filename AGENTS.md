@@ -88,9 +88,12 @@ frameworks or speculative abstractions.
   preserve recoverable input on failure. Stopping recording must not send it.
 - MCP uses local stdio and exposes only `memory_capture` and `memory_search`.
   It starts enabled; users can disable it, and invalid configuration disables it.
-  Capture proactively saves meaningful new or changed user expressions without
-  routine confirmation, copying relevant passages verbatim without changing
-  first-person wording, attribution or tentative, decided or completed status.
+  The external Agent proactively writes a specific title and self-contained
+  body for meaningful new or changed user expressions without routine
+  confirmation. Preserve attribution, scope, time, negation and tentative,
+  decided or completed status. Pass supporting passages verbatim in `text`,
+  preserving first-person wording. Save both together and search the organized
+  memory. Keep the original passages available as sources.
   Favor keeping meaningful expressions when future usefulness is uncertain.
   Respect requests not to save; retain meaningful user
   information within questions or task requests, while skipping repetition and

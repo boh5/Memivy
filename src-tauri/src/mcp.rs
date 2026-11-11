@@ -43,14 +43,24 @@ fn configuration(path: &Path, data: Option<&Path>) -> String {
 
 fn setup_prompt(configuration: &str) -> String {
     format!(
-        r#"Set up Memivy, my personal memory app, as a local MCP server for this agent on my Mac.
+        r#"Connect this AI agent to Memivy, my personal memory app on this Mac, and set it up to proactively save useful memories in future chats.
 
 Memivy is already installed. Use its bundled stdio server with the configuration below.
 
-1. Find the MCP configuration method and location supported by this agent. Adapt the JSON to its required format, keeping the command, arguments, and environment values unchanged.
-2. Back up the existing configuration, then add or update only the "memivy" entry. Preserve all other servers and settings. If an existing Memivy entry uses a different executable or memory library, ask me which to keep before replacing it.
-3. Reload or reconnect the MCP server and verify that this agent can access both "memory_capture" and "memory_search". Do not create memories just to test the connection. Only report success after verifying the tools are available. If a restart, permission, or manual step is needed, tell me exactly what to do. If memory access is disabled, ask me to enable it in Memivy under Settings > External access.
-4. Tell me what you changed and the verification result, using the language of our conversation. If you cannot configure MCP in this environment, explain what is missing.
+1. Find where this agent configures MCP servers. Use user-level settings unless I specify another scope. If the agent only supports a narrower scope, report the available scope and ask before using it. Adapt the JSON to the required format, keeping the command, arguments, and environment values unchanged.
+2. Back up any existing configuration before editing, then add or update only the "memivy" entry. Preserve all other servers and settings. If an existing Memivy entry uses a different executable or memory library, ask me which to keep and wait for my choice before changing the connection or adding the instructions.
+3. Add the Memivy section below to this agent's user-level global instructions so it loads in future chats across projects. Find the active global instruction file or setting supported by this agent. Back up any existing instructions before editing. Preserve unrelated instructions and update the existing Memivy section if there is one.
+4. Reload or reconnect in the AI app. Open a fresh session. For user-level setup, verify without relying on project settings. Check that the agent automatically loaded the Memivy instructions and can see both `memory_capture` and `memory_search`. Verify the instructions from the agent's loaded context, without reading the file on demand or pasting the rule into the chat. From that session, run `memory_search` with `queries: [{{"text":"Memivy setup check","keywords":["Memivy setup check"]}}], limit: 1, since: 0, until: 0`. A successful empty response is enough. Do not create any memories during setup. Memivy's local server check alone does not verify the agent connection.
+5. Report the tool check and the instruction check separately, naming the files or settings changed, in the language of our conversation. Only report setup complete when both checks pass. If this agent does not support user-level global instructions, report that limitation. If a restart, permission, or manual step is needed, say what is pending and give the exact next step. If access is disabled, ask me to enable it in Memivy under Settings > External access.
+
+Persistent instructions:
+```markdown
+## Memivy
+
+- Use `memory_capture` without waiting for me to ask when I share meaningful new or changed information that could help in future chats, including useful information within a question or task request. Look up the Memivy tools if they are not immediately visible. Write a specific `title` and a self-contained `body` in my language. Capture the subject, scope and reasons when known. Preserve attribution, dates, negation and whether I am considering, deciding, or reporting a completed action. Pass the supporting passages verbatim in `text`, preserving first-person wording. Group closely related information and respect requests not to save. Skip pure questions, temporary commands and unchanged repetitions. Treat assistant suggestions and third-party ideas as my views only when I adopt them, and keep attribution for reference material I ask you to save.
+- Use `memory_search` when saved context would help with the current request, and cite the sources you use.
+- Count a save as complete only when `memory_capture` returns `memory_saved`. If a save is needed and the tool is unavailable or fails, tell me the save was not confirmed.
+```
 
 Configuration:
 ```json
@@ -256,6 +266,7 @@ mod tests {
         assert!(prompt.contains("memory_capture"));
         assert!(prompt.contains("memory_search"));
         assert!(prompt.contains("Preserve all other servers and settings"));
-        assert!(prompt.contains("Only report success after verifying"));
+        assert!(prompt.contains("user-level global instructions"));
+        assert!(prompt.contains("Only report setup complete when both checks pass"));
     }
 }

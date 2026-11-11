@@ -22,7 +22,7 @@ test('local diagnostic does not claim an Agent connection and switch changes inv
   f.overrides.mcp_set_enabled=async()=>{};
   const view=f.mount(f.load('src/workspace/McpSettings.tsx').default);await f.settle();
   f.find(view,n=>n.type==='button'&&f.text(n)==="Check local MCP").props.onClick();await f.settle();
-  assert(f.text(view.tree).includes("ask your other AI app whether it can see Memivy’s memory tools"));
+  assert(f.text(view.tree).includes("check that both memory tools are available in the other AI app and ask it to run a read-only search"));
   assert(f.text(view.tree).includes("Saving and searching memories are unavailable"));
   const diagnostic=f.find(view,n=>n.props.role==='status'&&f.text(n).includes("Local MCP check passed"));
   const diagnosticText=f.text(diagnostic);
@@ -90,7 +90,8 @@ for (const language of ['en', 'zh-CN']) {
     f.find(view,n=>n.type==='button'&&f.text(n)===(language==='en'?'Check local MCP':'检查本机 MCP'));
     finishCopy(); await f.settle();
     f.find(view,n=>n.type==='button'&&f.text(n)===(language==='en'?'Copied':'已复制'));
-    assert(f.text(view.tree).includes(language==='en'?'Copied. Send the prompt to your agent':'已复制。把提示词发给你的 AI 助手'));
+    const feedback = language === 'en' ? 'set up the connection and proactive saving' : '配置连接和主动保存规则';
+    assert(f.find(view, n=>n.props.role==='status'&&f.text(n).includes(feedback)));
     assert(!f.calls.some(c=>c.name==='mcp_diagnose'||c.name==='mcp_set_enabled'));
   });
 }

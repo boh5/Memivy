@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Connected assistants save a clear title and organized memory. The original words stay available in the memory’s sources, and search uses the organized content.
+- The setup prompt adds global instructions for proactive saving and checks the connection and instructions in a new chat.
+
+`memory_capture` requires `title` and `body` alongside the verbatim `text` source. After updating, reconnect or refresh the tool definitions and send the new setup prompt. The database stays on schema 3.
+
 ## 0.1.10
 
 - When you choose **Restart and update**, Memivy waits for active MCP work to finish and closes the affected local sessions before installing and restarting.

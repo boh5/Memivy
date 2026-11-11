@@ -27,8 +27,12 @@ use tokio::{
 struct CaptureArgs {
     /// Stable UUID for this save. Reuse it on every retry; use a new UUID only for a separate save.
     request_id: String,
-    /// Text to remember, copied verbatim from relevant source passages. Do not summarize, paraphrase or change first-person wording. Preserve speaker, scope, time and tentative/decided/completed status. Do not invent facts or present assistant suggestions or third-party text as the user's own views. Maximum 128 KiB of UTF-8 text.
+    /// Original evidence. Copy only the relevant source passages verbatim, preserving speaker and first-person wording. Maximum 128 KiB of UTF-8 text.
     text: String,
+    /// Specific title in the user's language that names what this memory is about. Maximum 200 UTF-8 bytes.
+    title: String,
+    /// Organized, self-contained memory in the user's language. Preserve attribution, scope, dates and uncertainty. Omit temporary instructions and unrelated conversation. Maximum 128 KiB of UTF-8 text.
+    body: String,
     /// Actual calling application's name, such as Codex, not the model name. Self-reported provenance, not authentication. Nonempty, at most 200 UTF-8 bytes.
     source_app: String,
     /// Optional source project name or identifier known from the current task context. Omit when unknown; never invent it. This label does not add collection membership. Maximum 200 UTF-8 bytes.
@@ -122,7 +126,7 @@ impl Memivy {
 #[tool_router]
 impl Memivy {
     #[tool(
-        description = "Proactively save meaningful new or changed user information useful for future conversations: facts, preferences, constraints, ideas, decisions and their reasons, and lessons learned. Do not wait for an explicit save request or ask routine permission. When future usefulness is uncertain, favor preserving a meaningful expression; never invent missing facts. Copy relevant source passages verbatim without changing first-person wording. Preserve attribution, scope, time and uncertainty: considering is not deciding, and deciding is not doing. Save meaningful user information embedded in questions or task requests; skip pure questions or transient commands that add no such information, generic knowledge and unchanged repetition. Do not treat assistant suggestions or third-party text as user facts; save adopted ideas or explicitly requested material with truthful attribution. Respect requests not to remember. Group closely related new information into a coherent capture; do not save every sentence or repeatedly save whole-conversation summaries. Reuse the same UUID request_id on retries. Success means the memory and original text are committed and searchable. This tool creates a new memory; it does not merge existing memories or schedule background organization.",
+        description = "Proactively turn meaningful new or changed user information into a memory useful in future conversations. When future usefulness is uncertain, favor preserving a meaningful expression. Write a specific title and a concise, self-contained body before calling. State the relevant subject, scope, decision or tentative idea, and its reasons when known. Preserve attribution, time, negation and the difference between considering, deciding and completing. Put only the supporting passages, copied verbatim, in text. Extract durable facts, preferences, constraints, ideas, decisions or lessons even when they appear in a question or task request. Skip pure questions, temporary execution instructions, generic knowledge and unchanged repetition. Group closely related facts and keep independent matters separate. Do not invent context or attribute assistant suggestions or third-party statements to the user unless adopted. Preserve attribution for reference material the user asks to save. Save without routine confirmation and respect requests not to save. Reuse the same UUID and arguments on retries. On success, title and body are searchable and text is preserved as the original source.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -132,15 +136,19 @@ impl Memivy {
     )]
     async fn memory_capture(&self, Parameters(args): Parameters<CaptureArgs>) -> CallToolResult {
         self.blocking_tool(move |store| {
-            store.mcp_capture(&CaptureRequest {
-                request_id: args.request_id,
-                text: args.text,
-                origin: Origin::Agent {
-                    app: args.source_app,
-                    project: args.project,
-                    uri: args.session_uri,
+            store.mcp_capture(
+                &CaptureRequest {
+                    request_id: args.request_id,
+                    text: args.text,
+                    origin: Origin::Agent {
+                        app: args.source_app,
+                        project: args.project,
+                        uri: args.session_uri,
+                    },
                 },
-            })
+                &args.title,
+                &args.body,
+            )
         })
         .await
     }
@@ -174,7 +182,7 @@ impl Memivy {
         .await
     }
 }
-#[tool_handler(router=self.tool_router, name="memivy", instructions="Local personal memory with proactive capture and read-only search. Save meaningful new or changed user information without routine confirmation, including tentative ideas with their original uncertainty. Copy relevant source passages verbatim, preserving first-person wording, attribution and scope; never turn assistant suggestions or third-party text into user facts. Respect requests not to remember and avoid repeated or per-sentence saves. Both tools require Memivy's master switch. Search returns bounded saved-memory evidence, not complete context or unsaved conversations. Use complementary queries when useful and cite actual sources. Search never calls a generative model; optional semantic retrieval may send queries to the configured embedding service. Neither tool schedules background organization or merges existing memories.")]
+#[tool_handler(router=self.tool_router, name="memivy", instructions="Local personal memory with proactive capture and read-only search. When the user shares meaningful new or changed information, write a self-contained memory title and body. Submit them with separate verbatim source excerpts in text. Preserve attribution, scope and whether something is tentative, decided or completed. Skip temporary instructions and repetition. Respect requests not to save. Both tools require Memivy's master switch. Search returns bounded saved-memory evidence. Use complementary queries when useful and cite actual sources. Optional semantic retrieval may send queries to the configured embedding service.")]
 impl ServerHandler for Memivy {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(&[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28])
@@ -182,6 +190,7 @@ impl ServerHandler for Memivy {
 }
 
 fn bounded_input() -> std::io::Result<(DuplexStream, JoinHandle<()>)> {
+    const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
     // Keep the blocking pipe read outside the runtime. The client can leave stdin
     // open during a shutdown, and runtime shutdown waits for Tokio's stdin reader.
     let (frames, mut queued) = mpsc::channel::<Vec<u8>>(1);
@@ -192,14 +201,13 @@ fn bounded_input() -> std::io::Result<(DuplexStream, JoinHandle<()>)> {
             let mut stdin = std::io::stdin().lock();
             loop {
                 let mut line = Vec::new();
-                // Bound each frame before the SDK's reader allocates it. 1 MiB
-                // accommodates the 128 KiB text limit even with JSON escaping.
+                // Leave room for both 128 KiB fields with JSON escaping, plus metadata.
                 match (&mut stdin)
-                    .take(1024 * 1024 + 1)
+                    .take(MAX_FRAME_BYTES as u64 + 1)
                     .read_until(b'\n', &mut line)
                 {
                     Ok(0) => break,
-                    Ok(_) if line.len() <= 1024 * 1024 && line.last() == Some(&b'\n') => {
+                    Ok(_) if line.len() <= MAX_FRAME_BYTES && line.last() == Some(&b'\n') => {
                         if frames.blocking_send(line).is_err() {
                             break;
                         }

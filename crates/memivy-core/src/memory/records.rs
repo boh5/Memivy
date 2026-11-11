@@ -182,6 +182,16 @@ pub(super) fn create_captured_memory_with_title(
     capture: &RawCapture,
     title: &str,
 ) -> Result<CaptureResult> {
+    create_captured_memory_version(db, capture, title, &capture.text, "user")
+}
+
+fn create_captured_memory_version(
+    db: &Connection,
+    capture: &RawCapture,
+    title: &str,
+    body: &str,
+    actor: &str,
+) -> Result<CaptureResult> {
     valid_text(title, 200)?;
     let memory_id = id();
     db.execute(
@@ -193,8 +203,8 @@ pub(super) fn create_captured_memory_with_title(
         memory_id: memory_id.clone(),
         parent_id: None,
         title: title.into(),
-        body: capture.text.clone(),
-        actor: "user".into(),
+        body: body.into(),
+        actor: actor.into(),
         reason: "create".into(),
         created_at: capture.created_at,
         capture_ids: vec![capture.id.clone()],
@@ -480,6 +490,14 @@ pub(super) fn resolve_excerpt(
 impl MemoryStore {
     /// Current body, original input and receipt commit together.
     pub fn capture(&self, r: &CaptureRequest) -> Result<CaptureResult> {
+        self.capture_with_content(r, None)
+    }
+
+    pub(super) fn capture_with_content(
+        &self,
+        r: &CaptureRequest,
+        organized: Option<(&str, &str)>,
+    ) -> Result<CaptureResult> {
         if matches!(
             r.origin,
             Origin::Conversation { .. } | Origin::Discussion { .. } | Origin::Imported { .. }
@@ -488,7 +506,10 @@ impl MemoryStore {
         }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let hash = fingerprint(&("capture", &r.text, &r.origin))?;
+        let hash = match organized {
+            Some((title, body)) => fingerprint(&("mcp_capture", &r.text, &r.origin, title, body))?,
+            None => fingerprint(&("capture", &r.text, &r.origin))?,
+        };
         if let Some(receipt) = replay(&tx, &r.request_id, &hash)? {
             let capture_id = receipt.capture_id.ok_or(DataError::Integrity)?;
             let created_at = tx.query_row(
@@ -504,7 +525,10 @@ impl MemoryStore {
             });
         }
         let c = insert_capture(&tx, &r.request_id, &r.text, &r.origin)?;
-        let saved = create_captured_memory(&tx, &c)?;
+        let saved = match organized {
+            Some((title, body)) => create_captured_memory_version(&tx, &c, title, body, "ai")?,
+            None => create_captured_memory(&tx, &c)?,
+        };
         save_receipt(
             &tx,
             &Receipt {

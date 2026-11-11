@@ -111,15 +111,17 @@ The original text is saved locally and becomes searchable immediately, even with
 
 To bring selected memories into any AI chat, click **Copy for AI** in the memory list or a memory's menu. Choose memories, preview and edit their full text, then copy it with source references. You can also use **Summarize background** with your configured AI model. The preview is saved locally as a draft; it does not change your memories. If a source changes or is deleted, review your selection and reload the preview before copying.
 
-Through MCP, your other AI assistants can save and search memories in Memivy. The other app must support local MCP servers (stdio), and the agent needs permission to edit its configuration.
+Through MCP, your other AI assistants can save and search memories in Memivy. They write a title and an organized memory, with the original words available in its sources. The other app must support local MCP servers (stdio). The setup prompt tells it when to save proactively.
 
 ![Connect other AI apps: enable access, copy the setup prompt, and give it to your agent](docs/media/en/mcp.gif)
 
 1. Open **Settings → External access** and turn on **Allow other AI apps to save and search memories**.
-2. Click **Copy setup prompt** and send it directly to the agent you want to connect. The prompt already includes the Memivy configuration for this Mac.
-3. The prompt asks your agent to add the MCP configuration and check the connection. Follow its instructions if it needs a restart or additional permissions.
+2. Click **Copy setup prompt** and send it to the assistant you want to connect. The prompt asks it to add this Mac’s MCP configuration and put the rule for proactive saving in its global instructions.
+3. Follow the assistant’s reconnect or restart instructions. In a new chat, verify that `memory_capture` and `memory_search` are available, a read-only search succeeds, and the assistant has loaded the Memivy instructions.
 
-You can also expand **Manual configuration** to set up the connection yourself. If you move Memivy later, copy the prompt again and ask your agent to update the configuration.
+For manual setup, expand **Manual configuration** to copy the MCP settings. Copy the Memivy section from **View setup prompt** into the global instruction file or setting your assistant uses for your account, then follow step 3.
+
+If you already connected Memivy, reconnect after updating and send the new setup prompt to refresh the global instructions. If you move Memivy, use a fresh copy of the prompt to update the executable path.
 
 To stop access, turn off the switch in Memivy's **External access** settings.
 
