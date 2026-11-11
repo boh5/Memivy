@@ -31,7 +31,11 @@ def check():
             try:
                 for i in range(100):
                     if stop.is_set():break
-                    result=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':f'Subsequent synthetic record {i}','source_app':'Restore QA'}})
+                    result=client.call('tools/call',{'name':'memory_capture','arguments':{
+                        'request_id':str(uuid.uuid4()), 'text':f'Subsequent synthetic record {i}',
+                        'title':f'Restore verification {i}', 'body':f'Synthetic memory {i} saved after the backup.',
+                        'source_app':'Restore QA',
+                    }})
                     if result.get('isError'):break
                     saved.append(result['structuredContent']['capture_id']);first.set()
             except BaseException as error:
@@ -45,7 +49,10 @@ def check():
             # A newly launched MCP must fail before initializing or writing this database.
             newcomer=subprocess.run([str(binary)],env={**os.environ,'MEMIVY_DATA_DIR':str(root)},input='',capture_output=True,text=True,timeout=5)
             assert newcomer.returncode!=0 and newcomer.stdout=='',newcomer.stdout
-            blocked=client.call('tools/call',{'name':'memory_capture','arguments':{'request_id':str(uuid.uuid4()),'text':'Must not be written','source_app':'Restore QA'}})
+            blocked=client.call('tools/call',{'name':'memory_capture','arguments':{
+                'request_id':str(uuid.uuid4()), 'text':'Must not be written',
+                'title':'Blocked synthetic memory', 'body':'The library is being restored.', 'source_app':'Restore QA',
+            }})
             assert blocked.get('isError'),blocked
             outcome=json.loads(run('open-application'));assert outcome['restored'],outcome
             before=sqlite3.connect(f"file:{outcome['previous_backup']}?mode=ro",uri=True)

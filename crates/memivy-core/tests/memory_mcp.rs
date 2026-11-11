@@ -14,6 +14,9 @@ fn request(text: &str) -> CaptureRequest {
         },
     }
 }
+fn save(store: &MemoryStore, request: &CaptureRequest) -> Result<McpCaptureReceipt> {
+    store.mcp_capture(request, "Synthetic memory", &request.text)
+}
 fn query(text: &str) -> McpSearchQuery {
     McpSearchQuery {
         queries: vec![MemoryQuery::text(text)],
@@ -32,14 +35,14 @@ fn off_and_corrupt_configuration_fail_closed_with_no_capture() {
     s.set_mcp_enabled(false).unwrap();
     assert!(!MemoryStore::open(dir.path()).unwrap().mcp_enabled());
     let req = request("关闭测试");
-    assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::McpDisabled);
+    assert_eq!(save(&s, &req).unwrap_err(), DataError::McpDisabled);
     assert_eq!(
         s.mcp_search(&query("关闭")).unwrap_err(),
         DataError::McpDisabled
     );
     s.set_mcp_enabled(true).unwrap();
     std::fs::write(dir.path().join("mcp.json"), "{broken").unwrap();
-    assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::McpDisabled);
+    assert_eq!(save(&s, &req).unwrap_err(), DataError::McpDisabled);
     assert!(
         s.library(&LibraryQuery::default())
             .unwrap()
@@ -48,20 +51,84 @@ fn off_and_corrupt_configuration_fail_closed_with_no_capture() {
     );
 }
 #[test]
-fn retries_preserve_exact_text_source_and_immediate_searchability() {
+fn organized_capture_preserves_evidence_and_retries_the_entire_write() {
     let (_dir, s) = setup();
     s.set_mcp_enabled(true).unwrap();
-    let mut req = request("  请记住：原话\n不能改写！  ");
-    let receipt = s.mcp_capture(&req).unwrap();
-    assert_eq!(s.mcp_capture(&req).unwrap().capture_id, receipt.capture_id);
-    assert_eq!(s.capture_by_id(&receipt.capture_id).unwrap().text, req.text);
+    let mut req = request("  我决定预算就七百五十。\n原话必须保留！  ");
+    let title = "工坊采购预算";
+    let body = "已决定将工坊的采购预算定为 750。";
+    assert_eq!(
+        s.mcp_capture(&req, " ", body).unwrap_err(),
+        DataError::Invalid
+    );
+    assert_eq!(
+        s.mcp_capture(&req, title, " ").unwrap_err(),
+        DataError::Invalid
+    );
+    assert!(
+        s.library(&LibraryQuery::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let receipt = s.mcp_capture(&req, title, body).unwrap();
+    assert_eq!(
+        s.mcp_capture(&req, title, body).unwrap().capture_id,
+        receipt.capture_id
+    );
+    let original = s.capture_by_id(&receipt.capture_id).unwrap();
+    assert_eq!(original.text, req.text);
+    assert_eq!(original.origin, req.origin);
+    let current = s.memory(&receipt.memory_id).unwrap().current;
+    assert_eq!(
+        (
+            current.title.as_str(),
+            current.body.as_str(),
+            current.actor.as_str()
+        ),
+        (title, body, "ai")
+    );
+    assert_eq!(
+        current.capture_ids.as_slice(),
+        std::slice::from_ref(&receipt.capture_id)
+    );
+    for (changed_title, changed_body) in [("不同标题", body), (title, "不同正文")] {
+        assert_eq!(
+            s.mcp_capture(&req, changed_title, changed_body)
+                .unwrap_err(),
+            DataError::RequestConflict
+        );
+    }
     req.text.push('！');
-    assert_eq!(s.mcp_capture(&req).unwrap_err(), DataError::RequestConflict);
+    assert_eq!(
+        s.mcp_capture(&req, title, body).unwrap_err(),
+        DataError::RequestConflict
+    );
     // With no app or model running, capture/search remain fully usable.
-    assert_eq!(s.mcp_search(&query("不能改写")).unwrap().items.len(), 1);
+    let found = s.mcp_search(&query("工坊采购预算")).unwrap();
+    assert_eq!(found.items.len(), 1);
+    assert_eq!(found.items[0].record.id, receipt.memory_id);
+    assert_eq!(found.items[0].title, title);
+    assert!(
+        s.mcp_search(&query("原话必须保留"))
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    s.undo(&id(), &receipt.request_id).unwrap();
+    assert!(
+        s.mcp_search(&query("工坊采购预算"))
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        s.capture_by_id(&receipt.capture_id).unwrap().text,
+        original.text
+    );
     s.set_mcp_enabled(false).unwrap();
     assert_eq!(
-        s.mcp_search(&query("不能改写")).unwrap_err(),
+        s.mcp_search(&query("工坊采购预算")).unwrap_err(),
         DataError::McpDisabled
     );
 }
@@ -70,8 +137,7 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
     let (_dir, s) = setup();
     s.set_mcp_enabled(true).unwrap();
     for n in 0..12 {
-        s.mcp_capture(&request(&format!("合成边界记忆 {n}")))
-            .unwrap();
+        save(&s, &request(&format!("合成边界记忆 {n}"))).unwrap();
     }
     let mut other = request("独有过滤 合成边界记忆");
     other.origin = Origin::User {
@@ -110,7 +176,7 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
         context: vec![],
     })
     .unwrap();
-    let deleted = s.mcp_capture(&request("私有删除秘密")).unwrap();
+    let deleted = save(&s, &request("私有删除秘密")).unwrap();
     s.trash_memory(
         &deleted.memory_id,
         &s.memory(&deleted.memory_id).unwrap().current.id,
@@ -122,7 +188,7 @@ fn bounded_search_filters_before_limit_and_excludes_transient_and_deleted_data()
 fn snippets_reference_the_used_version_or_original_and_omit_old_bodies() {
     let (_dir, s) = setup();
     s.set_mcp_enabled(true).unwrap();
-    let raw = s.mcp_capture(&request("原始证据 蜂蜜柚子茶")).unwrap();
+    let raw = save(&s, &request("原始证据 蜂蜜柚子茶")).unwrap();
     let receipt = s
         .edit_memory(&EditRequest {
             request_id: id(),
@@ -242,9 +308,7 @@ fn watcher_detects_external_commits_without_a_model() {
     let external = MemoryStore::open(dir.path()).unwrap();
     assert!(!watcher.changed().unwrap());
     external.set_mcp_enabled(true).unwrap();
-    external
-        .mcp_capture(&request("来自另一个进程的原话"))
-        .unwrap();
+    save(&external, &request("来自另一个进程的原话")).unwrap();
     assert!(watcher.changed().unwrap());
     assert!(!watcher.changed().unwrap());
 }

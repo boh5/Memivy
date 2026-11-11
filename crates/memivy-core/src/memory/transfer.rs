@@ -481,15 +481,19 @@ mod restore_tests {
             Err(DataError::Busy)
         ));
         assert!(matches!(
-            store.mcp_capture(&CaptureRequest {
-                request_id: id(),
-                text: "blocked".into(),
-                origin: Origin::Agent {
-                    app: "QA".into(),
-                    project: None,
-                    uri: None
-                }
-            }),
+            store.mcp_capture(
+                &CaptureRequest {
+                    request_id: id(),
+                    text: "blocked".into(),
+                    origin: Origin::Agent {
+                        app: "QA".into(),
+                        project: None,
+                        uri: None
+                    }
+                },
+                "Blocked capture",
+                "The update blocks this capture."
+            ),
             Err(DataError::Busy)
         ));
         drop(gate);

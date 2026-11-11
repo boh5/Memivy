@@ -148,15 +148,19 @@ fn whole_restore_preserves_latest_library_and_private_configuration() {
         "MCP startup must not bypass pending restore"
     );
     assert!(matches!(
-        s.mcp_capture(&CaptureRequest {
-            request_id: id(),
-            text: "must not write".into(),
-            origin: Origin::Agent {
-                app: "QA".into(),
-                project: None,
-                uri: None
-            }
-        }),
+        s.mcp_capture(
+            &CaptureRequest {
+                request_id: id(),
+                text: "must not write".into(),
+                origin: Origin::Agent {
+                    app: "QA".into(),
+                    project: None,
+                    uri: None
+                }
+            },
+            "Blocked capture",
+            "The restore blocks this capture."
+        ),
         Err(DataError::Busy)
     ));
     let restored = MemoryStore::open_application(dir.path()).unwrap();

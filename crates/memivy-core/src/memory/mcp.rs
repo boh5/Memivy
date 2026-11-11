@@ -153,19 +153,25 @@ impl MemoryStore {
         }
         Ok(guard)
     }
-    pub fn mcp_capture(&self, request: &CaptureRequest) -> Result<McpCaptureReceipt> {
+    pub fn mcp_capture(
+        &self,
+        request: &CaptureRequest,
+        title: &str,
+        body: &str,
+    ) -> Result<McpCaptureReceipt> {
         let _guard = self.mcp_guard()?;
         if !matches!(request.origin, Origin::Agent { .. }) {
             return Err(DataError::Invalid);
         }
-        let capture = self.capture(request)?;
+        valid_text(body, 128 * 1024)?;
+        let capture = self.capture_with_content(request, Some((title, body)))?;
         Ok(McpCaptureReceipt {
             action: "memory_saved",
             memory_id: capture.memory_id,
             capture_id: capture.capture_id,
             request_id: request.request_id.clone(),
             created_at: capture.created_at,
-            receipt: "Memory saved. The original text is preserved and the memory is available to read or search.",
+            receipt: "Memory saved. The organized content is available to read or search, with the original text preserved as its source.",
         })
     }
     pub fn mcp_search(&self, query: &McpSearchQuery) -> Result<McpSearchResult> {
