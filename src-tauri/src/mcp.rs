@@ -49,17 +49,15 @@ Memivy is already installed. Use its bundled stdio server with the configuration
 
 1. Find where this agent configures MCP servers. Use user-level settings unless I specify another scope. If the agent only supports a narrower scope, report the available scope and ask before using it. Adapt the JSON to the required format, keeping the command, arguments, and environment values unchanged.
 2. Back up any existing configuration before editing, then add or update only the "memivy" entry. Preserve all other servers and settings. If an existing Memivy entry uses a different executable or memory library, ask me which to keep and wait for my choice before changing the connection or adding the instructions.
-3. Add the Memivy section below to this agent's user-level global instructions so it loads in future chats across projects. Find the active global instruction file or setting supported by this agent. Back up any existing instructions before editing. Preserve unrelated instructions and update the existing Memivy section if there is one.
-4. Reload or reconnect in the AI app. Open a fresh session. For user-level setup, verify without relying on project settings. Check that the agent automatically loaded the Memivy instructions and can see both `memory_capture` and `memory_search`. Verify the instructions from the agent's loaded context, without reading the file on demand or pasting the rule into the chat. From that session, run `memory_search` with `queries: [{{"text":"Memivy setup check","keywords":["Memivy setup check"]}}], limit: 1, since: 0, until: 0`. A successful empty response is enough. Do not create any memories during setup. Memivy's local server check alone does not verify the agent connection.
+3. Find this agent's active user-level global instruction file or setting. Back up any existing instructions. Add only the Memivy section below, replacing the previous Memivy setup instructions if present, so it loads in future chats across projects. Preserve other user instructions. Memivy supplies its detailed guidance through MCP.
+4. Reload or reconnect in the AI app and refresh any cached tool definitions. Open a fresh session. For user-level setup, verify without relying on project settings. Check that the agent automatically loaded the Memivy instructions and can discover both `memory_capture` and `memory_search`. Verify the instructions from the agent's loaded context, without reading the file on demand or pasting the rule into the chat. From that session, run `memory_search` with `queries: [{{"text":"Memivy setup check","keywords":["Memivy setup check"]}}], limit: 1, since: 0, until: 0`. A successful empty response is enough. Do not create any memories during setup. Memivy's local server check alone does not verify the agent connection.
 5. Report the tool check and the instruction check separately, naming the files or settings changed, in the language of our conversation. Only report setup complete when both checks pass. If this agent does not support user-level global instructions, report that limitation. If a restart, permission, or manual step is needed, say what is pending and give the exact next step. If access is disabled, ask me to enable it in Memivy under Settings > External access.
 
 Persistent instructions:
 ```markdown
 ## Memivy
 
-- Use `memory_capture` without waiting for me to ask when I share meaningful new or changed information that could help in future chats, including useful information within a question or task request. Look up the Memivy tools if they are not immediately visible. Write a specific `title` and a self-contained `body` in my language. Capture the subject, scope and reasons when known. Preserve attribution, dates, negation and whether I am considering, deciding, or reporting a completed action. Pass the supporting passages verbatim in `text`, preserving first-person wording. Group closely related information and respect requests not to save. Skip pure questions, temporary commands and unchanged repetitions. Treat assistant suggestions and third-party ideas as my views only when I adopt them, and keep attribution for reference material I ask you to save.
-- Use `memory_search` when saved context would help with the current request, and cite the sources you use.
-- Count a save as complete only when `memory_capture` returns `memory_saved`. If a save is needed and the tool is unavailable or fails, tell me the save was not confirmed.
+Memivy is my external memory. When I share something that may be useful in future chats, look up `memory_capture` if needed and follow its current guidance to decide whether to save it proactively. Use `memory_search` when saved context would help and cite the sources you use. Respect my requests not to save. Only say a memory was saved when the tool confirms it, and tell me if an intended save could not be confirmed.
 ```
 
 Configuration:
@@ -268,5 +266,17 @@ mod tests {
         assert!(prompt.contains("Preserve all other servers and settings"));
         assert!(prompt.contains("user-level global instructions"));
         assert!(prompt.contains("Only report setup complete when both checks pass"));
+        let instructions = prompt
+            .split_once("```markdown\n")
+            .and_then(|(_, rest)| rest.split_once("\n```").map(|(section, _)| section))
+            .expect("prompt includes a Memivy instructions block");
+        assert!(instructions.starts_with("## Memivy\n\n"));
+        assert!(instructions.contains("follow its current guidance"));
+        for field in ["`title`", "`body`", "`text`", "`project`"] {
+            assert!(
+                !instructions.contains(field),
+                "{field} belongs in MCP guidance"
+            );
+        }
     }
 }
