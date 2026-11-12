@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.12
+
+- Connected assistants can save useful project decisions from task requests. Saved memories name the project and feature when known, and keep the supporting words in the source.
+- The setup prompt adds a short global instruction. The MCP server now supplies the detailed rules for saving and searching memories.
+
+If you connected Memivy before this version, send the new setup prompt once to replace the old Memivy instructions. After later updates, reconnect and refresh cached tool definitions to load the latest guidance.
+
 ## 0.1.11
 
 - Connected assistants save a clear title and organized memory. The original words stay available in the memory’s sources, and search uses the organized content.
