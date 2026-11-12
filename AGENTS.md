@@ -94,10 +94,12 @@ frameworks or speculative abstractions.
   decided or completed status. Pass supporting passages verbatim in `text`,
   preserving first-person wording. Save both together and search the organized
   memory. Keep the original passages available as sources.
-  Favor keeping meaningful expressions when future usefulness is uncertain.
-  Respect requests not to save; retain meaningful user
-  information within questions or task requests, while skipping repetition and
-  pure questions or transient commands that add no such information.
+  The setup prompt installs a brief user-level instruction to use Memivy.
+  MCP descriptions supply the current guidance on what and how to save.
+  Task requests can contain product decisions. Use context and judgment for
+  borderline decisions. When saving, name the known project and feature and
+  preserve the scope supported by the conversation. Respect requests not to save
+  and skip pure questions, repetition, and one-off execution steps.
   AI suggestions and third-party material are not user facts unless adopted;
   requested reference material retains its attribution. Search returns bounded
   saved-memory results with sources, never unsaved conversations.

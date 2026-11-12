@@ -31,11 +31,11 @@ struct CaptureArgs {
     text: String,
     /// Specific title in the user's language that names what this memory is about. Maximum 200 UTF-8 bytes.
     title: String,
-    /// Organized, self-contained memory in the user's language. Preserve attribution, scope, dates and uncertainty. Omit temporary instructions and unrelated conversation. Maximum 128 KiB of UTF-8 text.
+    /// Self-contained memory in the user's language. Include the known project, affected feature or subject, and the scope supported by the conversation. Preserve attribution, dates, and uncertainty. Maximum 128 KiB of UTF-8 text.
     body: String,
     /// Actual calling application's name, such as Codex, not the model name. Self-reported provenance, not authentication. Nonempty, at most 200 UTF-8 bytes.
     source_app: String,
-    /// Optional source project name or identifier known from the current task context. Omit when unknown; never invent it. This label does not add collection membership. Maximum 200 UTF-8 bytes.
+    /// Set to the source project's name or stable identifier when known from the conversation or workspace. Omit when unknown. This label does not add collection membership. Maximum 200 UTF-8 bytes.
     project: Option<String>,
     /// Optional real URI of the external conversation that produced this memory, only if available in the current context. Omit when unknown; do not invent a link or substitute a project or repository URL. Maximum 2048 UTF-8 bytes.
     session_uri: Option<String>,
@@ -126,7 +126,17 @@ impl Memivy {
 #[tool_router]
 impl Memivy {
     #[tool(
-        description = "Proactively turn meaningful new or changed user information into a memory useful in future conversations. When future usefulness is uncertain, favor preserving a meaningful expression. Write a specific title and a concise, self-contained body before calling. State the relevant subject, scope, decision or tentative idea, and its reasons when known. Preserve attribution, time, negation and the difference between considering, deciding and completing. Put only the supporting passages, copied verbatim, in text. Extract durable facts, preferences, constraints, ideas, decisions or lessons even when they appear in a question or task request. Skip pure questions, temporary execution instructions, generic knowledge and unchanged repetition. Group closely related facts and keep independent matters separate. Do not invent context or attribute assistant suggestions or third-party statements to the user unless adopted. Preserve attribution for reference material the user asks to save. Save without routine confirmation and respect requests not to save. Reuse the same UUID and arguments on retries. On success, title and body are searchable and text is preserved as the original source.",
+        description = "Proactively save new or changed information that could help in future conversations, such as a preference, decision, constraint, fact, or tentative idea. \
+                       A task request can contain a lasting product decision alongside one-off instructions. Use the conversation and project context to infer the decision's scope. \
+                       Use your judgment about saving a borderline product choice. Skip pure questions, one-off execution steps, generic knowledge, and unchanged repetition. \
+                       If you save, write a specific title and a concise body in the user's language that make sense outside this chat. \
+                       Name the known project and affected feature or subject in the memory, and pass the known source project in project. \
+                       Keep the decision, its supported scope, and any relevant reasons and dates or times. Preserve attribution, negation, uncertainty, and whether the user is considering, deciding, or reporting completion. \
+                       For example, in a discussion about TrailNotes' route export policy, a request to shorten a label and omit XML can yield 'TrailNotes will not offer XML for route exports' if the conversation supports that ongoing scope. \
+                       Leave the label edit out of the memory. Copy only relevant supporting passages verbatim in text, preserving the speaker's wording. \
+                       Group closely related facts and keep independent matters separate. Attribute assistant suggestions or third-party views to the user only when they adopt them, and retain attribution for requested reference material. \
+                       Save without routine confirmation and respect requests not to save. Reuse the same UUID and arguments on retries. \
+                       Report a save as complete only on memory_saved. The title and body are searchable and text is preserved as the original source.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -182,7 +192,13 @@ impl Memivy {
         .await
     }
 }
-#[tool_handler(router=self.tool_router, name="memivy", instructions="Local personal memory with proactive capture and read-only search. When the user shares meaningful new or changed information, write a self-contained memory title and body. Submit them with separate verbatim source excerpts in text. Preserve attribution, scope and whether something is tentative, decided or completed. Skip temporary instructions and repetition. Respect requests not to save. Both tools require Memivy's master switch. Search returns bounded saved-memory evidence. Use complementary queries when useful and cite actual sources. Optional semantic retrieval may send queries to the configured embedding service.")]
+#[tool_handler(
+    router = self.tool_router,
+    name = "memivy",
+    instructions = "Local personal memory across conversations. Look for memory_capture when the user shares information that could help later, including project decisions within task requests. \
+                    Look for memory_search when saved context would help. Follow each tool's current guidance. Both tools require Memivy's external access switch. \
+                    Optional semantic retrieval may send queries to the configured embedding service."
+)]
 impl ServerHandler for Memivy {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(&[ProtocolVersion::V_2025_11_25, ProtocolVersion::V_2026_07_28])
